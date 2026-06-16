@@ -1,0 +1,65 @@
+name: "Build and publish documentation."
+
+on:
+  push:
+    branches:
+      - "main"
+  workflow_dispatch:
+
+permissions: # Required permissions for WIF authentication.
+  contents: "read"
+  id-token: "write"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    # Skip run if the necessary variables are not set, to avoid billing.
+    if: ${{ vars.GCP_TRYOLABS_DOCUMENTATION_DEPLOYMENT_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_TRYOLABS_DOCUMENTATION_DEPLOYMENT_SERVICE_ACCOUNT != '' }}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Preflight checks
+        id: preflight
+        run: |
+          if [[ "${{ github.event.repository.is_template }}" == "true" ]]; then
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+            echo "📄 Running in repo-template. Building documentation."
+          elif [[ -f pyproject.toml ]] && grep -Fq '[tool.repo-template]' pyproject.toml; then
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Project initialized as `tool.repo-template` marker is present in `pyproject.toml`. Building documentation."
+          else
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️ Project has not been initialized yet (init.sh has not been run). Skipping documentation build and publish."
+          fi
+
+      - name: Authenticate to GCP using Workload Identity Federation
+        if: steps.preflight.outputs.should_deploy == 'true'
+        id: "auth"
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: "${{ vars.GCP_TRYOLABS_DOCUMENTATION_DEPLOYMENT_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ vars.GCP_TRYOLABS_DOCUMENTATION_DEPLOYMENT_SERVICE_ACCOUNT }}"
+
+      - name: Install gcloud # Necessary for publishing to GCS.
+        if: steps.preflight.outputs.should_deploy == 'true'
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Install uv
+        if: steps.preflight.outputs.should_deploy == 'true'
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install just
+        if: steps.preflight.outputs.should_deploy == 'true'
+        uses: extractions/setup-just@v4
+
+      - name: Install dependencies
+        if: steps.preflight.outputs.should_deploy == 'true'
+        run: just install
+
+      - name: Build and publish documentation
+        if: steps.preflight.outputs.should_deploy == 'true'
+        run: |
+          just docs-build-and-publish-site

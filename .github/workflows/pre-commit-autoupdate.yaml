@@ -1,0 +1,50 @@
+name: Pre-commit auto-update
+
+on:
+  # every week on Monday at midnight
+  schedule:
+    - cron: "0 0 * * 1"
+  # Allow manual triggering from the Actions tab
+  workflow_dispatch:
+
+jobs:
+  auto-update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Install dependencies
+        run: just install
+
+      - name: Run autoupdate
+        run: |
+          uv run pre-commit autoupdate
+
+      - name: Run all pre-commits
+        run: uv run pre-commit run --all-files
+
+      - uses: peter-evans/create-pull-request@v8
+        if: always()
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          branch: update/pre-commit-hooks
+          title: Update pre-commit hooks
+          commit-message: "chore: update pre-commit hooks"
+          body: |
+            ## Summary
+
+            Autoupdate pre-commit hooks to their latest versions.
+
+            ## Details
+
+            Check if the new versions of the hooks have anything interesting you could add.
+
+            In particular, you can check the [releases](https://github.com/pre-commit/pre-commit-hooks/releases) page of the assorted hooks provided by pre-commit. They usually add new functionalities that may be interesting!

@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "hooks": {
+        "sessionEnd": [
+            {
+                "type": "command",
+                "bash": "just lint",
+                "powershell": "just lint",
+                "cwd": ".",
+                "timeoutSec": 30
+            }
+        ]
+    }
+}

@@ -1,0 +1,3 @@
+logging:
+  log_level: DEBUG
+  third_party_log_level: INFO

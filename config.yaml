@@ -1,0 +1,3 @@
+logging:
+  log_level: INFO
+  third_party_log_level: WARNING
