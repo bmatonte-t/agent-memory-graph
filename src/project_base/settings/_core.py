@@ -17,9 +17,9 @@ from pydantic_settings import (
     YamlConfigSettingsSource,
 )
 
-from project_base.constants import PACKAGE_NAME
-from project_base.paths import ROOT
-from project_base.settings.enums import Environment
+from src.project_base.constants import PACKAGE_NAME
+from src.project_base.paths import ROOT
+from src.project_base.settings.enums import Environment
 
 logger = logging.getLogger(__name__)
 

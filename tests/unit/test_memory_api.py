@@ -1,9 +1,11 @@
 """Unit tests for core memory APIs."""
 
-import pytest
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from src.db.schema import SchemaConfig
 from src.memory.api import MemoryAPI
 from src.models.schemas import (
     AuditResponse,
@@ -64,10 +66,9 @@ class TestMemoryAPI:
 
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(
-                MemoryAPI, "record_audit_event", new_callable=AsyncMock
-            ), patch.object(
-                MemoryAPI, "_update_weight_on_successful_use", new_callable=AsyncMock
+            with (
+                patch.object(MemoryAPI, "record_audit_event", new_callable=AsyncMock),
+                patch.object(MemoryAPI, "_update_weight_on_successful_use", new_callable=AsyncMock),
             ):
                 response = await MemoryAPI.add_semantic_fact(
                     entity_type="PERSON",
@@ -84,9 +85,7 @@ class TestMemoryAPI:
     async def test_add_semantic_fact_invalid_entity_type(self):
         """Test semantic fact with invalid entity type."""
         with pytest.raises(ValueError, match="Invalid entity_type"):
-            await MemoryAPI.add_semantic_fact(
-                entity_type="INVALID_TYPE", entity_id="entity_123"
-            )
+            await MemoryAPI.add_semantic_fact(entity_type="INVALID_TYPE", entity_id="entity_123")
 
     @pytest.mark.asyncio
     async def test_add_semantic_fact_empty_entity_id(self):
@@ -104,11 +103,14 @@ class TestMemoryAPI:
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
 
             mock_client.get_database.return_value = mock_db
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = [(SchemaConfig.MEMORY_TIER_SEMANTIC,)]
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
 
-            with patch.object(
-                MemoryAPI, "record_audit_event", new_callable=AsyncMock
-            ), patch.object(
-                MemoryAPI, "_update_weight_on_successful_use", new_callable=AsyncMock
+            with (
+                patch.object(MemoryAPI, "record_audit_event", new_callable=AsyncMock),
+                patch.object(MemoryAPI, "_update_weight_on_successful_use", new_callable=AsyncMock),
             ):
                 relationship = {"source_id": "source_123", "type": "REFERENCES"}
                 response = await MemoryAPI.add_semantic_fact(
@@ -120,6 +122,24 @@ class TestMemoryAPI:
                 assert response.entity_id == "location_123"
                 # Verify that execute_update was called twice (node + edge)
                 assert mock_batch.execute_update.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_add_semantic_fact_rejects_audit_relationship_source(self):
+        """Semantic facts cannot attach relationships from immutable audit nodes."""
+        with patch("src.memory.api.SpannerClient") as mock_client:
+            mock_db = MagicMock()
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = [(SchemaConfig.MEMORY_TIER_AUDIT,)]
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
+            mock_client.get_database.return_value = mock_db
+
+            with pytest.raises(ValueError, match="AUDIT tier"):
+                await MemoryAPI.add_semantic_fact(
+                    entity_type="PERSON",
+                    entity_id="entity_123",
+                    relationship={"source_id": "audit_node", "type": "REFERENCES"},
+                )
 
     @pytest.mark.asyncio
     async def test_record_audit_event_success(self):
@@ -143,22 +163,14 @@ class TestMemoryAPI:
     @pytest.mark.asyncio
     async def test_record_audit_event_empty_event_type(self):
         """Test audit event with empty event_type."""
-        with pytest.raises(
-            ValueError, match="event_type and source_node_id cannot be empty"
-        ):
-            await MemoryAPI.record_audit_event(
-                event_type="", source_node_id="source_123"
-            )
+        with pytest.raises(ValueError, match="event_type and source_node_id cannot be empty"):
+            await MemoryAPI.record_audit_event(event_type="", source_node_id="source_123")
 
     @pytest.mark.asyncio
     async def test_record_audit_event_empty_source_node_id(self):
         """Test audit event with empty source_node_id."""
-        with pytest.raises(
-            ValueError, match="event_type and source_node_id cannot be empty"
-        ):
-            await MemoryAPI.record_audit_event(
-                event_type="CREATE_SESSION", source_node_id=""
-            )
+        with pytest.raises(ValueError, match="event_type and source_node_id cannot be empty"):
+            await MemoryAPI.record_audit_event(event_type="CREATE_SESSION", source_node_id="")
 
     @pytest.mark.asyncio
     async def test_retrieve_context_window_success(self):
@@ -172,7 +184,7 @@ class TestMemoryAPI:
                     "User",
                     '{"content": "Hello"}',
                     0.6,
-                    datetime.utcnow(),
+                    datetime.now(UTC),
                     "HAS_TURN",
                 ),
                 (
@@ -180,21 +192,18 @@ class TestMemoryAPI:
                     "Agent",
                     '{"content": "Hi"}',
                     0.55,
-                    datetime.utcnow(),
+                    datetime.now(UTC),
                     "HAS_TURN",
                 ),
             ]
-            mock_db.snapshot.return_value.__enter__ = MagicMock(
-                return_value=mock_snapshot
-            )
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
 
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(
-                MemoryAPI, "record_audit_event", new_callable=AsyncMock
-            ), patch.object(
-                MemoryAPI, "_update_weight_on_successful_use", new_callable=AsyncMock
+            with (
+                patch.object(MemoryAPI, "record_audit_event", new_callable=AsyncMock),
+                patch.object(MemoryAPI, "_update_weight_on_successful_use", new_callable=AsyncMock),
             ):
                 response = await MemoryAPI.retrieve_context_window(
                     session_id="session_123", window_size=10
@@ -215,14 +224,10 @@ class TestMemoryAPI:
     async def test_retrieve_context_window_invalid_window_size(self):
         """Test context retrieval with invalid window size."""
         with pytest.raises(ValueError, match="window_size must be between 1 and 100"):
-            await MemoryAPI.retrieve_context_window(
-                session_id="session_123", window_size=0
-            )
+            await MemoryAPI.retrieve_context_window(session_id="session_123", window_size=0)
 
         with pytest.raises(ValueError, match="window_size must be between 1 and 100"):
-            await MemoryAPI.retrieve_context_window(
-                session_id="session_123", window_size=101
-            )
+            await MemoryAPI.retrieve_context_window(session_id="session_123", window_size=101)
 
     @pytest.mark.asyncio
     async def test_update_weight_on_successful_use(self):
@@ -235,11 +240,48 @@ class TestMemoryAPI:
 
             mock_client.get_database.return_value = mock_db
 
-            await MemoryAPI._update_weight_on_successful_use(
-                ["node_1", "node_2"]
-            )
+            await MemoryAPI._update_weight_on_successful_use(["node_1", "node_2"])
 
             mock_batch.execute_update.assert_called_once()
+            params = mock_batch.execute_update.call_args[0][1]
+            assert params["tier"] == SchemaConfig.MEMORY_TIER_SEMANTIC
+
+    @pytest.mark.asyncio
+    async def test_update_weight_on_successful_use_context_tier(self):
+        """Test cognitive weight update for context tier."""
+        with patch("src.memory.api.SpannerClient") as mock_client:
+            mock_db = MagicMock()
+            mock_batch = MagicMock()
+            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
+            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+
+            mock_client.get_database.return_value = mock_db
+
+            await MemoryAPI._update_weight_on_successful_use(
+                ["node_1"],
+                memory_tier=SchemaConfig.MEMORY_TIER_CONTEXT,
+            )
+
+            params = mock_batch.execute_update.call_args[0][1]
+            assert params["tier"] == SchemaConfig.MEMORY_TIER_CONTEXT
+
+    @pytest.mark.asyncio
+    async def test_update_weight_rejects_audit_tier(self):
+        """Ensure append-only audit tier cannot be updated."""
+        with pytest.raises(ValueError, match="append-only"):
+            await MemoryAPI._update_weight_on_successful_use(
+                ["node_1"],
+                memory_tier=SchemaConfig.MEMORY_TIER_AUDIT,
+            )
+
+    @pytest.mark.asyncio
+    async def test_update_weight_rejects_invalid_tier(self):
+        """Ensure unknown tier names are rejected."""
+        with pytest.raises(ValueError, match="invalid memory_tier"):
+            await MemoryAPI._update_weight_on_successful_use(
+                ["node_1"],
+                memory_tier="UNKNOWN",
+            )
 
     @pytest.mark.asyncio
     async def test_update_weight_on_empty_node_ids(self):

@@ -1,8 +1,9 @@
 """Integration tests for memory API tripartite memory isolation."""
 
-import pytest
-from datetime import datetime
+from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.db.schema import SchemaConfig
 from src.memory.api import MemoryAPI
@@ -23,15 +24,13 @@ class TestAuditTrail:
 
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(
-                MemoryAPI, "record_audit_event"
-            ) as mock_record_audit:
+            with patch.object(MemoryAPI, "record_audit_event") as mock_record_audit:
                 # Make it async-compatible
                 async def async_audit(*args, **kwargs):
                     return AuditResponse(
                         event_id="audit_1",
                         event_type=args[0],
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(UTC),
                     )
 
                 mock_record_audit.side_effect = async_audit
@@ -57,17 +56,16 @@ class TestAuditTrail:
 
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(
-                MemoryAPI, "record_audit_event"
-            ) as mock_audit, patch.object(
-                MemoryAPI, "_update_weight_on_successful_use"
-            ) as mock_weight:
+            with (
+                patch.object(MemoryAPI, "record_audit_event") as mock_audit,
+                patch.object(MemoryAPI, "_update_weight_on_successful_use") as mock_weight,
+            ):
 
                 async def async_audit(*args, **kwargs):
                     return AuditResponse(
                         event_id="audit_2",
                         event_type=args[0],
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(UTC),
                     )
 
                 async def async_weight(*args, **kwargs):
@@ -96,28 +94,25 @@ class TestAuditTrail:
                     "User",
                     '{"content": "Hello"}',
                     0.5,
-                    datetime.utcnow(),
+                    datetime.now(UTC),
                     "HAS_TURN",
                 ),
             ]
-            mock_db.snapshot.return_value.__enter__ = MagicMock(
-                return_value=mock_snapshot
-            )
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
 
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(
-                MemoryAPI, "record_audit_event"
-            ) as mock_audit, patch.object(
-                MemoryAPI, "_update_weight_on_successful_use"
-            ) as mock_weight:
+            with (
+                patch.object(MemoryAPI, "record_audit_event") as mock_audit,
+                patch.object(MemoryAPI, "_update_weight_on_successful_use") as mock_weight,
+            ):
 
                 async def async_audit(*args, **kwargs):
                     return AuditResponse(
                         event_id="audit_3",
                         event_type=args[0],
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(UTC),
                     )
 
                 async def async_weight(*args, **kwargs):
@@ -126,12 +121,12 @@ class TestAuditTrail:
                 mock_audit.side_effect = async_audit
                 mock_weight.side_effect = async_weight
 
-                response = await MemoryAPI.retrieve_context_window(
-                    session_id="session_123"
-                )
+                response = await MemoryAPI.retrieve_context_window(session_id="session_123")
 
                 # Verify weight update was called for retrieved turns
-                mock_weight.assert_called_once_with(["turn_1"])
+                mock_weight.assert_called_once_with(
+                    ["turn_1"], memory_tier=SchemaConfig.MEMORY_TIER_CONTEXT
+                )
 
     @pytest.mark.asyncio
     async def test_tripartite_memory_isolation(self):
@@ -152,7 +147,7 @@ class TestAuditTrail:
                     return AuditResponse(
                         event_id="audit_4",
                         event_type=args[0],
-                        timestamp=datetime.utcnow(),
+                        timestamp=datetime.now(UTC),
                     )
 
                 mock_audit.side_effect = async_audit
@@ -163,9 +158,7 @@ class TestAuditTrail:
                 )
 
                 # Add semantic fact (SEMANTIC tier)
-                with patch.object(
-                    MemoryAPI, "_update_weight_on_successful_use"
-                ) as mock_weight:
+                with patch.object(MemoryAPI, "_update_weight_on_successful_use") as mock_weight:
 
                     async def async_weight(*args, **kwargs):
                         pass
@@ -215,10 +208,9 @@ class TestCognitiveWeighting:
 
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(
-                MemoryAPI, "record_audit_event"
-            ), patch.object(
-                MemoryAPI, "_update_weight_on_successful_use"
+            with (
+                patch.object(MemoryAPI, "record_audit_event"),
+                patch.object(MemoryAPI, "_update_weight_on_successful_use"),
             ):
 
                 async def async_noop(*args, **kwargs):
@@ -246,7 +238,7 @@ class TestCognitiveWeighting:
             # Verify the update SQL includes ln(BAYES_FACTOR_SUCCESS)
             call_args = mock_batch.execute_update.call_args
             assert call_args is not None
-            
+
             # call_args is a tuple: (args, kwargs)
             # The SQL is in call_args[0][0] and the params are in call_args[0][1]
             params = call_args[0][1]

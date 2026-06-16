@@ -5,8 +5,8 @@ See https://documentation.tryolabs.com/repo-template/batteries/configuration/.
 Note: you may store secrets in `.local` or `.env` files.
 """
 
-from project_base.settings._core import PreconfiguredSettings
-from project_base.settings.models import Logging
+from ._core import PreconfiguredSettings
+from .models import Logging
 
 
 class Settings(PreconfiguredSettings):

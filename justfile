@@ -1,5 +1,5 @@
-SRC := 'project_base'
-SRC_DIR := 'src/' + SRC
+SRC := 'src'
+SRC_DIR := 'src'
 
 # Show available commands
 default:
@@ -117,3 +117,16 @@ docs-build-and-publish-site: build-docs docs-publish-site
 # Run the main application
 run:
   uv run python {{SRC_DIR}}/src.py
+
+# Render Cloud Run manifest for Phase 3 deployment
+phase3-render-cloudrun project_id image_tag='latest' region='us-central1' artifact_repo='agent-memory-graph' image_name='phase3' service_name='agent-memory-graph-phase3' output='infrastructure/phase3/cloudrun-service.rendered.yaml':
+  uv run python scripts/render_phase3_cloudrun_manifest.py --project-id "{{project_id}}" --image-tag "{{image_tag}}" --region "{{region}}" --artifact-repository "{{artifact_repo}}" --image-name "{{image_name}}" --service-name "{{service_name}}" --output "{{output}}"
+
+# Build and push Phase 3 container image with Cloud Build
+phase3-build-image project_id image_tag='latest' region='us-central1' artifact_repo='agent-memory-graph' image_name='phase3':
+  gcloud builds submit --project "{{project_id}}" --tag "{{region}}-docker.pkg.dev/{{project_id}}/{{artifact_repo}}/{{image_name}}:{{image_tag}}" .
+
+# Deploy Phase 3 service to Cloud Run using rendered manifest
+phase3-deploy-cloudrun project_id image_tag='latest' region='us-central1' artifact_repo='agent-memory-graph' image_name='phase3' service_name='agent-memory-graph-phase3':
+  just phase3-render-cloudrun "{{project_id}}" "{{image_tag}}" "{{region}}" "{{artifact_repo}}" "{{image_name}}" "{{service_name}}"
+  gcloud run services replace infrastructure/phase3/cloudrun-service.rendered.yaml --project "{{project_id}}" --region "{{region}}"

@@ -13,15 +13,15 @@ from typing import TYPE_CHECKING
 
 from asgi_correlation_id import CorrelationIdFilter
 
-from project_base.constants import PACKAGE_NAME
-from project_base.paths import LOGS, PACKAGE
+from .constants import PACKAGE_NAME
+from .paths import LOGS, PACKAGE
 
 if TYPE_CHECKING:
     from os import PathLike
     from types import TracebackType
     from typing import TextIO
 
-    from project_base.settings.models import Logging
+    from .settings.models import Logging
 
 
 class CorrelationIdFormatter(logging.Formatter):

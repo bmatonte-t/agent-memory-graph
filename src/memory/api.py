@@ -1,7 +1,9 @@
 """Core memory API implementations."""
 
+import logging
+import math
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Dict, List, Optional
 
 from src.db.schema import SchemaConfig
@@ -14,9 +16,43 @@ from src.models.schemas import (
     SessionResponse,
 )
 
+logger = logging.getLogger(__name__)
+
 
 class MemoryAPI:
     """Core memory API for tripartite memory operations."""
+
+    @staticmethod
+    def _get_node_memory_tier(node_id: str) -> str | None:
+        """Return memory tier for a node when it exists.
+
+        Args:
+            node_id: Node identifier to inspect.
+
+        Returns:
+            str | None: Node memory tier when found, else None.
+
+        Raises:
+            RuntimeError: If database read fails.
+        """
+        query = """
+            SELECT MemoryTier
+            FROM MemoryNode
+            WHERE NodeId = @node_id
+            LIMIT 1
+        """
+
+        try:
+            database = SpannerClient.get_database()
+            with database.snapshot() as snapshot:
+                rows = list(snapshot.execute_sql(query, {"node_id": node_id}))
+        except Exception as error:
+            raise RuntimeError(f"Failed to lookup node tier: {error}") from error
+
+        if not rows:
+            return None
+
+        return rows[0][0]
 
     @staticmethod
     async def create_session(
@@ -40,16 +76,16 @@ class MemoryAPI:
         if not session_id or not user_id:
             raise ValueError("session_id and user_id cannot be empty")
 
-        created_at = datetime.utcnow()
+        created_at = datetime.now(UTC)
 
         # Create Session node in MemoryNode
         attributes = {"user_id": user_id, **(metadata or {})}
         node_sql = """
             INSERT INTO MemoryNode (
-                NodeId, MemoryTier, Label, LogOddsWeight, 
+                NodeId, MemoryTier, Label, LogOddsWeight,
                 LastAccessed, Attributes, CreatedAt, UpdatedAt
             ) VALUES (
-                @node_id, @tier, @label, @weight, 
+                @node_id, @tier, @label, @weight,
                 @now, JSON(@attributes), @now, @now
             )
         """
@@ -70,9 +106,7 @@ class MemoryAPI:
                 )
 
             # Log audit event
-            await MemoryAPI.record_audit_event(
-                "CREATE_SESSION", session_id, {"user_id": user_id}
-            )
+            await MemoryAPI.record_audit_event("CREATE_SESSION", session_id, {"user_id": user_id})
 
             return SessionResponse(
                 session_id=session_id,
@@ -111,8 +145,12 @@ class MemoryAPI:
             )
         if not entity_id:
             raise ValueError("entity_id cannot be empty")
+        if relationship and relationship.get("source_id"):
+            source_tier = MemoryAPI._get_node_memory_tier(relationship["source_id"])
+            if source_tier == SchemaConfig.MEMORY_TIER_AUDIT:
+                raise ValueError("relationship source cannot be an AUDIT tier node")
 
-        created_at = datetime.utcnow()
+        created_at = datetime.now(UTC)
         node_attributes = {
             "entity_type": entity_type,
             **(attributes or {}),
@@ -215,7 +253,7 @@ class MemoryAPI:
         if not event_type or not source_node_id:
             raise ValueError("event_type and source_node_id cannot be empty")
 
-        timestamp = datetime.utcnow()
+        timestamp = datetime.now(UTC)
         event_id = str(uuid.uuid4())
         event_attributes = {
             "event_type": event_type,
@@ -258,9 +296,7 @@ class MemoryAPI:
             raise RuntimeError(f"Failed to record audit event: {e}")
 
     @staticmethod
-    async def retrieve_context_window(
-        session_id: str, window_size: int = 10
-    ) -> ContextResponse:
+    async def retrieve_context_window(session_id: str, window_size: int = 10) -> ContextResponse:
         """
         Retrieve recent session history via GQL with edge metadata.
 
@@ -280,14 +316,14 @@ class MemoryAPI:
         if not (1 <= window_size <= 100):
             raise ValueError("window_size must be between 1 and 100")
 
-        retrieved_at = datetime.utcnow()
+        retrieved_at = datetime.now(UTC)
 
         # GQL query to retrieve context window
         # Pattern: (Session)-[HAS_TURN]->(Turn)
         # Ordered by creation timestamp DESC, limited by window_size
         gql_query = """
             MATCH p = (s:Node)-[e]->(t:Node)
-            WHERE s.NodeId = @session_id 
+            WHERE s.NodeId = @session_id
               AND s.MemoryTier = 'CONTEXT'
               AND t.MemoryTier = 'CONTEXT'
             RETURN t.NodeId, t.Label, t.Attributes, t.LogOddsWeight, t.CreatedAt, e.RelType
@@ -332,7 +368,10 @@ class MemoryAPI:
             # Update weights on successful retrieval
             turn_ids = [turn.turn_id for turn in turns]
             if turn_ids:
-                await MemoryAPI._update_weight_on_successful_use(turn_ids)
+                await MemoryAPI._update_weight_on_successful_use(
+                    turn_ids,
+                    memory_tier=SchemaConfig.MEMORY_TIER_CONTEXT,
+                )
 
             return ContextResponse(
                 session_id=session_id,
@@ -344,7 +383,10 @@ class MemoryAPI:
             raise RuntimeError(f"Failed to retrieve context window: {e}")
 
     @staticmethod
-    async def _update_weight_on_successful_use(node_ids: List[str]) -> None:
+    async def _update_weight_on_successful_use(
+        node_ids: List[str],
+        memory_tier: str = SchemaConfig.MEMORY_TIER_SEMANTIC,
+    ) -> None:
         """
         Update cognitive weights on successful use (confirmation bias).
 
@@ -352,15 +394,25 @@ class MemoryAPI:
 
         Args:
             node_ids: List of node IDs to update
+            memory_tier: Target tier for update.
 
         Raises:
+            ValueError: If memory_tier is invalid or immutable.
             RuntimeError: If update fails
         """
         if not node_ids:
             return
 
+        if memory_tier not in SchemaConfig.VALID_MEMORY_TIERS:
+            raise ValueError(
+                f"invalid memory_tier. Must be one of: {SchemaConfig.VALID_MEMORY_TIERS}"
+            )
+
+        if memory_tier == SchemaConfig.MEMORY_TIER_AUDIT:
+            raise ValueError("audit tier is append-only and cannot be updated")
+
         # Bayesian log-odds update: ln(1.25) ≈ 0.223
-        bayes_factor_ln = import_math().log(SchemaConfig.BAYES_FACTOR_SUCCESS)
+        bayes_factor_ln = math.log(SchemaConfig.BAYES_FACTOR_SUCCESS)
 
         sql = """
             UPDATE MemoryNode
@@ -379,16 +431,9 @@ class MemoryAPI:
                     {
                         "delta": bayes_factor_ln,
                         "node_ids": node_ids,
-                        "tier": SchemaConfig.MEMORY_TIER_SEMANTIC,
+                        "tier": memory_tier,
                     },
                 )
         except Exception as e:
             # Log but don't raise - weight update is not critical to operation
-            print(f"Warning: Failed to update weights: {e}")
-
-
-def import_math():
-    """Helper to import math module (avoids circular imports)."""
-    import math
-
-    return math
+            logger.warning("failed to update weights", exc_info=e)
