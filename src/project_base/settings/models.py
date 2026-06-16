@@ -6,7 +6,7 @@ For example, create ``database.py``, ``api.py``, or ``cache.py`` as needed.
 
 from pydantic import BaseModel
 
-from project_base.settings.enums import LogLevel
+from .enums import LogLevel
 
 
 class Logging(BaseModel):

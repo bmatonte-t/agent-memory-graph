@@ -7,11 +7,11 @@ from unittest.mock import patch
 
 import pytest
 
-from project_base.settings import ENVIRONMENT_VARIABLE_PREFIX, Environment
-from project_base.settings._core import runtime_environment
-from project_base.settings.config import Settings
-from project_base.settings.enums import LogLevel
-from project_base.settings.models import Logging
+from src.project_base.settings import ENVIRONMENT_VARIABLE_PREFIX, Environment
+from src.project_base.settings._core import runtime_environment
+from src.project_base.settings.config import Settings
+from src.project_base.settings.enums import LogLevel
+from src.project_base.settings.models import Logging
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -55,7 +55,7 @@ class TestYAMLLoading:
 
     def test_loads_base_yaml(self, base_yaml_config: Path, temp_config_dir: Path) -> None:
         """Test that base config.yaml is loaded."""
-        with patch("project_base.settings._core.ROOT", temp_config_dir):
+        with patch("src.project_base.settings._core.ROOT", temp_config_dir):
             config = Settings(environment=Environment.DEV)  # type: ignore[call-arg]
             assert config.logging.log_level == LogLevel.INFO
 
@@ -66,7 +66,7 @@ class TestYAMLLoading:
         temp_config_dir: Path,
     ) -> None:
         """Test that config.dev.yaml overrides config.yaml."""
-        with patch("project_base.settings._core.ROOT", temp_config_dir):
+        with patch("src.project_base.settings._core.ROOT", temp_config_dir):
             config = Settings(environment=Environment.DEV)  # type: ignore[call-arg]
             assert config.logging.log_level == LogLevel.DEBUG
 
@@ -76,7 +76,7 @@ class TestYAMLLoading:
         """Test that environment variables override YAML config."""
         monkeypatch.setenv(f"{ENVIRONMENT_VARIABLE_PREFIX}LOGGING__LOG_LEVEL", "CRITICAL")
 
-        with patch("project_base.settings._core.ROOT", temp_config_dir):
+        with patch("src.project_base.settings._core.ROOT", temp_config_dir):
             config = Settings(environment=Environment.DEV)  # type: ignore[call-arg]
             assert config.logging.log_level == LogLevel.CRITICAL
 
@@ -84,7 +84,7 @@ class TestYAMLLoading:
         self, base_yaml_config: Path, temp_config_dir: Path
     ) -> None:
         """Test that missing config.prod.yaml falls back to config.yaml."""
-        with patch("project_base.settings._core.ROOT", temp_config_dir):
+        with patch("src.project_base.settings._core.ROOT", temp_config_dir):
             config = Settings(environment=Environment.PROD)  # type: ignore[call-arg]
             # Should fall back to base config.yaml
             assert config.logging.log_level == LogLevel.INFO
@@ -103,7 +103,7 @@ class TestLoadingHierarchy:
         """Test that environment variables have highest priority in the hierarchy."""
         monkeypatch.setenv(f"{ENVIRONMENT_VARIABLE_PREFIX}LOGGING__LOG_LEVEL", "ERROR")
 
-        with patch("project_base.settings._core.ROOT", temp_config_dir):
+        with patch("src.project_base.settings._core.ROOT", temp_config_dir):
             config = Settings(environment=Environment.DEV)  # type: ignore[call-arg]
             # Env var should override config.dev.yaml
             assert config.logging.log_level == LogLevel.ERROR
@@ -115,7 +115,7 @@ class TestLoadingHierarchy:
         temp_config_dir: Path,
     ) -> None:
         """Test that environment-specific YAML overrides base YAML."""
-        with patch("project_base.settings._core.ROOT", temp_config_dir):
+        with patch("src.project_base.settings._core.ROOT", temp_config_dir):
             config = Settings(environment=Environment.DEV)  # type: ignore[call-arg]
             # config.dev.yaml (DEBUG) should override config.yaml (INFO)
             assert config.logging.log_level == LogLevel.DEBUG

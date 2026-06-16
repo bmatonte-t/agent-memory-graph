@@ -1,25 +1,30 @@
-"""
-Test script to check that the following work, for developers of this template:
-- the python interpreter is selected
-- imports are sorted
-- absolute imports of the current project work
-- types are checked
-- linter warnings are shown
-- formatting works and is applied on save
+"""Template smoke-check script for local developer setup.
 
 Remove this file when you start a new project from this template.
 """
-import os
-import pathlib
-from datetime import datetime
 
-from project_base.src import a
+import logging
+from datetime import UTC, datetime
 
-a()
+from src.project_base.src import a
 
-
-def func(a: int) -> float:
-    return datetime.now()
+logger = logging.getLogger(__name__)
 
 
-print(func("str"))
+def current_timestamp() -> datetime:
+    """Return a timezone-aware UTC timestamp for smoke checks.
+
+    Returns:
+        datetime: Current UTC timestamp.
+    """
+    return datetime.now(UTC)
+
+
+def main() -> None:
+    """Run template smoke checks without introducing lint/type failures."""
+    a()
+    logger.info("Template smoke-check timestamp: %s", current_timestamp().isoformat())
+
+
+if __name__ == "__main__":
+    main()

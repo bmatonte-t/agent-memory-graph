@@ -17,9 +17,9 @@ If you want to re-instantiate settings, you may do so directly:
     settings = Settings(environment=runtime_environment())
 """
 
-from project_base.settings._core import ENVIRONMENT_VARIABLE_PREFIX, runtime_environment
-from project_base.settings.config import Settings
-from project_base.settings.enums import Environment
+from ._core import ENVIRONMENT_VARIABLE_PREFIX, runtime_environment
+from .config import Settings
+from .enums import Environment
 
 __all__ = ["ENVIRONMENT_VARIABLE_PREFIX", "Environment", "settings"]
 

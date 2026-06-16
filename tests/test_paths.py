@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from project_base.constants import PACKAGE_NAME
-from project_base.paths import DATA, DOCS, LOGS, NOTEBOOKS, PACKAGE, ROOT, SCRIPTS, SRC, TESTS
+from src.project_base.constants import PACKAGE_NAME
+from src.project_base.paths import DATA, DOCS, LOGS, NOTEBOOKS, PACKAGE, ROOT, SCRIPTS, SRC, TESTS
 
 
 def test_package_path() -> None:

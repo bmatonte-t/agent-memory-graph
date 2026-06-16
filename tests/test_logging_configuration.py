@@ -13,17 +13,17 @@ import pytest
 from asgi_correlation_id import CorrelationIdFilter
 from asgi_correlation_id.context import correlation_id
 
-from project_base import logging as logging_module
-from project_base.logging import (
+from src.project_base import logging as logging_module
+from src.project_base.logging import (
     APP_LOGGER,
     MODULE_LOGGER,
     CorrelationIdFormatter,
     LoggingConfiguration,
     configure_logging,
 )
-from project_base.paths import PACKAGE
-from project_base.settings.enums import LogLevel
-from project_base.settings.models import Logging
+from src.project_base.paths import PACKAGE
+from src.project_base.settings.enums import LogLevel
+from src.project_base.settings.models import Logging
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
