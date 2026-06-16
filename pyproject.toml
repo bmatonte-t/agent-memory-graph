@@ -1,13 +1,17 @@
 [project]
-name = "project_base"
+name = "agent-memory-graph"
 version = "0.1.0"
-description = ""
+description = "Cognitive Agent Memory Graph - Tripartite memory model with Spanner backend"
 requires-python = ">=3.14"
 dependencies = [
     "asgi-correlation-id",
+    "fastapi>=0.104.0",
+    "google-cloud-spanner>=3.25.0",
+    "httpx>=0.25.0",
     "pydantic>=2.0",
     "pydantic-settings>=2.13.0",
     "pyyaml",
+    "uvicorn[standard]>=0.24.0",
 ]
 
 [dependency-groups]
@@ -39,7 +43,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/project_base"]
+packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
