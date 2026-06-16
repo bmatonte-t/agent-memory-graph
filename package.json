@@ -1,0 +1,10 @@
+{
+  "name": "agent-memory-graph-gcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Architecture-first workspace for a GCP-native agent memory graph solution",
+  "scripts": {
+    "lint": "echo Lint placeholder - architecture phase",
+    "test": "echo Test placeholder - architecture phase"
+  }
+}
