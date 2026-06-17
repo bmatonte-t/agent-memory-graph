@@ -4,14 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
 from src.agent.orchestrator import AgentOrchestrator
 from src.models.agent import AgentOrchestrationRequest
-from src.models.mcp import MCPInvokeResponse, MCPToolName
+from src.models.mcp import MCPInvokeRequest, MCPInvokeResponse, MCPToolName
+
+P95_LATENCY_TARGET_MS = 250.0
 
 
 class TestAgentConcurrency:
@@ -22,7 +23,7 @@ class TestAgentConcurrency:
         """Concurrent sessions should complete within an acceptable p95 latency."""
         fake_service = AsyncMock()
 
-        async def fake_invoke(request: Any) -> MCPInvokeResponse:
+        async def fake_invoke(request: MCPInvokeRequest) -> MCPInvokeResponse:
             await asyncio.sleep(0.002)
             result = {}
             if request.tool_name == MCPToolName.MEMORY_SEARCH:
@@ -71,4 +72,4 @@ class TestAgentConcurrency:
         p95_index = max(int(len(sorted_latencies) * 0.95) - 1, 0)
         p95_latency = sorted_latencies[p95_index]
 
-        assert p95_latency < 250.0
+        assert p95_latency < P95_LATENCY_TARGET_MS

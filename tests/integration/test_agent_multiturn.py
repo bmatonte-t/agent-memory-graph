@@ -2,27 +2,34 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+from src.models.agent import (
+    AgentOrchestrationRequest,
+    AgentOrchestrationResponse,
+    AgentToolCallTrace,
+)
+
+if TYPE_CHECKING:
+    import pytest
+
+HTTP_OK = 200
 
 
 class TestAgentMultiTurn:
     """Integration tests for multi-turn behavior through agent endpoint."""
 
-    def test_memory_update_visible_on_subsequent_turn(self, monkeypatch) -> None:
+    def test_memory_update_visible_on_subsequent_turn(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Second turn should observe memory added during the first turn."""
-        from src.models.agent import (
-            AgentExecutionMode,
-            AgentOrchestrationRequest,
-            AgentOrchestrationResponse,
-            AgentToolCallTrace,
-        )
-
         session_memory: dict[str, list[str]] = {}
 
         async def fake_respond(
-            _self, request: AgentOrchestrationRequest
+            _self: object, request: AgentOrchestrationRequest
         ) -> AgentOrchestrationResponse:
             facts = session_memory.setdefault(request.session_id, [])
             if "remember" in request.prompt.lower():
@@ -76,19 +83,17 @@ class TestAgentMultiTurn:
             },
         )
 
-        assert first_turn.status_code == 200
-        assert second_turn.status_code == 200
+        assert first_turn.status_code == HTTP_OK
+        assert second_turn.status_code == HTTP_OK
         assert second_turn.json()["grounded"] is True
         assert "project_alpha_budget" in second_turn.json()["response_text"]
 
-    def test_memory_isolation_across_sessions(self, monkeypatch) -> None:
+    def test_memory_isolation_across_sessions(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Memory state should remain isolated between two sessions."""
-        from src.models.agent import AgentOrchestrationRequest, AgentOrchestrationResponse
-
         session_memory: dict[str, str] = {}
 
         async def fake_respond(
-            _self, request: AgentOrchestrationRequest
+            _self: object, request: AgentOrchestrationRequest
         ) -> AgentOrchestrationResponse:
             if "remember" in request.prompt.lower():
                 session_memory[request.session_id] = request.prompt
@@ -115,5 +120,5 @@ class TestAgentMultiTurn:
             json={"prompt": "what now", "session_id": "session_b", "request_id": "2"},
         )
 
-        assert response_b.status_code == 200
+        assert response_b.status_code == HTTP_OK
         assert response_b.json()["grounded"] is False
