@@ -6,7 +6,7 @@ from enum import StrEnum
 
 from pydantic import BaseModel, Field
 
-from src.models.mcp import MCPToolName
+from src.models.mcp import MCPToolName  # noqa: TC001
 
 
 class AgentExecutionMode(StrEnum):

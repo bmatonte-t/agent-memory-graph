@@ -513,8 +513,9 @@ class MindMapPipeline:
         started = perf_counter()
         facts: list[SerializedFact] = []
 
+        _minimum_path_nodes = 2
         for idx, path in enumerate(aggregation_result.paths, start=1):
-            if len(path.node_ids) < 2:
+            if len(path.node_ids) < _minimum_path_nodes:
                 continue
 
             statement = f"FACT {idx}: ({path.node_ids[0]}) -[RELATED_TO]-> ({path.node_ids[1]})"

@@ -1,11 +1,11 @@
 """FastAPI application for Agent Memory Graph."""
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator  # noqa: TC003
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
 from src.agent import build_vertex_adapter_from_env
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan handler for startup and shutdown events."""
     logger.info("Starting up Agent Memory Graph API")
     try:
@@ -37,8 +37,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         logger.info("Shutting down Agent Memory Graph API")
         try:
             SpannerClient.close()
-        except Exception as error:
-            logger.error(f"Error during shutdown: {error}")
+        except Exception:
+            logger.exception("Error during shutdown")
 
 
 # Create FastAPI app
@@ -58,14 +58,14 @@ agent_orchestrator = AgentOrchestrator(
 
 
 @app.get("/health", response_model=HealthCheckResponse)
-async def health_check():
+async def health_check() -> HealthCheckResponse:
     """Health check endpoint."""
     logger.info("Health check requested")
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now(UTC),
-        "database": "initialized",
-    }
+    return HealthCheckResponse(
+        status="healthy",
+        timestamp=datetime.now(UTC),
+        database="initialized",
+    )
 
 
 @app.post("/api/v1/mindmap/execute", response_model=MindMapResponse)
@@ -100,25 +100,20 @@ async def agent_respond(request: AgentOrchestrationRequest) -> AgentOrchestratio
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(request, exc):
+async def global_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
     """Global exception handler."""
-    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    logger.error(f"Unhandled exception: {exc}")
     return JSONResponse(
         status_code=500,
         content=ErrorResponse(
             error=str(exc),
             code="INTERNAL_ERROR",
             timestamp=datetime.now(UTC),
-        ).dict(),
+        ).model_dump(mode="json"),
     )
-
-
-# Import and include routers (will be created in Phase 1C)
-# from src.api.routes import memory_router
-# app.include_router(memory_router.router, prefix="/api/v1/memory", tags=["memory"])
 
 
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)  # noqa: S104
