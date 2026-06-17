@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import ClassVar
 
+from google.api_core import exceptions as gcp_exceptions
 from google.cloud import spanner  # noqa: TC002
 
 logger = logging.getLogger(__name__)
@@ -23,6 +24,28 @@ class SchemaManager:
             return []
 
         return sorted([f.name for f in cls.MIGRATIONS_DIR.glob("*.sql")])
+
+    @staticmethod
+    def _parse_sql_statements(sql: str) -> list[str]:
+        """Parse SQL file content into executable statements.
+
+        Removes line comments and splits on semicolons.
+
+        Args:
+            sql: Raw SQL file content.
+
+        Returns:
+            list[str]: Non-empty SQL statements.
+        """
+        uncommented_lines: list[str] = []
+        for line in sql.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("--"):
+                continue
+            uncommented_lines.append(line)
+
+        cleaned_sql = "\n".join(uncommented_lines)
+        return [statement.strip() for statement in cleaned_sql.split(";") if statement.strip()]
 
     @classmethod
     def init_schema(cls, database: spanner.Database) -> None:
@@ -45,20 +68,19 @@ class SchemaManager:
             with open(migration_path) as f:
                 sql = f.read()
 
-            # Split by semicolon for multiple statements
-            statements = [s.strip() for s in sql.split(";") if s.strip()]
+            statements = cls._parse_sql_statements(sql)
+            if not statements:
+                logger.warning(
+                    "Skipping migration with no executable statements: %s", migration_file
+                )
+                continue
 
-            for statement in statements:
-                # Skip comments
-                if statement.startswith("--"):
-                    continue
-
-                try:
-                    # Use execute_update for DDL
-                    with database.batch() as batch:
-                        batch.execute_update(statement)
-                except Exception:  # noqa: BLE001
-                    logger.debug("Migration statement failed, continuing", exc_info=True)
+            try:
+                operation = database.update_ddl(statements=statements)
+                operation.result()
+            except (gcp_exceptions.GoogleAPICallError, gcp_exceptions.RetryError) as error:
+                msg = f"Failed to apply migration {migration_file}: {error}"
+                raise RuntimeError(msg) from error
 
     @classmethod
     def validate_schema(cls, database: spanner.Database) -> dict:
@@ -105,8 +127,18 @@ class SchemaManager:
         except Exception:  # noqa: BLE001
             logger.debug("Error checking MemoryEdge table", exc_info=True)
 
-        # Check if property graph exists (may not be queryable the same way)
-        validation_results["property_graph_exists"] = True  # Assume success if no error
+        # Check if property graph exists
+        try:
+            with database.snapshot() as snapshot:
+                results = snapshot.execute_sql(
+                    "SELECT property_graph_name"
+                    " FROM information_schema.property_graphs"
+                    " WHERE property_graph_name = 'AgentMemoryGraph'"
+                )
+                if list(results):
+                    validation_results["property_graph_exists"] = True
+        except Exception:  # noqa: BLE001
+            logger.debug("Error checking property graph", exc_info=True)
 
         # Check if indexes exist
         try:

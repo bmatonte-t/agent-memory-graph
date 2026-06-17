@@ -1,5 +1,6 @@
 """Integration tests for memory API tripartite memory isolation."""
 
+import json
 from datetime import UTC, datetime
 from unittest.mock import MagicMock, patch
 
@@ -24,26 +25,13 @@ class TestAuditTrail:
 
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(MemoryAPI, "record_audit_event") as mock_record_audit:
-                # Make it async-compatible
-                async def async_audit(*args, **kwargs):
-                    return AuditResponse(
-                        event_id="audit_1",
-                        event_type=args[0],
-                        timestamp=datetime.now(UTC),
-                    )
+            await MemoryAPI.create_session(session_id="session_123", user_id="user_456")
 
-                mock_record_audit.side_effect = async_audit
-
-                response = await MemoryAPI.create_session(
-                    session_id="session_123", user_id="user_456"
-                )
-
-                # Verify audit was recorded
-                mock_record_audit.assert_called_once()
-                args = mock_record_audit.call_args[0]
-                assert args[0] == "CREATE_SESSION"
-                assert args[1] == "session_123"
+            assert mock_batch.execute_update.call_count == 2
+            audit_params = mock_batch.execute_update.call_args_list[1][0][1]
+            audit_attributes = json.loads(audit_params["attributes"])
+            assert audit_attributes["event_type"] == "CREATE_SESSION"
+            assert audit_attributes["source_node_id"] == "session_123"
 
     @pytest.mark.asyncio
     async def test_semantic_fact_addition_generates_audit(self):
@@ -56,30 +44,20 @@ class TestAuditTrail:
 
             mock_client.get_database.return_value = mock_db
 
-            with (
-                patch.object(MemoryAPI, "record_audit_event") as mock_audit,
-                patch.object(MemoryAPI, "_update_weight_on_successful_use") as mock_weight,
-            ):
-
-                async def async_audit(*args, **kwargs):
-                    return AuditResponse(
-                        event_id="audit_2",
-                        event_type=args[0],
-                        timestamp=datetime.now(UTC),
-                    )
+            with patch.object(MemoryAPI, "_update_weight_on_successful_use") as mock_weight:
 
                 async def async_weight(*args, **kwargs):
                     pass
 
-                mock_audit.side_effect = async_audit
                 mock_weight.side_effect = async_weight
 
-                response = await MemoryAPI.add_semantic_fact(
-                    entity_type="PERSON", entity_id="entity_123"
-                )
+                await MemoryAPI.add_semantic_fact(entity_type="PERSON", entity_id="entity_123")
 
-                # Verify audit and weight update were called
-                mock_audit.assert_called_once()
+                # Verify audit persisted and weight update was called
+                audit_params = mock_batch.execute_update.call_args_list[1][0][1]
+                audit_attributes = json.loads(audit_params["attributes"])
+                assert audit_attributes["event_type"] == "ADD_SEMANTIC_FACT"
+                assert audit_attributes["source_node_id"] == "entity_123"
                 mock_weight.assert_called_once()
 
     @pytest.mark.asyncio

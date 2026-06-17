@@ -172,12 +172,41 @@ class CloudSchedulerJob:
     PRUNING_SCHEDULE_CRON = "0 3 * * *"  # Run daily at 3 AM UTC
 
     @staticmethod
-    async def create_decay_job(project_id: str, location: str = "us-central1") -> dict:
+    def _build_target_uri(cloud_run_url: str, path: str) -> str:
+        """Build a valid Cloud Run target URI for scheduler jobs.
+
+        Args:
+            cloud_run_url: Base Cloud Run service URL.
+            path: Internal endpoint path.
+
+        Returns:
+            str: Fully-qualified target URI.
+
+        Raises:
+            ValueError: If the URL is missing or invalid.
+        """
+        base_url = cloud_run_url.strip()
+        if not base_url:
+            msg = "cloud_run_url cannot be empty"
+            raise ValueError(msg)
+
+        if not base_url.startswith(("https://", "http://")):
+            base_url = f"https://{base_url}"
+
+        return f"{base_url.rstrip('/')}{path}"
+
+    @staticmethod
+    async def create_decay_job(
+        project_id: str,
+        location: str = "us-central1",
+        cloud_run_url: str = "",
+    ) -> dict:
         """Create a Cloud Scheduler job for nightly weight decay.
 
         Args:
             project_id: GCP project ID
             location: Cloud Scheduler location (default: us-central1)
+            cloud_run_url: Base URL for the Cloud Run service.
 
         Returns:
             Dict with job configuration details
@@ -192,13 +221,18 @@ class CloudSchedulerJob:
             client = scheduler_v1.CloudSchedulerClient()
             parent = client.common_location_path(project_id, location)
 
+            decay_uri = CloudSchedulerJob._build_target_uri(
+                cloud_run_url=cloud_run_url,
+                path="/internal/decay-weights",
+            )
+
             job = Job(
                 name=f"{parent}/jobs/amg-decay-weights-daily",
                 description="Daily cognitive weight decay for agent memory graph",
                 schedule=CloudSchedulerJob.DECAY_SCHEDULE_CRON,
                 time_zone="UTC",
                 http_target=HttpTarget(
-                    uri="https://{cloud_run_url}/internal/decay-weights",
+                    uri=decay_uri,
                     http_method="POST",
                     headers={"Content-Type": "application/json"},
                     body=b'{"decay_rate": 0.05}',
@@ -229,12 +263,17 @@ class CloudSchedulerJob:
             }
 
     @staticmethod
-    async def create_pruning_job(project_id: str, location: str = "us-central1") -> dict:
+    async def create_pruning_job(
+        project_id: str,
+        location: str = "us-central1",
+        cloud_run_url: str = "",
+    ) -> dict:
         """Create a Cloud Scheduler job for weight-based pruning.
 
         Args:
             project_id: GCP project ID
             location: Cloud Scheduler location
+            cloud_run_url: Base URL for the Cloud Run service.
 
         Returns:
             Dict with job configuration
@@ -249,13 +288,18 @@ class CloudSchedulerJob:
             client = scheduler_v1.CloudSchedulerClient()
             parent = client.common_location_path(project_id, location)
 
+            pruning_uri = CloudSchedulerJob._build_target_uri(
+                cloud_run_url=cloud_run_url,
+                path="/internal/prune-weights",
+            )
+
             job = Job(
                 name=f"{parent}/jobs/amg-prune-weights-daily",
                 description="Daily cognitive weight pruning for agent memory graph",
                 schedule=CloudSchedulerJob.PRUNING_SCHEDULE_CRON,
                 time_zone="UTC",
                 http_target=HttpTarget(
-                    uri="https://{cloud_run_url}/internal/prune-weights",
+                    uri=pruning_uri,
                     http_method="POST",
                     headers={"Content-Type": "application/json"},
                     body=b'{"threshold": 0.30}',
@@ -286,15 +330,31 @@ class CloudSchedulerJob:
             }
 
     @staticmethod
-    def get_job_config() -> dict:
-        """Return Cloud Scheduler job configuration for Terraform/deployment."""
+    def get_job_config(cloud_run_url: str) -> dict:
+        """Return Cloud Scheduler job configuration for Terraform/deployment.
+
+        Args:
+            cloud_run_url: Base URL for the Cloud Run service.
+
+        Returns:
+            dict: Scheduler job configuration payload.
+        """
+        decay_uri = CloudSchedulerJob._build_target_uri(
+            cloud_run_url=cloud_run_url,
+            path="/internal/decay-weights",
+        )
+        pruning_uri = CloudSchedulerJob._build_target_uri(
+            cloud_run_url=cloud_run_url,
+            path="/internal/prune-weights",
+        )
+
         return {
             "decay_job": {
                 "name": "amg-decay-weights-daily",
                 "schedule": CloudSchedulerJob.DECAY_SCHEDULE_CRON,
                 "timezone": "UTC",
                 "http_target": {
-                    "uri": "{cloud_run_url}/internal/decay-weights",
+                    "uri": decay_uri,
                     "http_method": "POST",
                     "headers": {"Content-Type": "application/json"},
                     "body": '{"decay_rate": 0.05}',
@@ -310,7 +370,7 @@ class CloudSchedulerJob:
                 "schedule": CloudSchedulerJob.PRUNING_SCHEDULE_CRON,
                 "timezone": "UTC",
                 "http_target": {
-                    "uri": "{cloud_run_url}/internal/prune-weights",
+                    "uri": pruning_uri,
                     "http_method": "POST",
                     "headers": {"Content-Type": "application/json"},
                     "body": '{"threshold": 0.30}',
