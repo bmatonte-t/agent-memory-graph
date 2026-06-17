@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import uuid
@@ -65,8 +66,24 @@ class MindMapConfig(BaseModel):
     max_evidence_nodes: int = Field(default=200, ge=1)
     extraction_model_name: str = Field(default="gemini-2.5-flash")
     synthesis_model_name: str = Field(default="gemini-2.5-pro")
+    use_vertex_mining: bool = Field(default=False)
+    use_vertex_synthesis: bool = Field(default=False)
     use_spanner_aggregation: bool = Field(default=False)
-    enable_trace_recording: bool = Field(default=False)
+    enable_trace_recording: bool = Field(default=True)
+
+
+class MiningAdapter(Protocol):
+    """Abstraction for query-to-entity mining backends."""
+
+    async def mine(self, query: str) -> MiningResult:
+        """Extract intent and entities from a user query.
+
+        Args:
+            query (str): User query text.
+
+        Returns:
+            MiningResult: Structured mining output.
+        """
 
 
 @dataclass(slots=True)
@@ -93,6 +110,65 @@ class DeterministicMiningAdapter:
         ]
         latency_ms = (perf_counter() - started) * 1000
         intent = "information_lookup" if entities else "insufficient_input"
+        return MiningResult(intent=intent, entities=entities, latency_ms=latency_ms)
+
+
+@dataclass(slots=True)
+class VertexMiningAdapter:
+    """Vertex Flash-backed mining adapter for structured entity extraction."""
+
+    model_name: str
+
+    async def mine(self, query: str) -> MiningResult:
+        """Extract entities via Vertex Flash with schema-constrained JSON output.
+
+        Args:
+            query (str): User query text.
+
+        Returns:
+            MiningResult: Structured extraction output.
+
+        Raises:
+            MindMapPipelineError: If model invocation or parsing fails.
+        """
+        started = perf_counter()
+        try:
+            from google.generativeai import GenerativeModel  # noqa: PLC0415
+        except ImportError as error:
+            raise MindMapPipelineError(
+                stage=PipelineStage.MINE,
+                code=PipelineErrorCode.MODEL_ERROR,
+                message="google-generativeai is required for vertex mining",
+            ) from error
+
+        model = GenerativeModel(self.model_name)
+        schema_instructions = (
+            "Return JSON only with shape: "
+            "{'intent': string, 'entities': [{'entity_id': string, 'entity_type': string, "
+            "'confidence': number between 0 and 1}]}."
+        )
+
+        try:
+            response = model.generate_content(f"{schema_instructions}\n\nQuery: {query}")
+            payload = json.loads(response.text)
+            entities_payload = payload.get("entities", [])
+            entities = [
+                MinedEntity(
+                    entity_id=item["entity_id"],
+                    entity_type=item["entity_type"],
+                    confidence=float(item["confidence"]),
+                )
+                for item in entities_payload
+            ]
+        except Exception as error:
+            raise MindMapPipelineError(
+                stage=PipelineStage.MINE,
+                code=PipelineErrorCode.MODEL_ERROR,
+                message=f"vertex mining failed: {error}",
+            ) from error
+
+        latency_ms = (perf_counter() - started) * 1000
+        intent = payload.get("intent", "information_lookup")
         return MiningResult(intent=intent, entities=entities, latency_ms=latency_ms)
 
 
@@ -287,20 +363,24 @@ class SpannerAggregationAdapter:
             latency_ms = (perf_counter() - started) * 1000
             return AggregationResult(nodes=[], edges=[], paths=[], latency_ms=latency_ms)
 
-        sql = """
-            SELECT
+        max_hops = max(1, min(config.max_hops, 6))
+        sql = f"""
+            GRAPH MemoryGraph
+            MATCH (n:MemoryNode)
+                -[e:MemoryEdge*1..{max_hops}]->
+                (m:MemoryNode)
+            WHERE n.NodeId IN UNNEST(@entity_ids)
+              AND e.LogOddsWeight >= @threshold
+              AND m.MemoryTier IN ('SEMANTIC', 'CONTEXT')
+            RETURN
                 n.NodeId,
                 n.MemoryTier,
                 n.Label,
                 n.LogOddsWeight,
                 e.EdgeId,
-                e.DestNodeId,
+                m.NodeId,
                 e.RelType,
                 e.LogOddsWeight
-            FROM MemoryNode AS n
-            JOIN MemoryEdge AS e ON e.SourceNodeId = n.NodeId
-            WHERE n.NodeId IN UNNEST(@entity_ids)
-              AND e.LogOddsWeight >= @threshold
             LIMIT @max_paths
         """
 
@@ -380,12 +460,16 @@ class MindMapPipeline:
     """Mine -> Aggregate -> Serialize -> Synthesize orchestration."""
 
     INSUFFICIENT_EVIDENCE_RESPONSE = "Insufficient graph evidence."
+    VERTEX_SYNTHESIS_SYSTEM_PROMPT = (
+        "Use ONLY the provided fact statements. If evidence is insufficient, "
+        "respond exactly with: 'Insufficient graph evidence.'"
+    )
 
     def __init__(
         self,
         *,
         config: MindMapConfig | None = None,
-        mining_adapter: DeterministicMiningAdapter | None = None,
+        mining_adapter: MiningAdapter | None = None,
         aggregation_adapter: AggregationAdapter | None = None,
         trace_recorder: TraceRecorder | None = None,
     ) -> None:
@@ -394,7 +478,7 @@ class MindMapPipeline:
         Args:
             config (MindMapConfig | None, optional): Pipeline config.
                 When None, uses defaults. Defaults to None.
-            mining_adapter (DeterministicMiningAdapter | None, optional): Mining adapter.
+            mining_adapter (MiningAdapter | None, optional): Mining adapter.
                 When None, uses deterministic adapter. Defaults to None.
             aggregation_adapter (AggregationAdapter | None, optional): Aggregation adapter.
                 When None, selects adapter from config. Defaults to None.
@@ -402,7 +486,12 @@ class MindMapPipeline:
                 When None, selects recorder from config. Defaults to None.
         """
         self.config = config or MindMapConfig()
-        self.mining_adapter = mining_adapter or DeterministicMiningAdapter()
+        if mining_adapter is not None:
+            self.mining_adapter = mining_adapter
+        elif self.config.use_vertex_mining:
+            self.mining_adapter = VertexMiningAdapter(model_name=self.config.extraction_model_name)
+        else:
+            self.mining_adapter = DeterministicMiningAdapter()
         if aggregation_adapter is not None:
             self.aggregation_adapter = aggregation_adapter
         elif self.config.use_spanner_aggregation:
@@ -452,7 +541,12 @@ class MindMapPipeline:
             StageTiming(stage=PipelineStage.SERIALIZE, latency_ms=serialization_result.latency_ms)
         )
 
-        synthesis_result = self._synthesize(serialization_result=serialization_result)
+        if self.config.use_vertex_synthesis:
+            synthesis_result = self._synthesize_with_vertex(
+                serialization_result=serialization_result
+            )
+        else:
+            synthesis_result = self._synthesize(serialization_result=serialization_result)
         self._validate_grounding(
             synthesis_result=synthesis_result,
             serialization_result=serialization_result,
@@ -512,19 +606,32 @@ class MindMapPipeline:
         """
         started = perf_counter()
         facts: list[SerializedFact] = []
+        edge_by_id = {edge.edge_id: edge for edge in aggregation_result.edges}
 
         _minimum_path_nodes = 2
         for idx, path in enumerate(aggregation_result.paths, start=1):
             if len(path.node_ids) < _minimum_path_nodes:
                 continue
 
-            statement = f"FACT {idx}: ({path.node_ids[0]}) -[RELATED_TO]-> ({path.node_ids[1]})"
+            primary_edge_id = path.edge_ids[0] if path.edge_ids else None
+            evidence_edge = edge_by_id.get(primary_edge_id) if primary_edge_id else None
+            rel_type = evidence_edge.rel_type if evidence_edge else "RELATED_TO"
+            weight = (
+                evidence_edge.weight if evidence_edge else self.config.cognitive_weight_threshold
+            )
+
+            statement = (
+                f"FACT {idx}: ({path.node_ids[0]}) "
+                f"-[{rel_type}:{weight:.2f}]-> ({path.node_ids[1]})"
+            )
             facts.append(
                 SerializedFact(
                     fact_id=f"fact_{idx}",
                     statement=statement,
                     path_id=path.path_id,
                     edge_ids=path.edge_ids,
+                    rel_type=rel_type,
+                    weight=weight,
                 )
             )
 
@@ -587,6 +694,65 @@ class MindMapPipeline:
                 code=PipelineErrorCode.GROUNDING_ERROR,
                 message=f"ungrounded claims detected: {missing_ids}",
             )
+
+    def _synthesize_with_vertex(
+        self,
+        *,
+        serialization_result: SerializationResult,
+    ) -> SynthesisResult:
+        """Generate synthesis using Vertex Pro under strict grounding instructions.
+
+        Args:
+            serialization_result (SerializationResult): Serialized evidence payload.
+
+        Returns:
+            SynthesisResult: Model-generated synthesis constrained to evidence.
+
+        Raises:
+            MindMapPipelineError: If model invocation fails.
+        """
+        started = perf_counter()
+        if not serialization_result.facts:
+            return SynthesisResult(
+                response_text=self.INSUFFICIENT_EVIDENCE_RESPONSE,
+                claim_fact_ids=[],
+                grounded=True,
+                latency_ms=(perf_counter() - started) * 1000,
+            )
+
+        try:
+            from google.generativeai import GenerativeModel  # noqa: PLC0415
+        except ImportError as error:
+            raise MindMapPipelineError(
+                stage=PipelineStage.SYNTHESIZE,
+                code=PipelineErrorCode.MODEL_ERROR,
+                message="google-generativeai is required for vertex synthesis",
+            ) from error
+
+        model = GenerativeModel(self.config.synthesis_model_name)
+        prompt = f"{self.VERTEX_SYNTHESIS_SYSTEM_PROMPT}\n\nFacts:\n{serialization_result.markdown}"
+
+        try:
+            response = model.generate_content(prompt)
+            response_text = response.text.strip()
+        except Exception as error:
+            raise MindMapPipelineError(
+                stage=PipelineStage.SYNTHESIZE,
+                code=PipelineErrorCode.MODEL_ERROR,
+                message=f"vertex synthesis failed: {error}",
+            ) from error
+
+        if response_text == self.INSUFFICIENT_EVIDENCE_RESPONSE:
+            claim_fact_ids: list[str] = []
+        else:
+            claim_fact_ids = [fact.fact_id for fact in serialization_result.facts]
+
+        return SynthesisResult(
+            response_text=response_text or self.INSUFFICIENT_EVIDENCE_RESPONSE,
+            claim_fact_ids=claim_fact_ids,
+            grounded=True,
+            latency_ms=(perf_counter() - started) * 1000,
+        )
 
     @staticmethod
     def _now() -> datetime:

@@ -4,9 +4,8 @@ import json
 import logging
 import math
 import uuid
-from collections.abc import Mapping
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, Protocol
 
 from src.db.schema import SchemaConfig
 from src.db.spanner_client import SpannerClient
@@ -21,11 +20,17 @@ from src.models.schemas import (
 logger = logging.getLogger(__name__)
 
 
+class _SpannerBatch(Protocol):
+    """Protocol for the subset of batch API used by MemoryAPI."""
+
+    def execute_update(self, sql: str, params: dict[str, Any]) -> int: ...
+
+
 class MemoryAPI:
     """Core memory API for tripartite memory operations."""
 
     @staticmethod
-    def _serialize_json_attributes(attributes: Mapping[str, Any]) -> str:
+    def _serialize_json_attributes(attributes: dict[str, Any]) -> str:
         """Serialize attributes payload to JSON string.
 
         Args:
@@ -39,10 +44,10 @@ class MemoryAPI:
     @staticmethod
     def _insert_audit_event_in_batch(
         *,
-        batch: Any,
+        batch: _SpannerBatch,
         event_type: str,
         source_node_id: str,
-        context: Mapping[str, Any] | None,
+        context: dict[str, Any] | None,
         timestamp: datetime,
     ) -> AuditResponse:
         """Insert an audit event inside an existing write batch.
@@ -335,7 +340,7 @@ class MemoryAPI:
         try:
             database = SpannerClient.get_database()
             with database.batch() as batch:
-                response = MemoryAPI._insert_audit_event_in_batch(
+                return MemoryAPI._insert_audit_event_in_batch(
                     batch=batch,
                     event_type=event_type,
                     source_node_id=source_node_id,
@@ -343,7 +348,6 @@ class MemoryAPI:
                     timestamp=timestamp,
                 )
 
-            return response
         except Exception as e:
             msg = f"Failed to record audit event: {e}"
             raise RuntimeError(msg) from e
