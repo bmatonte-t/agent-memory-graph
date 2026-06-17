@@ -1,5 +1,6 @@
 """Unit tests for core memory APIs."""
 
+import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -30,18 +31,18 @@ class TestMemoryAPI:
 
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(
-                MemoryAPI, "record_audit_event", new_callable=AsyncMock
-            ) as mock_audit:
-                response = await MemoryAPI.create_session(
-                    session_id="session_123", user_id="user_456"
-                )
+            response = await MemoryAPI.create_session(session_id="session_123", user_id="user_456")
 
-                assert isinstance(response, SessionResponse)
-                assert response.session_id == "session_123"
-                assert response.status == "active"
-                assert isinstance(response.created_at, datetime)
-                mock_audit.assert_called_once()
+            assert isinstance(response, SessionResponse)
+            assert response.session_id == "session_123"
+            assert response.status == "active"
+            assert isinstance(response.created_at, datetime)
+            assert mock_batch.execute_update.call_count == 2
+
+            session_params = mock_batch.execute_update.call_args_list[0][0][1]
+            audit_params = mock_batch.execute_update.call_args_list[1][0][1]
+            assert json.loads(session_params["attributes"])["user_id"] == "user_456"
+            assert json.loads(audit_params["attributes"])["event_type"] == "CREATE_SESSION"
 
     @pytest.mark.asyncio
     async def test_create_session_empty_session_id(self):
@@ -66,9 +67,8 @@ class TestMemoryAPI:
 
             mock_client.get_database.return_value = mock_db
 
-            with (
-                patch.object(MemoryAPI, "record_audit_event", new_callable=AsyncMock),
-                patch.object(MemoryAPI, "_update_weight_on_successful_use", new_callable=AsyncMock),
+            with patch.object(
+                MemoryAPI, "_update_weight_on_successful_use", new_callable=AsyncMock
             ):
                 response = await MemoryAPI.add_semantic_fact(
                     entity_type="PERSON",
@@ -80,6 +80,12 @@ class TestMemoryAPI:
                 assert response.entity_id == "entity_123"
                 assert response.entity_type == "PERSON"
                 assert response.weight == 0.5
+                assert mock_batch.execute_update.call_count == 2
+
+                node_params = mock_batch.execute_update.call_args_list[0][0][1]
+                audit_params = mock_batch.execute_update.call_args_list[1][0][1]
+                assert json.loads(node_params["attributes"])["name"] == "John"
+                assert json.loads(audit_params["attributes"])["event_type"] == "ADD_SEMANTIC_FACT"
 
     @pytest.mark.asyncio
     async def test_add_semantic_fact_invalid_entity_type(self):
@@ -108,9 +114,8 @@ class TestMemoryAPI:
             mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
 
-            with (
-                patch.object(MemoryAPI, "record_audit_event", new_callable=AsyncMock),
-                patch.object(MemoryAPI, "_update_weight_on_successful_use", new_callable=AsyncMock),
+            with patch.object(
+                MemoryAPI, "_update_weight_on_successful_use", new_callable=AsyncMock
             ):
                 relationship = {"source_id": "source_123", "type": "REFERENCES"}
                 response = await MemoryAPI.add_semantic_fact(
@@ -120,8 +125,8 @@ class TestMemoryAPI:
                 )
 
                 assert response.entity_id == "location_123"
-                # Verify that execute_update was called twice (node + edge)
-                assert mock_batch.execute_update.call_count == 2
+                # Verify that execute_update was called three times (node + edge + audit)
+                assert mock_batch.execute_update.call_count == 3
 
     @pytest.mark.asyncio
     async def test_add_semantic_fact_rejects_audit_relationship_source(self):
@@ -159,6 +164,8 @@ class TestMemoryAPI:
             assert isinstance(response, AuditResponse)
             assert response.event_type == "CREATE_SESSION"
             assert isinstance(response.timestamp, datetime)
+            call_params = mock_batch.execute_update.call_args[0][1]
+            assert json.loads(call_params["attributes"])["source_node_id"] == "session_123"
 
     @pytest.mark.asyncio
     async def test_record_audit_event_empty_event_type(self):

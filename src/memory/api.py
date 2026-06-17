@@ -1,8 +1,10 @@
 """Core memory API implementations."""
 
+import json
 import logging
 import math
 import uuid
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
@@ -21,6 +23,73 @@ logger = logging.getLogger(__name__)
 
 class MemoryAPI:
     """Core memory API for tripartite memory operations."""
+
+    @staticmethod
+    def _serialize_json_attributes(attributes: Mapping[str, Any]) -> str:
+        """Serialize attributes payload to JSON string.
+
+        Args:
+            attributes: Attribute mapping to persist.
+
+        Returns:
+            str: JSON-encoded payload.
+        """
+        return json.dumps(attributes, separators=(",", ":"), default=str)
+
+    @staticmethod
+    def _insert_audit_event_in_batch(
+        *,
+        batch: Any,
+        event_type: str,
+        source_node_id: str,
+        context: Mapping[str, Any] | None,
+        timestamp: datetime,
+    ) -> AuditResponse:
+        """Insert an audit event inside an existing write batch.
+
+        Args:
+            batch: Active Spanner batch.
+            event_type: Audit event type.
+            source_node_id: Source node identifier.
+            context: Optional context payload.
+            timestamp: Event timestamp.
+
+        Returns:
+            AuditResponse: Created audit event descriptor.
+        """
+        event_id = str(uuid.uuid4())
+        event_attributes = {
+            "event_type": event_type,
+            "source_node_id": source_node_id,
+            **(dict(context) if context else {}),
+        }
+
+        sql = """
+            INSERT INTO MemoryNode (
+                NodeId, MemoryTier, Label, LogOddsWeight,
+                LastAccessed, Attributes, CreatedAt, UpdatedAt
+            ) VALUES (
+                @node_id, @tier, @label, @weight,
+                @now, JSON(@attributes), @now, @now
+            )
+        """
+        batch.execute_update(
+            sql,
+            {
+                "node_id": event_id,
+                "tier": SchemaConfig.MEMORY_TIER_AUDIT,
+                "label": "Event",
+                "weight": SchemaConfig.INITIAL_WEIGHT,
+                "now": timestamp,
+                "attributes": MemoryAPI._serialize_json_attributes(event_attributes),
+            },
+        )
+
+        return AuditResponse(
+            event_id=event_id,
+            event_type=event_type,
+            timestamp=timestamp,
+        )
 
     @staticmethod
     def _get_node_memory_tier(node_id: str) -> str | None:
@@ -102,12 +171,17 @@ class MemoryAPI:
                         "label": "Session",
                         "weight": SchemaConfig.INITIAL_WEIGHT,
                         "now": created_at,
-                        "attributes": str(attributes),
+                        "attributes": MemoryAPI._serialize_json_attributes(attributes),
                     },
                 )
 
-            # Log audit event
-            await MemoryAPI.record_audit_event("CREATE_SESSION", session_id, {"user_id": user_id})
+                MemoryAPI._insert_audit_event_in_batch(
+                    batch=batch,
+                    event_type="CREATE_SESSION",
+                    source_node_id=session_id,
+                    context={"user_id": user_id},
+                    timestamp=created_at,
+                )
 
             return SessionResponse(
                 session_id=session_id,
@@ -180,7 +254,7 @@ class MemoryAPI:
                         "label": entity_type,
                         "weight": SchemaConfig.INITIAL_WEIGHT,
                         "now": created_at,
-                        "attributes": str(node_attributes),
+                        "attributes": MemoryAPI._serialize_json_attributes(node_attributes),
                     },
                 )
 
@@ -211,12 +285,13 @@ class MemoryAPI:
                             },
                         )
 
-            # Log audit event
-            await MemoryAPI.record_audit_event(
-                "ADD_SEMANTIC_FACT",
-                entity_id,
-                {"entity_type": entity_type, "relationship": relationship},
-            )
+                MemoryAPI._insert_audit_event_in_batch(
+                    batch=batch,
+                    event_type="ADD_SEMANTIC_FACT",
+                    source_node_id=entity_id,
+                    context={"entity_type": entity_type, "relationship": relationship},
+                    timestamp=created_at,
+                )
 
             # Update weight on successful creation
             await MemoryAPI._update_weight_on_successful_use([entity_id])
@@ -257,44 +332,18 @@ class MemoryAPI:
             raise ValueError(msg)
 
         timestamp = datetime.now(UTC)
-        event_id = str(uuid.uuid4())
-        event_attributes = {
-            "event_type": event_type,
-            "source_node_id": source_node_id,
-            **(context or {}),
-        }
-
-        # Insert audit event node (append-only)
-        sql = """
-            INSERT INTO MemoryNode (
-                NodeId, MemoryTier, Label, LogOddsWeight,
-                LastAccessed, Attributes, CreatedAt, UpdatedAt
-            ) VALUES (
-                @node_id, @tier, @label, @weight,
-                @now, JSON(@attributes), @now, @now
-            )
-        """
-
         try:
             database = SpannerClient.get_database()
             with database.batch() as batch:
-                batch.execute_update(
-                    sql,
-                    {
-                        "node_id": event_id,
-                        "tier": SchemaConfig.MEMORY_TIER_AUDIT,
-                        "label": "Event",
-                        "weight": SchemaConfig.INITIAL_WEIGHT,
-                        "now": timestamp,
-                        "attributes": str(event_attributes),
-                    },
+                response = MemoryAPI._insert_audit_event_in_batch(
+                    batch=batch,
+                    event_type=event_type,
+                    source_node_id=source_node_id,
+                    context=context,
+                    timestamp=timestamp,
                 )
 
-            return AuditResponse(
-                event_id=event_id,
-                event_type=event_type,
-                timestamp=timestamp,
-            )
+            return response
         except Exception as e:
             msg = f"Failed to record audit event: {e}"
             raise RuntimeError(msg) from e

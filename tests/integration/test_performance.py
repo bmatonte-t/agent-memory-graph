@@ -1,14 +1,16 @@
 """Load tests and performance benchmarks for memory APIs."""
 
-import pytest
 import asyncio
+import json
 import time
 from typing import List
 from unittest.mock import MagicMock, patch
 
+import pytest
+
+from src.db.schema import SchemaConfig
 from src.memory.api import MemoryAPI
 from src.memory.cognitive_weighting import CognitiveWeighting
-from src.db.schema import SchemaConfig
 
 
 class TestLoadScenarios:
@@ -18,7 +20,7 @@ class TestLoadScenarios:
     async def test_bulk_session_creation_latency(self):
         """
         Load test: Create 100 sessions and measure p95 latency.
-        
+
         Target: <50ms per session
         """
         with patch("src.memory.api.SpannerClient") as mock_client:
@@ -34,9 +36,7 @@ class TestLoadScenarios:
 
                 for i in range(num_sessions):
                     start = time.perf_counter()
-                    await MemoryAPI.create_session(
-                        session_id=f"session_{i}", user_id=f"user_{i}"
-                    )
+                    await MemoryAPI.create_session(session_id=f"session_{i}", user_id=f"user_{i}")
                     elapsed = (time.perf_counter() - start) * 1000  # ms
 
                     latencies.append(elapsed)
@@ -49,15 +49,13 @@ class TestLoadScenarios:
 
                 # Assert performance targets
                 assert p95 < 50, f"p95 latency {p95}ms exceeds 50ms target"
-                print(
-                    f"Session creation: p50={p50:.2f}ms, p95={p95:.2f}ms, p99={p99:.2f}ms"
-                )
+                print(f"Session creation: p50={p50:.2f}ms, p95={p95:.2f}ms, p99={p99:.2f}ms")
 
     @pytest.mark.asyncio
     async def test_bulk_semantic_fact_ingestion(self):
         """
         Load test: Ingest 1000 semantic facts and measure p95 latency.
-        
+
         Target: <50ms per fact
         """
         with patch("src.memory.api.SpannerClient") as mock_client:
@@ -67,8 +65,9 @@ class TestLoadScenarios:
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(MemoryAPI, "record_audit_event"), patch.object(
-                MemoryAPI, "_update_weight_on_successful_use"
+            with (
+                patch.object(MemoryAPI, "record_audit_event"),
+                patch.object(MemoryAPI, "_update_weight_on_successful_use"),
             ):
                 latencies = []
                 num_facts = 100  # Reduced for test speed
@@ -99,7 +98,7 @@ class TestLoadScenarios:
     async def test_context_window_retrieval_latency(self):
         """
         Load test: Retrieve context windows 100 times with 10 turns each.
-        
+
         Target: <200ms per retrieval
         """
         with patch("src.memory.api.SpannerClient") as mock_client:
@@ -113,14 +112,13 @@ class TestLoadScenarios:
             ]
             mock_snapshot.execute_sql.return_value = mock_turns
 
-            mock_db.snapshot.return_value.__enter__ = MagicMock(
-                return_value=mock_snapshot
-            )
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(MemoryAPI, "record_audit_event"), patch.object(
-                MemoryAPI, "_update_weight_on_successful_use"
+            with (
+                patch.object(MemoryAPI, "record_audit_event"),
+                patch.object(MemoryAPI, "_update_weight_on_successful_use"),
             ):
                 latencies = []
                 num_retrievals = 100
@@ -140,15 +138,13 @@ class TestLoadScenarios:
                 p99 = sorted_latencies[int(len(sorted_latencies) * 0.99)]
 
                 assert p95 < 200, f"p95 latency {p95}ms exceeds 200ms target"
-                print(
-                    f"Context retrieval: p50={p50:.2f}ms, p95={p95:.2f}ms, p99={p99:.2f}ms"
-                )
+                print(f"Context retrieval: p50={p50:.2f}ms, p95={p95:.2f}ms, p99={p99:.2f}ms")
 
     @pytest.mark.asyncio
     async def test_graph_traversal_with_large_edge_set(self):
         """
         Test: Retrieve context window with 100 edges from single session.
-        
+
         Target: <500ms for complex graph queries
         """
         with patch("src.memory.api.SpannerClient") as mock_client:
@@ -169,14 +165,13 @@ class TestLoadScenarios:
             ]
             mock_snapshot.execute_sql.return_value = mock_turns
 
-            mock_db.snapshot.return_value.__enter__ = MagicMock(
-                return_value=mock_snapshot
-            )
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(MemoryAPI, "record_audit_event"), patch.object(
-                MemoryAPI, "_update_weight_on_successful_use"
+            with (
+                patch.object(MemoryAPI, "record_audit_event"),
+                patch.object(MemoryAPI, "_update_weight_on_successful_use"),
             ):
                 start = time.perf_counter()
                 result = await MemoryAPI.retrieve_context_window(
@@ -235,15 +230,14 @@ class TestConcurrency:
                 for i in range(5)
             ]
             mock_snapshot.execute_sql.return_value = mock_turns
-            mock_db.snapshot.return_value.__enter__ = MagicMock(
-                return_value=mock_snapshot
-            )
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
 
             mock_client.get_database.return_value = mock_db
 
-            with patch.object(MemoryAPI, "record_audit_event"), patch.object(
-                MemoryAPI, "_update_weight_on_successful_use"
+            with (
+                patch.object(MemoryAPI, "record_audit_event"),
+                patch.object(MemoryAPI, "_update_weight_on_successful_use"),
             ):
                 # Mix fact ingestion and retrievals
                 tasks = []
@@ -257,9 +251,7 @@ class TestConcurrency:
                         )
                     else:
                         tasks.append(
-                            MemoryAPI.retrieve_context_window(
-                                session_id=f"concurrent_session_{i}"
-                            )
+                            MemoryAPI.retrieve_context_window(session_id=f"concurrent_session_{i}")
                         )
 
                 results = await asyncio.gather(*tasks)
@@ -280,26 +272,11 @@ class TestAuditTrailIntegrity:
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
             mock_snapshot.execute_sql.return_value = []
-            mock_db.snapshot.return_value.__enter__ = MagicMock(
-                return_value=mock_snapshot
-            )
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
 
-            audit_calls = []
-
-            async def capture_audit(*args, **kwargs):
-                audit_calls.append(args[0])  # Capture event type
-                from src.models.schemas import AuditResponse
-                return AuditResponse(
-                    event_id="test",
-                    event_type=args[0],
-                    timestamp=time.time(),
-                )
-
-            with patch.object(
-                MemoryAPI, "record_audit_event", side_effect=capture_audit
-            ), patch.object(MemoryAPI, "_update_weight_on_successful_use"):
+            with patch.object(MemoryAPI, "_update_weight_on_successful_use"):
                 # Execute operations
                 await MemoryAPI.create_session(
                     session_id="audit_test_session", user_id="audit_test_user"
@@ -307,11 +284,17 @@ class TestAuditTrailIntegrity:
                 await MemoryAPI.add_semantic_fact(
                     entity_type="PERSON", entity_id="audit_test_entity"
                 )
-                await MemoryAPI.retrieve_context_window(
-                    session_id="audit_test_session"
-                )
+                await MemoryAPI.retrieve_context_window(session_id="audit_test_session")
 
-                # Verify audit events were captured
-                assert "CREATE_SESSION" in audit_calls
-                assert "ADD_SEMANTIC_FACT" in audit_calls
-                assert "RETRIEVE_CONTEXT_WINDOW" in audit_calls
+                # Verify audit events were persisted.
+                audit_event_types: list[str] = []
+                for call in mock_batch.execute_update.call_args_list:
+                    params = call[0][1]
+                    if params.get("tier") != SchemaConfig.MEMORY_TIER_AUDIT:
+                        continue
+                    attributes = json.loads(params["attributes"])
+                    audit_event_types.append(attributes["event_type"])
+
+                assert "CREATE_SESSION" in audit_event_types
+                assert "ADD_SEMANTIC_FACT" in audit_event_types
+                assert "RETRIEVE_CONTEXT_WINDOW" in audit_event_types

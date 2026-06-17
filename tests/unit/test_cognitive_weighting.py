@@ -1,11 +1,12 @@
 """Tests for cognitive weighting and temporal decay."""
 
-import pytest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
-from src.memory.cognitive_weighting import CognitiveWeighting, CloudSchedulerJob
+import pytest
+
 from src.db.schema import SchemaConfig
+from src.memory.cognitive_weighting import CloudSchedulerJob, CognitiveWeighting
 
 
 class TestTemporalDecay:
@@ -173,12 +174,20 @@ class TestCloudSchedulerJob:
 
     def test_get_job_config(self):
         """Test Cloud Scheduler job configuration generation."""
-        config = CloudSchedulerJob.get_job_config()
+        config = CloudSchedulerJob.get_job_config("https://example.run.app")
 
         assert "decay_job" in config
         assert "pruning_job" in config
         assert config["decay_job"]["schedule"] == CloudSchedulerJob.DECAY_SCHEDULE_CRON
         assert config["pruning_job"]["schedule"] == CloudSchedulerJob.PRUNING_SCHEDULE_CRON
+        assert (
+            config["decay_job"]["http_target"]["uri"]
+            == "https://example.run.app/internal/decay-weights"
+        )
+        assert (
+            config["pruning_job"]["http_target"]["uri"]
+            == "https://example.run.app/internal/prune-weights"
+        )
 
     def test_decay_schedule_cron_format(self):
         """Test decay job CRON schedule format."""
@@ -198,7 +207,10 @@ class TestCloudSchedulerJob:
             # Mock the import to fail
             with patch("builtins.__import__", side_effect=ImportError("No module")):
                 with pytest.raises(RuntimeError, match="google-cloud-scheduler not installed"):
-                    await CloudSchedulerJob.create_decay_job(project_id="test-project")
+                    await CloudSchedulerJob.create_decay_job(
+                        project_id="test-project",
+                        cloud_run_url="https://example.run.app",
+                    )
 
     @pytest.mark.asyncio
     async def test_create_pruning_job_not_installed(self):
@@ -206,11 +218,14 @@ class TestCloudSchedulerJob:
         with patch.dict("sys.modules", {"google.cloud.scheduler_v1": None}):
             with patch("builtins.__import__", side_effect=ImportError("No module")):
                 with pytest.raises(RuntimeError, match="google-cloud-scheduler not installed"):
-                    await CloudSchedulerJob.create_pruning_job(project_id="test-project")
+                    await CloudSchedulerJob.create_pruning_job(
+                        project_id="test-project",
+                        cloud_run_url="https://example.run.app",
+                    )
 
     def test_job_config_has_required_fields(self):
         """Test that job config contains all required fields."""
-        config = CloudSchedulerJob.get_job_config()
+        config = CloudSchedulerJob.get_job_config("example.run.app")
 
         for job_name in ["decay_job", "pruning_job"]:
             job = config[job_name]
@@ -221,3 +236,8 @@ class TestCloudSchedulerJob:
             assert "uri" in job["http_target"]
             assert "http_method" in job["http_target"]
             assert job["http_target"]["http_method"] == "POST"
+
+    def test_build_target_uri_rejects_empty_url(self):
+        """Target URI builder should reject empty Cloud Run URLs."""
+        with pytest.raises(ValueError, match="cloud_run_url cannot be empty"):
+            CloudSchedulerJob._build_target_uri("", "/internal/decay-weights")

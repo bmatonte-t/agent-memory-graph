@@ -1,5 +1,7 @@
 """Integration tests for Spanner schema design."""
 
+from pathlib import Path
+
 import pytest
 
 from src.db.schema import SchemaConfig, SchemaManager
@@ -73,3 +75,56 @@ class TestSchemaDesign:
         """Test that property graph is created third."""
         migrations = SchemaManager.get_migration_files()
         assert migrations[2] == "003_property_graph.sql"
+
+
+class TestSchemaExecution:
+    """Tests for schema migration execution mechanics."""
+
+    def test_parse_sql_statements_strips_comments(self) -> None:
+        """Parser should drop full-line comments and preserve executable statements."""
+        sql = """
+        -- migration comment
+        CREATE TABLE Demo (Id STRING(10) NOT NULL) PRIMARY KEY (Id);
+
+        -- index comment
+        CREATE INDEX idx_demo_id ON Demo (Id);
+        """
+
+        statements = SchemaManager._parse_sql_statements(sql)
+
+        assert len(statements) == 2
+        assert statements[0].startswith("CREATE TABLE")
+        assert statements[1].startswith("CREATE INDEX")
+
+    def test_init_schema_uses_update_ddl(self, tmp_path: Path) -> None:
+        """Schema initialization should execute migrations via update_ddl."""
+        migrations_dir = tmp_path / "migrations"
+        migrations_dir.mkdir()
+        (migrations_dir / "001_test.sql").write_text(
+            "CREATE TABLE Demo (Id STRING(10) NOT NULL) PRIMARY KEY (Id);",
+            encoding="utf-8",
+        )
+
+        class FakeOperation:
+            def result(self) -> None:
+                return None
+
+        class FakeDatabase:
+            def __init__(self) -> None:
+                self.statements: list[list[str]] = []
+
+            def update_ddl(self, *, statements: list[str]) -> FakeOperation:
+                self.statements.append(statements)
+                return FakeOperation()
+
+        fake_database = FakeDatabase()
+        original_dir = SchemaManager.MIGRATIONS_DIR
+        SchemaManager.MIGRATIONS_DIR = migrations_dir
+        try:
+            SchemaManager.init_schema(fake_database)  # type: ignore[arg-type]
+        finally:
+            SchemaManager.MIGRATIONS_DIR = original_dir
+
+        assert fake_database.statements == [
+            ["CREATE TABLE Demo (Id STRING(10) NOT NULL) PRIMARY KEY (Id)"]
+        ]
