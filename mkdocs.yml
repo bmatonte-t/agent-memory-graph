@@ -162,6 +162,12 @@ nav:
       - Admin Guide: operations/admin-guide.md
       - Disaster Recovery: operations/disaster-recovery.md
       - Support Playbook: operations/support-playbook.md
+  - Marketplace:
+      - Overview: marketplace/index.md
+      - Security Architecture: marketplace/security-architecture.md
+      - Quickstart: marketplace/quickstart.md
+      - Deployment Guide: marketplace/deployment-guide.md
+      - Pricing and Editions: marketplace/pricing-and-editions.md
   - Help:
       - Troubleshooting: help/troubleshooting.md
       - FAQ: help/faq.md

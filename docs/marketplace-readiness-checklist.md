@@ -39,69 +39,82 @@ Evidence:
 
 ## 4) Security and Compliance
 
-- [ ] IAM least-privilege model is documented.
-- [ ] Service accounts and key management approach are defined.
-- [ ] Data handling, retention, and deletion semantics are documented.
-- [ ] Audit evidence covers tool execution and external API calls.
+- [x] IAM least-privilege model is documented.
+- [x] Service accounts and key management approach are defined.
+- [x] Data handling, retention, and deletion semantics are documented.
+- [x] Audit evidence covers tool execution and external API calls.
 
 Evidence:
-- Security architecture doc
-- Access matrix and audit samples
+- Security architecture doc: [docs/marketplace/security-architecture.md](marketplace/security-architecture.md)
+- Admin and retention guidance: [docs/operations/admin-guide.md](operations/admin-guide.md)
+- Audit controls and tests:
+	- `migrations/005_audit_immutability_controls.sql`
+	- `tests/unit/test_audit_immutability.py`
+	- `tests/unit/test_security_audit.py`
 
 ## 5) Reliability and Operations
 
 - [ ] SLOs/SLIs are defined for availability, latency, and error rate.
-- [ ] Observability stack is documented (logs, traces, metrics, alerts).
-- [ ] Runbooks exist for top operational failure modes.
-- [ ] Backup, restore, and disaster recovery approach is documented.
+- [x] Observability stack is documented (logs, traces, metrics, alerts).
+- [x] Runbooks exist for top operational failure modes.
+- [x] Backup, restore, and disaster recovery approach is documented.
 
 Evidence:
-- Ops runbook
-- On-call playbook
+- Ops runbook: [docs/operations/ops-runbook.md](operations/ops-runbook.md)
+- Support playbook: [docs/operations/support-playbook.md](operations/support-playbook.md)
+- Disaster recovery: [docs/operations/disaster-recovery.md](operations/disaster-recovery.md)
+- Monitoring artifacts:
+	- `infrastructure/phase2/cloud-monitoring-dashboard.json`
+	- `infrastructure/phase2/alert-policies.yaml`
 
 ## 6) Performance and Cost
 
-- [ ] p95 latency targets are defined and measured.
+- [x] p95 latency targets are defined and measured.
 - [ ] Retrieval horizon strategy is documented to control token/cost growth.
-- [ ] Cost model is documented (Spanner, Vertex, serving).
-- [ ] Load test evidence exists for phase-one expected demand.
+- [x] Cost model is documented (Spanner, Vertex, serving).
+- [x] Load test evidence exists for phase-one expected demand.
 
 Evidence:
-- Benchmark report
-- Cost estimation sheet
+- Latency and load validation tests:
+	- `tests/integration/test_performance.py`
+	- `tests/load/test_slo_validation.py`
+- Pricing and cost model: [docs/marketplace/pricing-and-editions.md](marketplace/pricing-and-editions.md)
 
 ## 7) Deployment and Lifecycle
 
-- [ ] Deployment architecture is documented for customer environments.
-- [ ] Versioning and upgrade path are documented.
-- [ ] Backward compatibility policy is defined for APIs and schemas.
+- [x] Deployment architecture is documented for customer environments.
+- [x] Versioning and upgrade path are documented.
+- [x] Backward compatibility policy is defined for APIs and schemas.
 - [ ] Rollback strategy is documented and tested.
 
 Evidence:
-- Deployment guide
-- Release policy
+- Deployment guide: [docs/marketplace/deployment-guide.md](marketplace/deployment-guide.md)
+- Architecture baseline: [docs/architecture/architecture-brief.md](architecture/architecture-brief.md)
 
 ## 8) Buyer-Facing Materials
 
-- [ ] Installation and quickstart documentation is complete.
-- [ ] Admin and operator guides are complete.
-- [ ] Troubleshooting guide and known limitations are published.
-- [ ] Support model and escalation path are defined.
+- [x] Installation and quickstart documentation is complete.
+- [x] Admin and operator guides are complete.
+- [x] Troubleshooting guide and known limitations are published.
+- [x] Support model and escalation path are defined.
 
 Evidence:
-- Buyer documentation set
-- Support handbook
+- Marketplace docs index: [docs/marketplace/index.md](marketplace/index.md)
+- Quickstart: [docs/marketplace/quickstart.md](marketplace/quickstart.md)
+- Admin guide: [docs/operations/admin-guide.md](operations/admin-guide.md)
+- Troubleshooting: [docs/help/troubleshooting.md](help/troubleshooting.md)
+- Support handbook: [docs/operations/support-playbook.md](operations/support-playbook.md)
 
 ## 9) Commercial Readiness
 
-- [ ] Packaging model is defined (editions/features).
-- [ ] Pricing approach is documented and reviewable.
+- [x] Packaging model is defined (editions/features).
+- [x] Pricing approach is documented and reviewable.
 - [ ] License/terms readiness is confirmed.
-- [ ] Private offer process and constraints are documented.
+- [x] Private offer process and constraints are documented.
 
 Evidence:
-- Commercial package brief
-- Marketplace publishing plan
+- Commercial package brief: [docs/marketplace/pricing-and-editions.md](marketplace/pricing-and-editions.md)
+- Positioning brief: [docs/marketing-pitch.md](marketing-pitch.md)
 
 ## Exit Criteria (Phase 1)
 
