@@ -1,4 +1,4 @@
-"""Integration tests for Phase 3 multi-turn orchestration behavior."""
+"""Integration tests for tenant-aware multi-turn orchestration behavior."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from src.models.agent import (
     AgentOrchestrationResponse,
     AgentToolCallTrace,
 )
+from src.models.mcp import MCPToolName
 
 if TYPE_CHECKING:
     import pytest
@@ -20,18 +21,19 @@ HTTP_OK = 200
 
 
 class TestAgentMultiTurn:
-    """Integration tests for multi-turn behavior through agent endpoint."""
+    """Integration tests for multi-turn behavior through the agent endpoint."""
 
     def test_memory_update_visible_on_subsequent_turn(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Second turn should observe memory added during the first turn."""
-        session_memory: dict[str, list[str]] = {}
+        """A second turn in the same tenant and session should see prior memory."""
+        session_memory: dict[tuple[str, str], list[str]] = {}
 
         async def fake_respond(
             _self: object, request: AgentOrchestrationRequest
         ) -> AgentOrchestrationResponse:
-            facts = session_memory.setdefault(request.session_id, [])
+            memory_key = (request.tenant_id, request.session_id)
+            facts = session_memory.setdefault(memory_key, [])
             if "remember" in request.prompt.lower():
                 facts.append("project_alpha_budget")
                 response_text = "Saved project_alpha_budget."
@@ -51,7 +53,7 @@ class TestAgentMultiTurn:
                 grounded=grounded,
                 tool_calls=[
                     AgentToolCallTrace(
-                        tool_name="memory_search",
+                        tool_name=MCPToolName.MEMORY_SEARCH,
                         request_id=request.request_id,
                         success=True,
                         latency_ms=1.0,
@@ -67,6 +69,7 @@ class TestAgentMultiTurn:
         first_turn = client.post(
             "/api/v1/agent/respond",
             json={
+                "tenant_id": "tenant_a",
                 "prompt": "Remember project_alpha_budget",
                 "session_id": "session_1",
                 "request_id": "req_1",
@@ -76,6 +79,7 @@ class TestAgentMultiTurn:
         second_turn = client.post(
             "/api/v1/agent/respond",
             json={
+                "tenant_id": "tenant_a",
                 "prompt": "What do you remember?",
                 "session_id": "session_1",
                 "request_id": "req_2",
@@ -88,16 +92,20 @@ class TestAgentMultiTurn:
         assert second_turn.json()["grounded"] is True
         assert "project_alpha_budget" in second_turn.json()["response_text"]
 
-    def test_memory_isolation_across_sessions(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Memory state should remain isolated between two sessions."""
-        session_memory: dict[str, str] = {}
+    def test_memory_isolated_for_same_session_id_across_tenants(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The same session identifier must not leak memory across tenants."""
+        session_memory: dict[tuple[str, str], str] = {}
 
         async def fake_respond(
             _self: object, request: AgentOrchestrationRequest
         ) -> AgentOrchestrationResponse:
+            memory_key = (request.tenant_id, request.session_id)
             if "remember" in request.prompt.lower():
-                session_memory[request.session_id] = request.prompt
-            known = session_memory.get(request.session_id)
+                session_memory[memory_key] = request.prompt
+            known = session_memory.get(memory_key)
             response_text = known or "Insufficient graph evidence."
             return AgentOrchestrationResponse(
                 session_id=request.session_id,
@@ -111,14 +119,37 @@ class TestAgentMultiTurn:
         monkeypatch.setattr("src.agent.orchestrator.AgentOrchestrator.respond", fake_respond)
         client = TestClient(app)
 
-        client.post(
+        tenant_a_write = client.post(
             "/api/v1/agent/respond",
-            json={"prompt": "remember A", "session_id": "session_a", "request_id": "1"},
+            json={
+                "tenant_id": "tenant_a",
+                "prompt": "remember A",
+                "session_id": "shared_session",
+                "request_id": "1",
+            },
         )
-        response_b = client.post(
+        tenant_b_read = client.post(
             "/api/v1/agent/respond",
-            json={"prompt": "what now", "session_id": "session_b", "request_id": "2"},
+            json={
+                "tenant_id": "tenant_b",
+                "prompt": "what now",
+                "session_id": "shared_session",
+                "request_id": "2",
+            },
+        )
+        tenant_a_read = client.post(
+            "/api/v1/agent/respond",
+            json={
+                "tenant_id": "tenant_a",
+                "prompt": "what now",
+                "session_id": "shared_session",
+                "request_id": "3",
+            },
         )
 
-        assert response_b.status_code == HTTP_OK
-        assert response_b.json()["grounded"] is False
+        assert tenant_a_write.status_code == HTTP_OK
+        assert tenant_b_read.status_code == HTTP_OK
+        assert tenant_a_read.status_code == HTTP_OK
+        assert tenant_b_read.json()["grounded"] is False
+        assert tenant_a_read.json()["grounded"] is True
+        assert "remember A" in tenant_a_read.json()["response_text"]

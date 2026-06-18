@@ -6,7 +6,7 @@ Note: you may store secrets in `.local` or `.env` files.
 """
 
 from ._core import PreconfiguredSettings
-from .models import Logging
+from .models import CloudLogging, CloudTrace, Logging
 
 
 class Settings(PreconfiguredSettings):
@@ -25,3 +25,5 @@ class Settings(PreconfiguredSettings):
     """
 
     logging: Logging
+    cloud_trace: CloudTrace = CloudTrace()
+    cloud_logging: CloudLogging = CloudLogging()

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -19,6 +20,8 @@ from src.models.agent import AgentOrchestrationRequest, AgentOrchestrationRespon
 from src.models.mcp import MCPInvokeRequest, MCPInvokeResponse
 from src.models.mindmap import MindMapRequest, MindMapResponse
 from src.models.schemas import ErrorResponse, HealthCheckResponse
+from src.observability.tracing import configure_tracer
+from src.project_base.logging import LoggingConfiguration
 
 # Configure logging
 logging.basicConfig(
@@ -45,6 +48,16 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan handler for startup and shutdown events."""
     logger.info("Starting up Agent Memory Graph API")
     try:
+        from src.project_base.settings.config import Settings  # noqa: PLC0415
+
+        settings = Settings()
+        LoggingConfiguration().configure_logging(
+            configuration=settings.logging,
+            cloud_logging=settings.cloud_logging if settings.cloud_logging.enabled else None,
+        )
+        configure_tracer(
+            project_id=settings.cloud_trace.project_id if settings.cloud_trace.enabled else None,
+        )
         # Initialize Spanner client lazily when needed.
         yield
     finally:
@@ -153,17 +166,120 @@ async def prune_weights(request: PruneWeightsRequest) -> dict[str, float | int |
     }
 
 
-@app.exception_handler(Exception)
-async def global_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
-    """Global exception handler."""
-    logger.error(f"Unhandled exception: {exc}")
+def _error_response(status_code: int, code: str, message: str) -> JSONResponse:
+    """Create a stable error envelope for API responses.
+
+    Args:
+        status_code: HTTP status code to return.
+        code: Stable machine-readable error code.
+        message: Client-safe error message.
+
+    Returns:
+        JSONResponse: Serialized error response payload.
+    """
     return JSONResponse(
-        status_code=500,
+        status_code=status_code,
         content=ErrorResponse(
-            error=str(exc),
-            code="INTERNAL_ERROR",
+            error=message,
+            code=code,
             timestamp=datetime.now(UTC),
         ).model_dump(mode="json"),
+    )
+
+
+def _format_request_validation_error(exc: RequestValidationError) -> str:
+    """Build a client-safe validation message without leaking internals.
+
+    Args:
+        exc: Validation exception from request parsing.
+
+    Returns:
+        str: Sanitized message with field guidance only.
+    """
+    body_fields: set[str] = set()
+
+    for error in exc.errors():
+        location = error.get("loc", ())
+        if len(location) >= 2 and location[0] == "body":
+            field_name = str(location[-1])
+            if field_name:
+                body_fields.add(field_name)
+
+    if body_fields:
+        ordered_fields = ", ".join(sorted(body_fields))
+        return f"Invalid request payload. Check fields: {ordered_fields}."
+
+    return "Invalid request payload."
+
+
+@app.exception_handler(Exception)
+async def global_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+    """Global fallback exception handler for unhandled errors."""
+    logger.exception("Unhandled exception")
+    return _error_response(
+        status_code=500,
+        code="INTERNAL_ERROR",
+        message="An unexpected internal error occurred.",
+    )
+
+
+@app.exception_handler(ValueError)
+async def validation_exception_handler(_request: Request, exc: ValueError) -> JSONResponse:
+    """Map domain validation errors to stable 400 responses."""
+    logger.warning("Validation error: %s", exc)
+    return _error_response(
+        status_code=400,
+        code="VALIDATION_ERROR",
+        message=str(exc),
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def request_validation_exception_handler(
+    _request: Request,
+    exc: RequestValidationError,
+) -> JSONResponse:
+    """Map request schema validation errors to stable 422 responses."""
+    client_message = _format_request_validation_error(exc)
+    logger.warning(
+        "Request validation error",
+        extra={
+            "error_count": len(exc.errors()),
+            "fields": sorted(
+                {
+                    str(error.get("loc", ())[-1])
+                    for error in exc.errors()
+                    if error.get("loc") and error.get("loc", ())[0] == "body"
+                }
+            ),
+        },
+    )
+    return _error_response(
+        status_code=422,
+        code="REQUEST_VALIDATION_ERROR",
+        message=client_message,
+    )
+
+
+@app.exception_handler(PermissionError)
+async def permission_exception_handler(_request: Request, exc: PermissionError) -> JSONResponse:
+    """Map permission failures to stable 403 responses without leaking internals."""
+    logger.warning("Permission error: %s", exc)
+    return _error_response(
+        status_code=403,
+        code="FORBIDDEN",
+        message="The requested operation is not permitted.",
+    )
+
+
+@app.exception_handler(RuntimeError)
+async def runtime_exception_handler(_request: Request, exc: RuntimeError) -> JSONResponse:
+    """Map runtime errors to stable 500 responses without leaking internals."""
+    logger.error("Runtime error: %s", exc)
+    return _error_response(
+        status_code=500,
+        code="RUNTIME_ERROR",
+        message="An internal error occurred.",
     )
 
 

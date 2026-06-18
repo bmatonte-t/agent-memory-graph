@@ -20,6 +20,7 @@ class MCPToolName(StrEnum):
 class MCPInvokeRequest(BaseModel):
     """Tool invocation request payload."""
 
+    tenant_id: str = Field(...)
     tool_name: MCPToolName
     arguments: dict[str, Any] = Field(default_factory=dict)
     session_id: str | None = Field(default=None)

@@ -41,6 +41,7 @@ class TestMindMapPipeline:
 
         async def fake_record_audit_event(**_: object) -> AuditResponse:
             return AuditResponse(
+                tenant_id="tenant_mindmap",
                 event_id="audit_test",
                 event_type="MINDMAP_EXECUTION",
                 timestamp=datetime.now(UTC),
@@ -157,6 +158,7 @@ class TestMindMapPipeline:
                 trace: MindMapTrace,
                 query: str,
                 session_id: str | None,
+                tenant_id: str | None,
             ) -> None:
                 """Capture trace metadata in memory.
 
@@ -164,8 +166,9 @@ class TestMindMapPipeline:
                     trace: Trace payload from pipeline.
                     query (str): Original query.
                     session_id (str | None): Session identifier.
+                    tenant_id (str | None): Tenant identifier.
                 """
-                del query, session_id
+                del query, session_id, tenant_id
                 self.calls += 1
                 self.latest_trace_id = trace.trace_id
 

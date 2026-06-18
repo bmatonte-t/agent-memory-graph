@@ -27,7 +27,9 @@ class TestAgentObservability:
         """Request IDs should appear in orchestrator and MCP log records."""
 
         class FakePipeline:
-            async def execute(self, query: str, session_id: str | None) -> object:
+            async def execute(
+                self, query: str, session_id: str | None, tenant_id: str | None = None
+            ) -> object:
                 return type(
                     "MindMapResponseStub",
                     (),
@@ -70,6 +72,7 @@ class TestAgentObservability:
         request_id = "request_obs_1"
         response = await orchestrator.respond(
             AgentOrchestrationRequest(
+                tenant_id="tenant_obs",
                 prompt="hello",
                 session_id="session_obs",
                 request_id=request_id,

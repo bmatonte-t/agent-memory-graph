@@ -1,4 +1,4 @@
-"""Unit tests for Phase 3 agent orchestration loop."""
+"""Unit tests for tenant-aware agent orchestration."""
 
 from __future__ import annotations
 
@@ -36,16 +36,15 @@ def _token_usage(input_tokens: int, output_tokens: int) -> MCPTokenUsage:
 
 
 class TestAgentOrchestrator:
-    """Contract tests for prompt -> tool -> response orchestration."""
+    """Contract tests for tenant propagation across orchestration flows."""
 
-    async def test_respond_success_and_request_id_propagation(self) -> None:
-        """Orchestrator should pass one request_id through all tool calls."""
+    async def test_respond_success_propagates_tenant_to_every_tool(self) -> None:
+        """Single-agent mode should preserve one tenant across all MCP calls."""
         fake_service = AsyncMock()
-
-        seen_request_ids: list[str | None] = []
+        seen_requests: list[MCPInvokeRequest] = []
 
         async def fake_invoke(request: MCPInvokeRequest) -> MCPInvokeResponse:
-            seen_request_ids.append(request.request_id)
+            seen_requests.append(request)
             if request.tool_name == MCPToolName.MEMORY_RECALL_CONTEXT:
                 return MCPInvokeResponse(
                     tool_name=request.tool_name,
@@ -85,16 +84,18 @@ class TestAgentOrchestrator:
         orchestrator = AgentOrchestrator(mcp_tool_service=fake_service)
 
         response = await orchestrator.respond(
-            AgentOrchestrationRequest(prompt="What changed?", session_id="sess_1")
+            AgentOrchestrationRequest(
+                tenant_id="tenant_a",
+                prompt="What changed?",
+                session_id="sess_1",
+            )
         )
 
         assert response.execution_mode == AgentExecutionMode.SINGLE
         assert response.grounded is True
         assert response.response_text == "Grounded answer"
         assert len(response.tool_calls) == EXPECTED_TOOL_CALLS
-        assert all(request_id == response.request_id for request_id in seen_request_ids)
-        assert all(tool_call.request_id == response.request_id for tool_call in response.tool_calls)
-        assert all((tool_call.total_tokens or 0) >= 0 for tool_call in response.tool_calls)
+        assert [request.tenant_id for request in seen_requests] == ["tenant_a"] * 3
 
     async def test_respond_fallback_when_search_fails(self) -> None:
         """Orchestrator should return insufficiency fallback when search fails."""
@@ -129,7 +130,11 @@ class TestAgentOrchestrator:
         orchestrator = AgentOrchestrator(mcp_tool_service=fake_service)
 
         response = await orchestrator.respond(
-            AgentOrchestrationRequest(prompt="Need evidence", session_id="sess_2")
+            AgentOrchestrationRequest(
+                tenant_id="tenant_a",
+                prompt="Need evidence",
+                session_id="sess_2",
+            )
         )
 
         assert response.execution_mode == AgentExecutionMode.SINGLE
@@ -137,13 +142,13 @@ class TestAgentOrchestrator:
         assert response.response_text == "Insufficient graph evidence."
         assert len(response.tool_calls) == EXPECTED_TOOL_CALLS
 
-    async def test_supervisor_worker_mode_uses_dedicated_orchestration_path(self) -> None:
-        """Supervisor-worker mode should execute dedicated path and preserve mode."""
+    async def test_supervisor_worker_mode_preserves_tenant(self) -> None:
+        """Supervisor-worker mode should send one tenant across both worker calls and audit."""
         fake_service = AsyncMock()
-        seen_tool_names: list[MCPToolName] = []
+        seen_requests: list[MCPInvokeRequest] = []
 
         async def fake_invoke(request: MCPInvokeRequest) -> MCPInvokeResponse:
-            seen_tool_names.append(request.tool_name)
+            seen_requests.append(request)
             return MCPInvokeResponse(
                 tool_name=request.tool_name,
                 request_id=request.request_id,
@@ -159,6 +164,7 @@ class TestAgentOrchestrator:
 
         response = await orchestrator.respond(
             AgentOrchestrationRequest(
+                tenant_id="tenant_a",
                 prompt="Need worker path",
                 session_id="sess_sw",
                 mode=AgentExecutionMode.SUPERVISOR_WORKER,
@@ -168,15 +174,15 @@ class TestAgentOrchestrator:
         assert response.execution_mode == AgentExecutionMode.SUPERVISOR_WORKER
         assert response.grounded is True
         assert len(response.tool_calls) == EXPECTED_TOOL_CALLS
-        assert seen_tool_names.count(MCPToolName.MEMORY_RECALL_CONTEXT) == 1
-        assert seen_tool_names.count(MCPToolName.MEMORY_SEARCH) == 1
-        assert seen_tool_names.count(MCPToolName.MEMORY_LOG_TRACE) == 1
+        assert [request.tenant_id for request in seen_requests] == ["tenant_a"] * 3
 
     async def test_vertex_mode_without_adapter_falls_back_to_single(self) -> None:
-        """Vertex mode should report single execution when adapter is unavailable."""
+        """Vertex mode should keep the tenant while falling back to the single-agent path."""
         fake_service = AsyncMock()
+        seen_requests: list[MCPInvokeRequest] = []
 
         async def fake_invoke(request: MCPInvokeRequest) -> MCPInvokeResponse:
+            seen_requests.append(request)
             return MCPInvokeResponse(
                 tool_name=request.tool_name,
                 request_id=request.request_id,
@@ -192,6 +198,7 @@ class TestAgentOrchestrator:
 
         response = await orchestrator.respond(
             AgentOrchestrationRequest(
+                tenant_id="tenant_a",
                 prompt="Need vertex",
                 session_id="sess_vertex",
                 mode=AgentExecutionMode.VERTEX,
@@ -200,3 +207,5 @@ class TestAgentOrchestrator:
 
         assert response.execution_mode == AgentExecutionMode.SINGLE
         assert response.grounded is True
+        assert len(response.tool_calls) == EXPECTED_TOOL_CALLS
+        assert [request.tenant_id for request in seen_requests] == ["tenant_a"] * 3

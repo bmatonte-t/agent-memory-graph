@@ -56,7 +56,7 @@ plugins:
       default_handler: python
       handlers:
         python:
-          paths: [.]
+          paths: [src]
           options:
             docstring_style: google
             show_source: true
@@ -157,6 +157,11 @@ nav:
       - Testing Changes: development/testing_changes.md
       - Documentation: development/documentation.md
       - Release Strategy: development/release_strategy.md
+  - Operations:
+      - Ops Runbook: operations/ops-runbook.md
+      - Admin Guide: operations/admin-guide.md
+      - Disaster Recovery: operations/disaster-recovery.md
+      - Support Playbook: operations/support-playbook.md
   - Help:
       - Troubleshooting: help/troubleshooting.md
       - FAQ: help/faq.md

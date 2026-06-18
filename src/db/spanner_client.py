@@ -2,9 +2,29 @@
 
 from __future__ import annotations
 
+import logging
+import re
 from typing import Self
 
 from google.cloud import spanner
+
+from src.security.validators import validate_tenant_id
+
+logger = logging.getLogger(__name__)
+
+_DML_TABLE_PATTERN_BY_OPERATION: dict[str, re.Pattern[str]] = {
+    "INSERT": re.compile(r"^\s*INSERT\s+INTO\s+`?([A-Za-z_][A-Za-z0-9_]*)`?", re.IGNORECASE),
+    "UPDATE": re.compile(r"^\s*UPDATE\s+`?([A-Za-z_][A-Za-z0-9_]*)`?", re.IGNORECASE),
+    "DELETE": re.compile(
+        r"^\s*DELETE\s+FROM\s+`?([A-Za-z_][A-Za-z0-9_]*)`?",
+        re.IGNORECASE,
+    ),
+    "TRUNCATE": re.compile(
+        r"^\s*TRUNCATE\s+(?:TABLE\s+)?`?([A-Za-z_][A-Za-z0-9_]*)`?",
+        re.IGNORECASE,
+    ),
+    "MERGE": re.compile(r"^\s*MERGE\s+INTO\s+`?([A-Za-z_][A-Za-z0-9_]*)`?", re.IGNORECASE),
+}
 
 
 class SpannerClient:
@@ -88,9 +108,39 @@ class SpannerClient:
         Returns:
             Number of rows affected
         """
+        mutation_target = cls._extract_dml_target(sql)
+        if mutation_target is not None:
+            operation, table_name = mutation_target
+            cls._validate_audit_mutation_forbidden(table_name, operation)
+
         database = cls.get_database()
         with database.batch() as batch:
             return batch.execute_update(sql, params or {})
+
+    @staticmethod
+    def _extract_dml_target(sql: str) -> tuple[str, str] | None:
+        """Extract the DML operation and target table from SQL.
+
+        Args:
+            sql: SQL statement text.
+
+        Returns:
+            tuple[str, str] | None: Operation and table name when parsable.
+        """
+        normalized_sql = sql.strip()
+        if not normalized_sql:
+            return None
+
+        operation = normalized_sql.split(maxsplit=1)[0].upper()
+        pattern = _DML_TABLE_PATTERN_BY_OPERATION.get(operation)
+        if pattern is None:
+            return None
+
+        match = pattern.search(normalized_sql)
+        if match is None:
+            return None
+
+        return operation, match.group(1)
 
     @classmethod
     def close(cls) -> None:
@@ -100,3 +150,36 @@ class SpannerClient:
             cls._client = None
             cls._instance_ref = None
             cls._database = None
+
+    @staticmethod
+    def validate_tenant_id(tenant_id: str | None) -> str:
+        """Validate tenant_id is non-empty and properly formatted.
+
+        Args:
+            tenant_id: Tenant identifier to validate
+
+        Returns:
+            str: Validated tenant_id
+
+        Raises:
+            ValueError: If tenant_id is empty or invalid
+        """
+        return validate_tenant_id(tenant_id)
+
+    @staticmethod
+    def _validate_audit_mutation_forbidden(table_name: str, operation: str) -> None:
+        """Enforce audit table immutability by rejecting mutations.
+
+        Audit events are append-only. Updates and deletions are forbidden.
+
+        Args:
+            table_name: Target table name
+            operation: Operation type (INSERT, UPDATE, DELETE)
+
+        Raises:
+            PermissionError: If attempting to mutate AUDIT_EVENTS
+        """
+        if table_name.upper() == "AUDIT_EVENTS" and operation.upper() != "INSERT":
+            msg = f"Operation {operation} on {table_name} is forbidden. Audit events are immutable."
+            logger.error("audit_mutation_forbidden %s", msg)
+            raise PermissionError(msg)

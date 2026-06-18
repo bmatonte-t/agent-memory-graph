@@ -1,0 +1,135 @@
+{
+    "displayName": "Agent Memory Graph Observability",
+    "mosaicLayout": {
+        "columns": 12,
+        "tiles": [
+            {
+                "xPos": 0,
+                "yPos": 0,
+                "width": 6,
+                "height": 4,
+                "widget": {
+                    "title": "MindMap Pipeline Latency (p95)",
+                    "xyChart": {
+                        "dataSets": [
+                            {
+                                "timeSeriesQuery": {
+                                    "timeSeriesFilter": {
+                                        "filter": "metric.type=\"workload.googleapis.com/mindmap.pipeline.execution_ms\"",
+                                        "aggregation": {
+                                            "alignmentPeriod": "60s",
+                                            "perSeriesAligner": "ALIGN_PERCENTILE_95"
+                                        }
+                                    }
+                                },
+                                "plotType": "LINE"
+                            }
+                        ],
+                        "yAxis": {
+                            "label": "ms",
+                            "scale": "LINEAR"
+                        }
+                    }
+                }
+            },
+            {
+                "xPos": 6,
+                "yPos": 0,
+                "width": 6,
+                "height": 4,
+                "widget": {
+                    "title": "MCP Tool Error Count",
+                    "xyChart": {
+                        "dataSets": [
+                            {
+                                "timeSeriesQuery": {
+                                    "timeSeriesFilter": {
+                                        "filter": "metric.type=\"workload.googleapis.com/mcp.tool.errors\"",
+                                        "aggregation": {
+                                            "alignmentPeriod": "60s",
+                                            "perSeriesAligner": "ALIGN_DELTA",
+                                            "crossSeriesReducer": "REDUCE_SUM",
+                                            "groupByFields": [
+                                                "metric.label.tool_name",
+                                                "metric.label.error_code"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "plotType": "STACKED_BAR"
+                            }
+                        ],
+                        "yAxis": {
+                            "label": "count",
+                            "scale": "LINEAR"
+                        }
+                    }
+                }
+            },
+            {
+                "xPos": 0,
+                "yPos": 4,
+                "width": 6,
+                "height": 4,
+                "widget": {
+                    "title": "Orchestrator Request Rate",
+                    "xyChart": {
+                        "dataSets": [
+                            {
+                                "timeSeriesQuery": {
+                                    "timeSeriesFilter": {
+                                        "filter": "metric.type=\"workload.googleapis.com/agent.orchestrator.requests\"",
+                                        "aggregation": {
+                                            "alignmentPeriod": "60s",
+                                            "perSeriesAligner": "ALIGN_RATE",
+                                            "crossSeriesReducer": "REDUCE_SUM",
+                                            "groupByFields": [
+                                                "metric.label.agent_mode",
+                                                "metric.label.grounded"
+                                            ]
+                                        }
+                                    }
+                                },
+                                "plotType": "LINE"
+                            }
+                        ],
+                        "yAxis": {
+                            "label": "req/s",
+                            "scale": "LINEAR"
+                        }
+                    }
+                }
+            },
+            {
+                "xPos": 6,
+                "yPos": 4,
+                "width": 6,
+                "height": 4,
+                "widget": {
+                    "title": "MindMap Serialized Facts",
+                    "xyChart": {
+                        "dataSets": [
+                            {
+                                "timeSeriesQuery": {
+                                    "timeSeriesFilter": {
+                                        "filter": "metric.type=\"workload.googleapis.com/mindmap.pipeline.facts\"",
+                                        "aggregation": {
+                                            "alignmentPeriod": "60s",
+                                            "perSeriesAligner": "ALIGN_DELTA",
+                                            "crossSeriesReducer": "REDUCE_SUM"
+                                        }
+                                    }
+                                },
+                                "plotType": "LINE"
+                            }
+                        ],
+                        "yAxis": {
+                            "label": "facts",
+                            "scale": "LINEAR"
+                        }
+                    }
+                }
+            }
+        ]
+    }
+}

@@ -17,6 +17,17 @@ from src.models.mcp import (
     MCPToolError,
     MCPToolName,
 )
+from src.observability.logging import structured_log
+from src.observability.metrics import mcp_tool_error_counter, mcp_tool_invocation_counter
+from src.observability.tracing import trace_span
+from src.security.validators import (
+    validate_mapping,
+    validate_optional_string,
+    validate_relationship,
+    validate_required_string,
+    validate_tenant_id,
+    validate_window_size,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,47 +57,95 @@ class MCPToolService:
             MCPInvokeResponse: Typed tool invocation result.
         """
         started = perf_counter()
-        logger.info(
-            "mcp_tool_invoke_start %s",
-            json.dumps(
+        with trace_span(
+            "mcp.invoke",
+            attributes={
+                "tenant.id": request.tenant_id,
+                "tool.name": str(request.tool_name),
+                "session.id": request.session_id or "",
+                "request.id": request.request_id or "",
+            },
+        ):
+            structured_log(
+                logger,
+                logging.INFO,
+                "mcp_tool_invoke_start",
                 {
-                    "tool_name": request.tool_name,
-                    "session_id": request.session_id,
-                    "request_id": request.request_id,
+                    "tenant_id": request.tenant_id,
+                    "tool_name": str(request.tool_name),
+                    "session_id": request.session_id or "",
+                    "request_id": request.request_id or "",
                 },
-                default=str,
-            ),
-        )
-        try:
-            if request.tool_name == MCPToolName.MEMORY_SEARCH:
-                result = await self._memory_search(request)
-            elif request.tool_name == MCPToolName.MEMORY_ADD_FACT:
-                result = await self._memory_add_fact(request)
-            elif request.tool_name == MCPToolName.MEMORY_LOG_TRACE:
-                result = await self._memory_log_trace(request)
-            elif request.tool_name == MCPToolName.MEMORY_RECALL_CONTEXT:
-                result = await self._memory_recall_context(request)
-            else:
-                raise MCPToolServiceError(  # noqa: TRY301
-                    code="validation_error",
-                    message=f"unsupported tool_name: {request.tool_name}",
+            )
+            try:
+                if request.tool_name == MCPToolName.MEMORY_SEARCH:
+                    result = await self._memory_search(request)
+                elif request.tool_name == MCPToolName.MEMORY_ADD_FACT:
+                    result = await self._memory_add_fact(request)
+                elif request.tool_name == MCPToolName.MEMORY_LOG_TRACE:
+                    result = await self._memory_log_trace(request)
+                elif request.tool_name == MCPToolName.MEMORY_RECALL_CONTEXT:
+                    result = await self._memory_recall_context(request)
+                else:
+                    raise MCPToolServiceError(  # noqa: TRY301
+                        code="validation_error",
+                        message=f"unsupported tool_name: {request.tool_name}",
+                    )
+            except MCPToolServiceError as error:
+                token_usage = self._estimate_token_usage(
+                    arguments=request.arguments,
+                    result=None,
+                    error_message=error.message,
                 )
-        except MCPToolServiceError as error:
+                response = MCPInvokeResponse(
+                    tool_name=request.tool_name,
+                    request_id=request.request_id,
+                    success=False,
+                    latency_ms=(perf_counter() - started) * 1000,
+                    error=MCPToolError(
+                        code=error.code,
+                        message=error.message,
+                        retryable=error.retryable,
+                    ),
+                    token_usage=token_usage,
+                )
+                logger.info(
+                    "mcp_tool_invoke_finish %s",
+                    json.dumps(
+                        {
+                            "tool_name": request.tool_name,
+                            "request_id": request.request_id,
+                            "success": response.success,
+                            "latency_ms": response.latency_ms,
+                            "error_code": response.error.code if response.error else None,
+                            "total_tokens": response.token_usage.total_tokens
+                            if response.token_usage
+                            else None,
+                        },
+                        default=str,
+                    ),
+                )
+                mcp_tool_error_counter().add(
+                    1,
+                    {
+                        "tool.name": str(request.tool_name),
+                        "error.code": error.code,
+                        "tenant.id": request.tenant_id,
+                    },
+                )
+                return response
+
             token_usage = self._estimate_token_usage(
                 arguments=request.arguments,
-                result=None,
-                error_message=error.message,
+                result=result,
+                error_message=None,
             )
             response = MCPInvokeResponse(
                 tool_name=request.tool_name,
                 request_id=request.request_id,
-                success=False,
+                success=True,
                 latency_ms=(perf_counter() - started) * 1000,
-                error=MCPToolError(
-                    code=error.code,
-                    message=error.message,
-                    retryable=error.retryable,
-                ),
+                result=result,
                 token_usage=token_usage,
             )
             logger.info(
@@ -97,7 +156,7 @@ class MCPToolService:
                         "request_id": request.request_id,
                         "success": response.success,
                         "latency_ms": response.latency_ms,
-                        "error_code": response.error.code if response.error else None,
+                        "error_code": None,
                         "total_tokens": response.token_usage.total_tokens
                         if response.token_usage
                         else None,
@@ -105,38 +164,15 @@ class MCPToolService:
                     default=str,
                 ),
             )
-            return response
-
-        token_usage = self._estimate_token_usage(
-            arguments=request.arguments,
-            result=result,
-            error_message=None,
-        )
-        response = MCPInvokeResponse(
-            tool_name=request.tool_name,
-            request_id=request.request_id,
-            success=True,
-            latency_ms=(perf_counter() - started) * 1000,
-            result=result,
-            token_usage=token_usage,
-        )
-        logger.info(
-            "mcp_tool_invoke_finish %s",
-            json.dumps(
+            mcp_tool_invocation_counter().add(
+                1,
                 {
-                    "tool_name": request.tool_name,
-                    "request_id": request.request_id,
-                    "success": response.success,
-                    "latency_ms": response.latency_ms,
-                    "error_code": None,
-                    "total_tokens": response.token_usage.total_tokens
-                    if response.token_usage
-                    else None,
+                    "tool.name": str(request.tool_name),
+                    "success": "true",
+                    "tenant.id": request.tenant_id,
                 },
-                default=str,
-            ),
-        )
-        return response
+            )
+            return response
 
     @staticmethod
     def _estimate_token_usage(
@@ -178,17 +214,26 @@ class MCPToolService:
         Returns:
             dict[str, Any]: Serialized MindMap response.
         """
-        query = request.arguments.get("query")
-        if not isinstance(query, str) or not query.strip():
+        try:
+            tenant_id = validate_tenant_id(request.tenant_id)
+            query = validate_required_string(request.arguments.get("query"), field_name="query")
+            session_id = validate_optional_string(
+                request.arguments.get("session_id") or request.session_id,
+                field_name="session_id",
+            )
+        except ValueError as error:
             raise MCPToolServiceError(
                 code="validation_error",
-                message="memory_search requires non-empty 'query'",
-            )
-
-        session_id = request.arguments.get("session_id") or request.session_id
+                message=f"memory_search {error}",
+            ) from error
 
         try:
-            response = await self.mindmap_pipeline.execute(query=query, session_id=session_id)
+            # TODO(Phase2-Observability): Update mindmap_pipeline.execute to accept tenant_id
+            response = await self.mindmap_pipeline.execute(
+                query=query,
+                session_id=session_id,
+                tenant_id=tenant_id,
+            )
         except MindMapPipelineError as error:
             raise MCPToolServiceError(
                 code=str(error.code),
@@ -207,29 +252,30 @@ class MCPToolService:
         Returns:
             dict[str, Any]: Serialized fact response.
         """
-        entity_type = request.arguments.get("entity_type")
-        entity_id = request.arguments.get("entity_id")
-        attributes = request.arguments.get("attributes", {})
-        relationship = request.arguments.get("relationship")
-
-        if not isinstance(entity_type, str) or not isinstance(entity_id, str):
+        try:
+            tenant_id = validate_tenant_id(request.tenant_id)
+            entity_type = validate_required_string(
+                request.arguments.get("entity_type"),
+                field_name="entity_type",
+            )
+            entity_id = validate_required_string(
+                request.arguments.get("entity_id"),
+                field_name="entity_id",
+            )
+            attributes = validate_mapping(
+                request.arguments.get("attributes", {}),
+                field_name="attributes",
+            )
+            relationship = validate_relationship(request.arguments.get("relationship"))
+        except ValueError as error:
             raise MCPToolServiceError(
                 code="validation_error",
-                message="memory_add_fact requires string 'entity_type' and 'entity_id'",
-            )
-        if not isinstance(attributes, dict):
-            raise MCPToolServiceError(
-                code="validation_error",
-                message="memory_add_fact 'attributes' must be an object",
-            )
-        if relationship is not None and not isinstance(relationship, dict):
-            raise MCPToolServiceError(
-                code="validation_error",
-                message="memory_add_fact 'relationship' must be an object when provided",
-            )
+                message=f"memory_add_fact {error}",
+            ) from error
 
         try:
             response = await MemoryAPI.add_semantic_fact(
+                tenant_id=tenant_id,
                 entity_type=entity_type,
                 entity_id=entity_id,
                 attributes=attributes,
@@ -258,28 +304,29 @@ class MCPToolService:
         Returns:
             dict[str, Any]: Serialized audit response.
         """
-        decision_context = request.arguments.get("decision_context")
-        event_type = request.arguments.get("event_type", "AGENT_REASONING_STEP")
-        source_node_id = request.arguments.get("source_node_id") or request.session_id
-
-        if not isinstance(decision_context, dict):
+        try:
+            tenant_id = validate_tenant_id(request.tenant_id)
+            decision_context = validate_mapping(
+                request.arguments.get("decision_context"),
+                field_name="decision_context",
+            )
+            event_type = validate_required_string(
+                request.arguments.get("event_type", "AGENT_REASONING_STEP"),
+                field_name="event_type",
+            )
+            source_node_id = validate_required_string(
+                request.arguments.get("source_node_id") or request.session_id,
+                field_name="source_node_id",
+            )
+        except ValueError as error:
             raise MCPToolServiceError(
                 code="validation_error",
-                message="memory_log_trace requires object 'decision_context'",
-            )
-        if not isinstance(event_type, str) or not event_type:
-            raise MCPToolServiceError(
-                code="validation_error",
-                message="memory_log_trace requires non-empty string 'event_type'",
-            )
-        if not isinstance(source_node_id, str) or not source_node_id:
-            raise MCPToolServiceError(
-                code="validation_error",
-                message="memory_log_trace requires 'source_node_id' or request/session id",
-            )
+                message=f"memory_log_trace {error}",
+            ) from error
 
         try:
             response = await MemoryAPI.record_audit_event(
+                tenant_id=tenant_id,
                 event_type=event_type,
                 source_node_id=source_node_id,
                 context=decision_context,
@@ -307,22 +354,22 @@ class MCPToolService:
         Returns:
             dict[str, Any]: Serialized context response.
         """
-        session_id = request.arguments.get("session_id") or request.session_id
-        window_size = request.arguments.get("window_size", 10)
-
-        if not isinstance(session_id, str) or not session_id:
+        try:
+            tenant_id = validate_tenant_id(request.tenant_id)
+            session_id = validate_required_string(
+                request.arguments.get("session_id") or request.session_id,
+                field_name="session_id",
+            )
+            window_size = validate_window_size(request.arguments.get("window_size", 10))
+        except ValueError as error:
             raise MCPToolServiceError(
                 code="validation_error",
-                message="memory_recall_context requires string 'session_id'",
-            )
-        if not isinstance(window_size, int):
-            raise MCPToolServiceError(
-                code="validation_error",
-                message="memory_recall_context 'window_size' must be an integer",
-            )
+                message=f"memory_recall_context {error}",
+            ) from error
 
         try:
             response = await MemoryAPI.retrieve_context_window(
+                tenant_id=tenant_id,
                 session_id=session_id,
                 window_size=window_size,
             )

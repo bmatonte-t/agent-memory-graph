@@ -88,6 +88,55 @@ If the test coverage action is failing in CI/CD, you may check these things:
 
 3. If it is fine, you'll have to do some debugging. Please contribute your findings to this document if you resolve it!
 
+## Agent Memory Graph operational issues
+
+### Health endpoint is healthy but answers are failing
+
+Check the request path in this order:
+
+1. Cloud Run revision health and recent deploy changes.
+2. MCP tool logs for `memory_search`, `memory_recall_context`, and `memory_log_trace`.
+3. Cloud Trace spans for `orchestrator.respond`, `mcp.invoke`, and `mindmap.execute`.
+4. Spanner reachability and recent schema migration changes.
+
+### `Insufficient graph evidence.` appears too often
+
+Common causes:
+
+- query mining produced too few entities
+- retrieval horizon is too restrictive
+- semantic facts were not ingested for the tenant
+- upstream caller is sending the wrong `tenant_id`
+
+Diagnostics:
+
+1. Review the `mindmap.execute` trace and fact count.
+2. Confirm semantic nodes exist for the tenant.
+3. Check MCP tool traces for earlier ingestion failures.
+
+### Tool errors are spiking
+
+Use the MCP error metric and logs:
+
+1. Check `mcp.tool.errors` by tool name and error code.
+2. Inspect structured logs for `mcp_tool_invoke_finish` with error codes.
+3. Confirm whether failures are validation, retrieval, or infrastructure-related.
+
+### Cross-tenant access concerns
+
+Treat as a Sev 1/Sev 2 security incident.
+
+1. Preserve request IDs, tenant IDs, and audit events.
+2. Confirm the request payload carried the expected tenant.
+3. Review audit and structured logs for access-boundary violations.
+4. Escalate through the support playbook immediately.
+
+## Known limitations
+
+- Vertex-backed mining and synthesis paths remain environment-dependent.
+- Observability exporters degrade gracefully when cloud exporters are not installed, which may hide misconfiguration if startup logs are ignored.
+- The current supervisor/worker orchestration path is intentionally lightweight and not a full planner-worker system.
+
 ## Getting Help
 
 If you encounter issues not covered here:

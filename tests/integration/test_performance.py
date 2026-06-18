@@ -1,7 +1,6 @@
 """Load tests and performance benchmarks for memory APIs."""
 
 import asyncio
-import json
 import time
 from unittest.mock import MagicMock, patch
 
@@ -18,6 +17,7 @@ LARGE_GRAPH_TURN_COUNT = 100
 CONCURRENT_TASK_COUNT = 10
 SIMULATED_NODE_COUNT = 10_000
 SIMULATED_EDGE_COUNT = 100_000
+TEST_TENANT_ID = "tenant_perf"
 
 
 class TestLoadScenarios:
@@ -35,6 +35,7 @@ class TestLoadScenarios:
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
+            mock_client.validate_tenant_id.return_value = TEST_TENANT_ID
 
             with patch.object(MemoryAPI, "record_audit_event"):
                 latencies = []
@@ -42,7 +43,11 @@ class TestLoadScenarios:
 
                 for i in range(num_sessions):
                     start = time.perf_counter()
-                    await MemoryAPI.create_session(session_id=f"session_{i}", user_id=f"user_{i}")
+                    await MemoryAPI.create_session(
+                        tenant_id=TEST_TENANT_ID,
+                        session_id=f"session_{i}",
+                        user_id=f"user_{i}",
+                    )
                     elapsed = (time.perf_counter() - start) * 1000  # ms
 
                     latencies.append(elapsed)
@@ -70,6 +75,7 @@ class TestLoadScenarios:
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
+            mock_client.validate_tenant_id.return_value = TEST_TENANT_ID
 
             with (
                 patch.object(MemoryAPI, "record_audit_event"),
@@ -84,6 +90,7 @@ class TestLoadScenarios:
                     entity_type = entity_types[i % len(entity_types)]
                     start = time.perf_counter()
                     await MemoryAPI.add_semantic_fact(
+                        tenant_id=TEST_TENANT_ID,
                         entity_type=entity_type,
                         entity_id=f"entity_{i}",
                         attributes={"name": f"Entity {i}"},
@@ -121,6 +128,7 @@ class TestLoadScenarios:
             mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
+            mock_client.validate_tenant_id.return_value = TEST_TENANT_ID
 
             with (
                 patch.object(MemoryAPI, "record_audit_event"),
@@ -132,7 +140,7 @@ class TestLoadScenarios:
                 for i in range(num_retrievals):
                     start = time.perf_counter()
                     await MemoryAPI.retrieve_context_window(
-                        session_id=f"session_{i}", window_size=10
+                        tenant_id=TEST_TENANT_ID, session_id=f"session_{i}", window_size=10
                     )
                     elapsed = (time.perf_counter() - start) * 1000
 
@@ -174,6 +182,7 @@ class TestLoadScenarios:
             mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
+            mock_client.validate_tenant_id.return_value = TEST_TENANT_ID
 
             with (
                 patch.object(MemoryAPI, "record_audit_event"),
@@ -181,7 +190,7 @@ class TestLoadScenarios:
             ):
                 start = time.perf_counter()
                 result = await MemoryAPI.retrieve_context_window(
-                    session_id="session_large", window_size=100
+                    tenant_id=TEST_TENANT_ID, session_id="session_large", window_size=100
                 )
                 elapsed = (time.perf_counter() - start) * 1000
 
@@ -203,6 +212,7 @@ class TestLoadScenarios:
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
+            mock_client.validate_tenant_id.return_value = TEST_TENANT_ID
 
             with mock_db.batch() as batch:
                 for node_index in range(SIMULATED_NODE_COUNT):
@@ -232,11 +242,13 @@ class TestConcurrency:
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
+            mock_client.validate_tenant_id.return_value = TEST_TENANT_ID
 
             with patch.object(MemoryAPI, "record_audit_event"):
                 # Create 10 sessions concurrently
                 tasks = [
                     MemoryAPI.create_session(
+                        tenant_id=TEST_TENANT_ID,
                         session_id=f"concurrent_session_{i}",
                         user_id=f"concurrent_user_{i}",
                     )
@@ -270,6 +282,7 @@ class TestConcurrency:
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
 
             mock_client.get_database.return_value = mock_db
+            mock_client.validate_tenant_id.return_value = TEST_TENANT_ID
 
             with (
                 patch.object(MemoryAPI, "record_audit_event"),
@@ -281,13 +294,18 @@ class TestConcurrency:
                     if i % 2 == 0:
                         tasks.append(
                             MemoryAPI.add_semantic_fact(
+                                tenant_id=TEST_TENANT_ID,
                                 entity_type="PERSON",
                                 entity_id=f"concurrent_entity_{i}",
                             )
                         )
                     else:
                         tasks.append(
-                            MemoryAPI.retrieve_context_window(session_id=f"concurrent_session_{i}")
+                            MemoryAPI.retrieve_context_window(
+                                tenant_id=TEST_TENANT_ID,
+                                session_id=f"concurrent_session_{i}",
+                                window_size=10,
+                            )
                         )
 
                 results = await asyncio.gather(*tasks)
@@ -311,25 +329,33 @@ class TestAuditTrailIntegrity:
             mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             mock_client.get_database.return_value = mock_db
+            mock_client.validate_tenant_id.return_value = TEST_TENANT_ID
 
             with patch.object(MemoryAPI, "_update_weight_on_successful_use"):
                 # Execute operations
                 await MemoryAPI.create_session(
-                    session_id="audit_test_session", user_id="audit_test_user"
+                    tenant_id=TEST_TENANT_ID,
+                    session_id="audit_test_session",
+                    user_id="audit_test_user",
                 )
                 await MemoryAPI.add_semantic_fact(
-                    entity_type="PERSON", entity_id="audit_test_entity"
+                    tenant_id=TEST_TENANT_ID,
+                    entity_type="PERSON",
+                    entity_id="audit_test_entity",
                 )
-                await MemoryAPI.retrieve_context_window(session_id="audit_test_session")
+                await MemoryAPI.retrieve_context_window(
+                    tenant_id=TEST_TENANT_ID,
+                    session_id="audit_test_session",
+                    window_size=10,
+                )
 
                 # Verify audit events were persisted.
                 audit_event_types: list[str] = []
                 for call in mock_batch.execute_update.call_args_list:
                     params = call[0][1]
-                    if params.get("tier") != SchemaConfig.MEMORY_TIER_AUDIT:
+                    if "event_type" not in params:
                         continue
-                    attributes = json.loads(params["attributes"])
-                    audit_event_types.append(attributes["event_type"])
+                    audit_event_types.append(params["event_type"])
 
                 assert "CREATE_SESSION" in audit_event_types
                 assert "ADD_SEMANTIC_FACT" in audit_event_types
