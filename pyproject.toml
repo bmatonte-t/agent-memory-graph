@@ -47,6 +47,10 @@ packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "integration: integration tests",
+    "unit: unit tests",
+]
 # ASYNC TESTING CONFIGURATION #
 # asyncio_mode = "auto" automatically detects async test functions and applies the asyncio marker
 # This allows writing async tests without explicitly adding @pytest.mark.asyncio decorator

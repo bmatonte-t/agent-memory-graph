@@ -9,6 +9,8 @@ Memory is separated by volatility, scope, and purpose:
 - Semantic Graph: long-term factual memory
 - Audit Graph: immutable execution evidence
 
+Cross-tier operations must be staged. Reads or writes across Context, Semantic, and Audit tiers are not mixed inside a single transaction.
+
 This structure supports deterministic behavior, explainability, and enterprise trust.
 
 ## 1) Context Graph (Short-Term Memory)
@@ -92,8 +94,8 @@ This topology improves product marketability by:
 - Supporting policy and tenant boundaries explicitly
 - Providing deterministic, explainable retrieval patterns buyers can trust
 
-## Open Questions
+## Boundary Rules
 
-- How strict should cross-memory write boundaries be?
-- Which cross-links should be weighted versus informational?
-- Which agent stages may write to Semantic Graph directly?
+- Cross-memory write boundaries are strict and mandatory.
+- Cross-tier links are allowed only as explicit, auditable references.
+- Semantic writes are allowed only from approved ingestion stages and must emit audit events.

@@ -1,9 +1,6 @@
 """Cognitive weighting and temporal decay module."""
 
-import asyncio
 import logging
-from datetime import datetime, timedelta
-from typing import List, Optional
 
 from src.db.schema import SchemaConfig
 from src.db.spanner_client import SpannerClient
@@ -16,8 +13,7 @@ class CognitiveWeighting:
 
     @staticmethod
     async def decay_weights_temporal(decay_rate: float = SchemaConfig.TEMPORAL_DECAY_RATE) -> int:
-        """
-        Decay all node weights by temporal distance.
+        """Decay all node weights by temporal distance.
 
         Implements exponential decay: weight_t = weight_0 * e^(-decay_rate * hours_since_access)
 
@@ -32,13 +28,14 @@ class CognitiveWeighting:
             RuntimeError: If database update fails
         """
         if not (0.0 <= decay_rate <= 1.0):
-            raise ValueError("decay_rate must be between 0.0 and 1.0")
+            msg = "decay_rate must be between 0.0 and 1.0"
+            raise ValueError(msg)
 
         # GQL/SQL to calculate hours since last access and apply decay
         # Only applies to SEMANTIC and CONTEXT tiers (AUDIT is immutable)
         sql = """
             UPDATE MemoryNode
-            SET LogOddsWeight = LogOddsWeight * EXP(-@decay_rate * 
+            SET LogOddsWeight = LogOddsWeight * EXP(-@decay_rate *
                 CAST(TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), LastAccessed, HOUR) AS FLOAT64)),
                 UpdatedAt = CURRENT_TIMESTAMP()
             WHERE MemoryTier IN (@tier_semantic, @tier_context)
@@ -56,18 +53,18 @@ class CognitiveWeighting:
                         "tier_context": SchemaConfig.MEMORY_TIER_CONTEXT,
                     },
                 )
-
+        except Exception as e:
+            msg = f"Failed to decay weights: {e}"
+            raise RuntimeError(msg) from e
+        else:
             logger.info(f"Applied temporal decay with rate={decay_rate}")
             return 0  # Spanner batch doesn't return row count, return 0
-        except Exception as e:
-            raise RuntimeError(f"Failed to decay weights: {e}")
 
     @staticmethod
     async def prune_weights_below_threshold(
         threshold: float = SchemaConfig.WEIGHT_THRESHOLD,
     ) -> int:
-        """
-        Soft-delete nodes whose weight falls below cognitive threshold.
+        """Soft-delete nodes whose weight falls below cognitive threshold.
 
         Marks nodes with is_deleted=true without hard deletion (audit trail preservation).
 
@@ -82,7 +79,8 @@ class CognitiveWeighting:
             RuntimeError: If update fails
         """
         if not (0.0 <= threshold <= 1.0):
-            raise ValueError("threshold must be between 0.0 and 1.0")
+            msg = "threshold must be between 0.0 and 1.0"
+            raise ValueError(msg)
 
         # Add a soft-delete marker without removing the node (audit preservation)
         # This requires an additional column: is_deleted BOOL
@@ -106,16 +104,16 @@ class CognitiveWeighting:
                         "tier_context": SchemaConfig.MEMORY_TIER_CONTEXT,
                     },
                 )
-
+        except Exception as e:
+            msg = f"Failed to prune weights: {e}"
+            raise RuntimeError(msg) from e
+        else:
             logger.info(f"Pruned nodes below threshold={threshold}")
             return 0
-        except Exception as e:
-            raise RuntimeError(f"Failed to prune weights: {e}")
 
     @staticmethod
     async def get_weight_statistics() -> dict:
-        """
-        Retrieve aggregate weight statistics for monitoring.
+        """Retrieve aggregate weight statistics for monitoring.
 
         Returns:
             Dict with mean, median, min, max weight per memory tier
@@ -124,7 +122,7 @@ class CognitiveWeighting:
             RuntimeError: If query fails
         """
         sql = """
-            SELECT 
+            SELECT
                 MemoryTier,
                 COUNT(*) as count,
                 AVG(LogOddsWeight) as mean_weight,
@@ -160,9 +158,11 @@ class CognitiveWeighting:
                         "median_weight": median or 0.0,
                     }
 
-            return stats
         except Exception as e:
-            raise RuntimeError(f"Failed to get weight statistics: {e}")
+            msg = f"Failed to get weight statistics: {e}"
+            raise RuntimeError(msg) from e
+        else:
+            return stats
 
 
 class CloudSchedulerJob:
@@ -172,13 +172,41 @@ class CloudSchedulerJob:
     PRUNING_SCHEDULE_CRON = "0 3 * * *"  # Run daily at 3 AM UTC
 
     @staticmethod
-    async def create_decay_job(project_id: str, location: str = "us-central1") -> dict:
+    def _build_target_uri(cloud_run_url: str, path: str) -> str:
+        """Build a valid Cloud Run target URI for scheduler jobs.
+
+        Args:
+            cloud_run_url: Base Cloud Run service URL.
+            path: Internal endpoint path.
+
+        Returns:
+            str: Fully-qualified target URI.
+
+        Raises:
+            ValueError: If the URL is missing or invalid.
         """
-        Create a Cloud Scheduler job for nightly weight decay.
+        base_url = cloud_run_url.strip()
+        if not base_url:
+            msg = "cloud_run_url cannot be empty"
+            raise ValueError(msg)
+
+        if not base_url.startswith(("https://", "http://")):
+            base_url = f"https://{base_url}"
+
+        return f"{base_url.rstrip('/')}{path}"
+
+    @staticmethod
+    async def create_decay_job(
+        project_id: str,
+        location: str = "us-central1",
+        cloud_run_url: str = "",
+    ) -> dict:
+        """Create a Cloud Scheduler job for nightly weight decay.
 
         Args:
             project_id: GCP project ID
             location: Cloud Scheduler location (default: us-central1)
+            cloud_run_url: Base URL for the Cloud Run service.
 
         Returns:
             Dict with job configuration details
@@ -187,11 +215,16 @@ class CloudSchedulerJob:
             RuntimeError: If job creation fails
         """
         try:
-            from google.cloud import scheduler_v1
-            from google.cloud.scheduler_v1.types import HttpTarget, Job
+            from google.cloud import scheduler_v1  # noqa: PLC0415
+            from google.cloud.scheduler_v1.types import HttpTarget, Job  # noqa: PLC0415
 
             client = scheduler_v1.CloudSchedulerClient()
             parent = client.common_location_path(project_id, location)
+
+            decay_uri = CloudSchedulerJob._build_target_uri(
+                cloud_run_url=cloud_run_url,
+                path="/internal/decay-weights",
+            )
 
             job = Job(
                 name=f"{parent}/jobs/amg-decay-weights-daily",
@@ -199,7 +232,7 @@ class CloudSchedulerJob:
                 schedule=CloudSchedulerJob.DECAY_SCHEDULE_CRON,
                 time_zone="UTC",
                 http_target=HttpTarget(
-                    uri="https://{cloud_run_url}/internal/decay-weights",
+                    uri=decay_uri,
                     http_method="POST",
                     headers={"Content-Type": "application/json"},
                     body=b'{"decay_rate": 0.05}',
@@ -211,31 +244,36 @@ class CloudSchedulerJob:
                 },
             )
 
-            response = client.create_job(
-                request={"parent": parent, "job": job}
+            response = client.create_job(request={"parent": parent, "job": job})
+        except ImportError:
+            msg = (
+                "google-cloud-scheduler not installed. Install with: "
+                "pip install google-cloud-scheduler"
             )
+            raise RuntimeError(msg) from None
+        except Exception as e:
+            msg = f"Failed to create Cloud Scheduler job: {e}"
+            raise RuntimeError(msg) from e
+        else:
             logger.info(f"Created Cloud Scheduler job: {response.name}")
             return {
                 "name": response.name,
                 "schedule": CloudSchedulerJob.DECAY_SCHEDULE_CRON,
                 "status": "created",
             }
-        except ImportError:
-            raise RuntimeError(
-                "google-cloud-scheduler not installed. Install with: "
-                "pip install google-cloud-scheduler"
-            )
-        except Exception as e:
-            raise RuntimeError(f"Failed to create Cloud Scheduler job: {e}")
 
     @staticmethod
-    async def create_pruning_job(project_id: str, location: str = "us-central1") -> dict:
-        """
-        Create a Cloud Scheduler job for weight-based pruning.
+    async def create_pruning_job(
+        project_id: str,
+        location: str = "us-central1",
+        cloud_run_url: str = "",
+    ) -> dict:
+        """Create a Cloud Scheduler job for weight-based pruning.
 
         Args:
             project_id: GCP project ID
             location: Cloud Scheduler location
+            cloud_run_url: Base URL for the Cloud Run service.
 
         Returns:
             Dict with job configuration
@@ -244,11 +282,16 @@ class CloudSchedulerJob:
             RuntimeError: If job creation fails
         """
         try:
-            from google.cloud import scheduler_v1
-            from google.cloud.scheduler_v1.types import HttpTarget, Job
+            from google.cloud import scheduler_v1  # noqa: PLC0415
+            from google.cloud.scheduler_v1.types import HttpTarget, Job  # noqa: PLC0415
 
             client = scheduler_v1.CloudSchedulerClient()
             parent = client.common_location_path(project_id, location)
+
+            pruning_uri = CloudSchedulerJob._build_target_uri(
+                cloud_run_url=cloud_run_url,
+                path="/internal/prune-weights",
+            )
 
             job = Job(
                 name=f"{parent}/jobs/amg-prune-weights-daily",
@@ -256,7 +299,7 @@ class CloudSchedulerJob:
                 schedule=CloudSchedulerJob.PRUNING_SCHEDULE_CRON,
                 time_zone="UTC",
                 http_target=HttpTarget(
-                    uri="https://{cloud_run_url}/internal/prune-weights",
+                    uri=pruning_uri,
                     http_method="POST",
                     headers={"Content-Type": "application/json"},
                     body=b'{"threshold": 0.30}',
@@ -268,33 +311,50 @@ class CloudSchedulerJob:
                 },
             )
 
-            response = client.create_job(
-                request={"parent": parent, "job": job}
+            response = client.create_job(request={"parent": parent, "job": job})
+        except ImportError:
+            msg = (
+                "google-cloud-scheduler not installed. Install with: "
+                "pip install google-cloud-scheduler"
             )
+            raise RuntimeError(msg) from None
+        except Exception as e:
+            msg = f"Failed to create pruning job: {e}"
+            raise RuntimeError(msg) from e
+        else:
             logger.info(f"Created Cloud Scheduler job: {response.name}")
             return {
                 "name": response.name,
                 "schedule": CloudSchedulerJob.PRUNING_SCHEDULE_CRON,
                 "status": "created",
             }
-        except ImportError:
-            raise RuntimeError(
-                "google-cloud-scheduler not installed. Install with: "
-                "pip install google-cloud-scheduler"
-            )
-        except Exception as e:
-            raise RuntimeError(f"Failed to create pruning job: {e}")
 
     @staticmethod
-    def get_job_config() -> dict:
-        """Return Cloud Scheduler job configuration for Terraform/deployment."""
+    def get_job_config(cloud_run_url: str) -> dict:
+        """Return Cloud Scheduler job configuration for Terraform/deployment.
+
+        Args:
+            cloud_run_url: Base URL for the Cloud Run service.
+
+        Returns:
+            dict: Scheduler job configuration payload.
+        """
+        decay_uri = CloudSchedulerJob._build_target_uri(
+            cloud_run_url=cloud_run_url,
+            path="/internal/decay-weights",
+        )
+        pruning_uri = CloudSchedulerJob._build_target_uri(
+            cloud_run_url=cloud_run_url,
+            path="/internal/prune-weights",
+        )
+
         return {
             "decay_job": {
                 "name": "amg-decay-weights-daily",
                 "schedule": CloudSchedulerJob.DECAY_SCHEDULE_CRON,
                 "timezone": "UTC",
                 "http_target": {
-                    "uri": "{cloud_run_url}/internal/decay-weights",
+                    "uri": decay_uri,
                     "http_method": "POST",
                     "headers": {"Content-Type": "application/json"},
                     "body": '{"decay_rate": 0.05}',
@@ -310,7 +370,7 @@ class CloudSchedulerJob:
                 "schedule": CloudSchedulerJob.PRUNING_SCHEDULE_CRON,
                 "timezone": "UTC",
                 "http_target": {
-                    "uri": "{cloud_run_url}/internal/prune-weights",
+                    "uri": pruning_uri,
                     "http_method": "POST",
                     "headers": {"Content-Type": "application/json"},
                     "body": '{"threshold": 0.30}',

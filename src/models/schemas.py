@@ -1,7 +1,7 @@
 """Pydantic models for API request/response schemas."""
 
-from datetime import datetime
-from typing import Any, Dict, List, Optional
+from datetime import datetime  # noqa: TC003
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -49,7 +49,7 @@ class ContextResponse(BaseModel):
     """Response model for retrieve_context_window operation."""
 
     session_id: str = Field(..., description="Session identifier")
-    turns: List[ContextTurn] = Field(default_factory=list, description="Context turns")
+    turns: list[ContextTurn] = Field(default_factory=list, description="Context turns")
     total_weight_sum: float = Field(default=0.0, description="Sum of all turn weights")
     retrieved_at: datetime = Field(..., description="Retrieval timestamp")
 
@@ -62,10 +62,10 @@ class AddSemanticFactRequest(BaseModel):
         description="POLE+O entity type: PERSON, OBJECT, LOCATION, EVENT, or ORGANIZATION",
     )
     entity_id: str = Field(..., description="Unique entity identifier")
-    attributes: Dict[str, Any] = Field(
+    attributes: dict[str, Any] = Field(
         default_factory=dict, description="Entity attributes as JSON"
     )
-    relationship: Optional[Dict[str, str]] = Field(
+    relationship: dict[str, str] | None = Field(
         None, description="Optional relationship to existing node (type, source_id)"
     )
 
@@ -75,9 +75,7 @@ class CreateSessionRequest(BaseModel):
 
     session_id: str = Field(..., description="Unique session identifier")
     user_id: str = Field(..., description="User ID associated with session")
-    metadata: Dict[str, Any] = Field(
-        default_factory=dict, description="Session metadata"
-    )
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Session metadata")
 
 
 class RecordAuditEventRequest(BaseModel):
@@ -85,18 +83,14 @@ class RecordAuditEventRequest(BaseModel):
 
     event_type: str = Field(..., description="Type of audit event")
     source_node_id: str = Field(..., description="Source node ID triggering event")
-    context: Dict[str, Any] = Field(
-        default_factory=dict, description="Event context information"
-    )
+    context: dict[str, Any] = Field(default_factory=dict, description="Event context information")
 
 
 class RetrieveContextWindowRequest(BaseModel):
     """Request model for retrieve_context_window operation."""
 
     session_id: str = Field(..., description="Session identifier")
-    window_size: int = Field(
-        default=10, ge=1, le=100, description="Number of turns to retrieve"
-    )
+    window_size: int = Field(default=10, ge=1, le=100, description="Number of turns to retrieve")
 
 
 class ErrorResponse(BaseModel):

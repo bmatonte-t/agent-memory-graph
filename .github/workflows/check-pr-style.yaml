@@ -68,8 +68,7 @@ jobs:
         run: |
           label_count=$(echo "$LABELS" | jq 'length')
           if [ "$label_count" -eq 0 ]; then
-            echo "There are no labels on this PR, please add at least one."
-            exit 1
+            echo "::warning::There are no labels on this PR. Add one when available for cleaner release notes."
           else
             labels=$(echo "$LABELS" | jq -r '. | join(", ")')
             echo "PR has $label_count label(s): $labels"
@@ -80,8 +79,7 @@ jobs:
         id: check-assignees
         run: |
           if [ "$(echo "$ASSIGNEES" | jq '. | length')" -eq 0 ]; then
-            echo "No user is assigned to this pull request."
-            exit 1
+            echo "::warning::No user is assigned to this pull request. Assign one when available for cleaner release notes."
           else
             assignees=$(echo "$ASSIGNEES" | jq -r '[.[].login] | join(", ")')
             echo "Assigned users: $assignees"

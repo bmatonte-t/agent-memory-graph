@@ -1,0 +1,29 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: SERVICE_NAME
+  annotations:
+    run.googleapis.com/ingress: all
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "20"
+        run.googleapis.com/cpu-throttling: "false"
+    spec:
+      containerConcurrency: 40
+      timeoutSeconds: 60
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/ARTIFACT_REPOSITORY/IMAGE_NAME:IMAGE_TAG
+          ports:
+            - containerPort: 8080
+          env:
+            - name: AGENT_EXECUTION_MODE_DEFAULT
+              value: single
+            - name: GOOGLE_CLOUD_PROJECT
+              value: PROJECT_ID
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi

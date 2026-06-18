@@ -1,7 +1,7 @@
 # Agent Memory Graph - Data Model Specification
 
-**Version**: 0.1.0  
-**Database**: Google Cloud Spanner  
+**Version**: 0.1.0
+**Database**: Google Cloud Spanner
 **Schema Format**: ISO GQL (Graph Query Language)
 
 ---
@@ -19,7 +19,7 @@
 
 ## Tripartite Memory Architecture
 
-The Agent Memory Graph divides all knowledge into three immutable tiers:
+The Agent Memory Graph divides all knowledge into three isolated tiers with tier-specific mutability:
 
 ```
 ┌─────────────────────────────────────────────────────┐
@@ -54,6 +54,10 @@ The Agent Memory Graph divides all knowledge into three immutable tiers:
 - **Compliance**: Audit trail isolated and immutable (AUDIT)
 - **Cognitive Modeling**: Mimics human memory (working, long-term, autobiographical)
 
+### Canonical Field Mapping
+
+Project-level terminology uses `cognitive_weight` and `last_accessed` as canonical concepts. In phase-one physical schema examples, these appear as `LogOddsWeight` and `LastAccessed`.
+
 ---
 
 ## Core Tables
@@ -77,11 +81,11 @@ CREATE TABLE MemoryNode (
     PRIMARY KEY (NodeId)
 ) INTERLEAVE IN PARENT MemoryNode;
 
-CREATE INDEX idx_MemoryNode_Tier_Weight 
+CREATE INDEX idx_MemoryNode_Tier_Weight
     ON MemoryNode(MemoryTier, LogOddsWeight DESC);
-CREATE INDEX idx_MemoryNode_Tier_Label 
+CREATE INDEX idx_MemoryNode_Tier_Label
     ON MemoryNode(MemoryTier, Label);
-CREATE INDEX idx_MemoryNode_LastAccessed 
+CREATE INDEX idx_MemoryNode_LastAccessed
     ON MemoryNode(LastAccessed DESC);
 ```
 
@@ -126,11 +130,11 @@ CREATE TABLE MemoryEdge (
     FOREIGN KEY (DestNodeId) REFERENCES MemoryNode(NodeId) ON DELETE CASCADE
 ) INTERLEAVE IN PARENT MemoryNode ON DELETE CASCADE;
 
-CREATE INDEX idx_MemoryEdge_Source_Type 
+CREATE INDEX idx_MemoryEdge_Source_Type
     ON MemoryEdge(SourceNodeId, RelType);
-CREATE INDEX idx_MemoryEdge_Dest_Type 
+CREATE INDEX idx_MemoryEdge_Dest_Type
     ON MemoryEdge(DestNodeId, RelType);
-CREATE INDEX idx_MemoryEdge_Type_Weight 
+CREATE INDEX idx_MemoryEdge_Type_Weight
     ON MemoryEdge(RelType, LogOddsWeight DESC);
 ```
 
@@ -158,27 +162,27 @@ CREATE INDEX idx_MemoryEdge_Type_Weight
 
 ```sql
 -- Retrieve all nodes in tier ordered by weight (for decay operations)
-CREATE INDEX idx_MemoryNode_Tier_Weight 
+CREATE INDEX idx_MemoryNode_Tier_Weight
     ON MemoryNode(MemoryTier, LogOddsWeight DESC);
 
 -- Find nodes by type within tier (for POLE+O filtering)
-CREATE INDEX idx_MemoryNode_Tier_Label 
+CREATE INDEX idx_MemoryNode_Tier_Label
     ON MemoryNode(MemoryTier, Label);
 
 -- Retrieve nodes accessed before timestamp (for decay cutoff)
-CREATE INDEX idx_MemoryNode_LastAccessed 
+CREATE INDEX idx_MemoryNode_LastAccessed
     ON MemoryNode(LastAccessed DESC);
 
 -- Outgoing edges from source with type filter (for graph traversal)
-CREATE INDEX idx_MemoryEdge_Source_Type 
+CREATE INDEX idx_MemoryEdge_Source_Type
     ON MemoryEdge(SourceNodeId, RelType);
 
 -- Incoming edges to destination (for reverse traversal)
-CREATE INDEX idx_MemoryEdge_Dest_Type 
+CREATE INDEX idx_MemoryEdge_Dest_Type
     ON MemoryEdge(DestNodeId, RelType);
 
 -- Edges ordered by relationship type and strength
-CREATE INDEX idx_MemoryEdge_Type_Weight 
+CREATE INDEX idx_MemoryEdge_Type_Weight
     ON MemoryEdge(RelType, LogOddsWeight DESC);
 ```
 
@@ -198,7 +202,7 @@ CREATE INDEX idx_MemoryEdge_Type_Weight
 CREATE PROPERTY GRAPH MemoryGraph
   NODE TABLES (MemoryNode AS Node)
   EDGE TABLES (
-    MemoryEdge AS Edge 
+    MemoryEdge AS Edge
     SOURCE KEY (SourceNodeId) REFERENCES Node(NodeId)
     DESTINATION KEY (DestNodeId) REFERENCES Node(NodeId)
     LABEL (RelType)
@@ -210,7 +214,7 @@ CREATE PROPERTY GRAPH MemoryGraph
 **Pattern 1: Session Context Window**
 ```gql
 MATCH p = (s:Node)-[e]->(t:Node)
-WHERE s.NodeId = @session_id 
+WHERE s.NodeId = @session_id
   AND s.MemoryTier = 'CONTEXT'
   AND t.MemoryTier = 'CONTEXT'
 RETURN t.NodeId, t.Label, t.Attributes, t.LogOddsWeight, t.CreatedAt, e.RelType
@@ -360,7 +364,7 @@ weight < 0.30 → Soft-delete (is_deleted = true)
 **Create Session**:
 ```sql
 INSERT INTO MemoryNode (
-    NodeId, MemoryTier, Label, LogOddsWeight, 
+    NodeId, MemoryTier, Label, LogOddsWeight,
     LastAccessed, Attributes, CreatedAt, UpdatedAt
 ) VALUES (
     '550e8400-e29b-41d4-a716-446655440000',
@@ -465,5 +469,5 @@ Run all migrations sequentially on fresh instance:
 
 ---
 
-**Last Updated**: 2026-06-16  
+**Last Updated**: 2026-06-16
 **Maintained by**: Agent Memory Graph Development Team

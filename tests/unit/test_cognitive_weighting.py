@@ -1,18 +1,21 @@
 """Tests for cognitive weighting and temporal decay."""
 
-import pytest
-from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
-from src.memory.cognitive_weighting import CognitiveWeighting, CloudSchedulerJob
-from src.db.schema import SchemaConfig
+import pytest
+
+from src.memory.cognitive_weighting import CloudSchedulerJob, CognitiveWeighting
+
+EXPECTED_CONTEXT_COUNT = 10
+EXPECTED_CONTEXT_MEAN_WEIGHT = 0.55
+EXPECTED_SEMANTIC_COUNT = 50
 
 
 class TestTemporalDecay:
     """Tests for temporal weight decay."""
 
     @pytest.mark.asyncio
-    async def test_decay_weights_temporal_success(self):
+    async def test_decay_weights_temporal_success(self) -> None:
         """Test successful temporal decay execution."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
@@ -28,7 +31,7 @@ class TestTemporalDecay:
             mock_batch.execute_update.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_decay_weights_with_custom_rate(self):
+    async def test_decay_weights_with_custom_rate(self) -> None:
         """Test decay with custom decay rate."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
@@ -47,19 +50,19 @@ class TestTemporalDecay:
             assert params["decay_rate"] == custom_rate
 
     @pytest.mark.asyncio
-    async def test_decay_weights_invalid_rate_too_low(self):
+    async def test_decay_weights_invalid_rate_too_low(self) -> None:
         """Test decay with invalid rate (below 0.0)."""
-        with pytest.raises(ValueError, match="decay_rate must be between 0.0 and 1.0"):
+        with pytest.raises(ValueError, match=r"decay_rate must be between 0.0 and 1.0"):
             await CognitiveWeighting.decay_weights_temporal(decay_rate=-0.1)
 
     @pytest.mark.asyncio
-    async def test_decay_weights_invalid_rate_too_high(self):
+    async def test_decay_weights_invalid_rate_too_high(self) -> None:
         """Test decay with invalid rate (above 1.0)."""
-        with pytest.raises(ValueError, match="decay_rate must be between 0.0 and 1.0"):
+        with pytest.raises(ValueError, match=r"decay_rate must be between 0.0 and 1.0"):
             await CognitiveWeighting.decay_weights_temporal(decay_rate=1.5)
 
     @pytest.mark.asyncio
-    async def test_decay_weights_zero_rate(self):
+    async def test_decay_weights_zero_rate(self) -> None:
         """Test decay with zero rate (no decay)."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
@@ -77,7 +80,7 @@ class TestWeightPruning:
     """Tests for weight-based pruning."""
 
     @pytest.mark.asyncio
-    async def test_prune_weights_below_threshold_success(self):
+    async def test_prune_weights_below_threshold_success(self) -> None:
         """Test successful weight pruning."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
@@ -93,7 +96,7 @@ class TestWeightPruning:
             mock_batch.execute_update.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_prune_weights_custom_threshold(self):
+    async def test_prune_weights_custom_threshold(self) -> None:
         """Test pruning with custom threshold."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
@@ -111,15 +114,15 @@ class TestWeightPruning:
             assert params["threshold"] == custom_threshold
 
     @pytest.mark.asyncio
-    async def test_prune_weights_invalid_threshold_low(self):
+    async def test_prune_weights_invalid_threshold_low(self) -> None:
         """Test pruning with invalid threshold (below 0.0)."""
-        with pytest.raises(ValueError, match="threshold must be between 0.0 and 1.0"):
+        with pytest.raises(ValueError, match=r"threshold must be between 0.0 and 1.0"):
             await CognitiveWeighting.prune_weights_below_threshold(threshold=-0.1)
 
     @pytest.mark.asyncio
-    async def test_prune_weights_invalid_threshold_high(self):
+    async def test_prune_weights_invalid_threshold_high(self) -> None:
         """Test pruning with invalid threshold (above 1.0)."""
-        with pytest.raises(ValueError, match="threshold must be between 0.0 and 1.0"):
+        with pytest.raises(ValueError, match=r"threshold must be between 0.0 and 1.0"):
             await CognitiveWeighting.prune_weights_below_threshold(threshold=1.5)
 
 
@@ -127,7 +130,7 @@ class TestWeightStatistics:
     """Tests for weight statistics aggregation."""
 
     @pytest.mark.asyncio
-    async def test_get_weight_statistics_success(self):
+    async def test_get_weight_statistics_success(self) -> None:
         """Test retrieving weight statistics."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
@@ -147,12 +150,12 @@ class TestWeightStatistics:
             assert "CONTEXT" in stats
             assert "SEMANTIC" in stats
             assert "AUDIT" in stats
-            assert stats["CONTEXT"]["count"] == 10
-            assert stats["CONTEXT"]["mean_weight"] == 0.55
-            assert stats["SEMANTIC"]["count"] == 50
+            assert stats["CONTEXT"]["count"] == EXPECTED_CONTEXT_COUNT
+            assert stats["CONTEXT"]["mean_weight"] == EXPECTED_CONTEXT_MEAN_WEIGHT
+            assert stats["SEMANTIC"]["count"] == EXPECTED_SEMANTIC_COUNT
 
     @pytest.mark.asyncio
-    async def test_get_weight_statistics_empty_results(self):
+    async def test_get_weight_statistics_empty_results(self) -> None:
         """Test statistics with no data."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
@@ -171,46 +174,63 @@ class TestWeightStatistics:
 class TestCloudSchedulerJob:
     """Tests for Cloud Scheduler job management."""
 
-    def test_get_job_config(self):
+    def test_get_job_config(self) -> None:
         """Test Cloud Scheduler job configuration generation."""
-        config = CloudSchedulerJob.get_job_config()
+        config = CloudSchedulerJob.get_job_config("https://example.run.app")
 
         assert "decay_job" in config
         assert "pruning_job" in config
         assert config["decay_job"]["schedule"] == CloudSchedulerJob.DECAY_SCHEDULE_CRON
         assert config["pruning_job"]["schedule"] == CloudSchedulerJob.PRUNING_SCHEDULE_CRON
+        assert (
+            config["decay_job"]["http_target"]["uri"]
+            == "https://example.run.app/internal/decay-weights"
+        )
+        assert (
+            config["pruning_job"]["http_target"]["uri"]
+            == "https://example.run.app/internal/prune-weights"
+        )
 
-    def test_decay_schedule_cron_format(self):
+    def test_decay_schedule_cron_format(self) -> None:
         """Test decay job CRON schedule format."""
         # Should be daily at 2 AM UTC: "0 2 * * *"
         assert CloudSchedulerJob.DECAY_SCHEDULE_CRON == "0 2 * * *"
 
-    def test_pruning_schedule_cron_format(self):
+    def test_pruning_schedule_cron_format(self) -> None:
         """Test pruning job CRON schedule format."""
         # Should be daily at 3 AM UTC: "0 3 * * *"
         assert CloudSchedulerJob.PRUNING_SCHEDULE_CRON == "0 3 * * *"
 
     @pytest.mark.asyncio
-    async def test_create_decay_job_not_installed(self):
+    async def test_create_decay_job_not_installed(self) -> None:
         """Test decay job creation fails gracefully when scheduler not installed."""
         # This test verifies the ImportError handling
-        with patch.dict("sys.modules", {"google.cloud.scheduler_v1": None}):
-            # Mock the import to fail
-            with patch("builtins.__import__", side_effect=ImportError("No module")):
-                with pytest.raises(RuntimeError, match="google-cloud-scheduler not installed"):
-                    await CloudSchedulerJob.create_decay_job(project_id="test-project")
+        with (
+            patch.dict("sys.modules", {"google.cloud.scheduler_v1": None}),
+            patch("builtins.__import__", side_effect=ImportError("No module")),
+            pytest.raises(RuntimeError, match="google-cloud-scheduler not installed"),
+        ):
+            await CloudSchedulerJob.create_decay_job(
+                project_id="test-project",
+                cloud_run_url="https://example.run.app",
+            )
 
     @pytest.mark.asyncio
-    async def test_create_pruning_job_not_installed(self):
+    async def test_create_pruning_job_not_installed(self) -> None:
         """Test pruning job creation fails gracefully when scheduler not installed."""
-        with patch.dict("sys.modules", {"google.cloud.scheduler_v1": None}):
-            with patch("builtins.__import__", side_effect=ImportError("No module")):
-                with pytest.raises(RuntimeError, match="google-cloud-scheduler not installed"):
-                    await CloudSchedulerJob.create_pruning_job(project_id="test-project")
+        with (
+            patch.dict("sys.modules", {"google.cloud.scheduler_v1": None}),
+            patch("builtins.__import__", side_effect=ImportError("No module")),
+            pytest.raises(RuntimeError, match="google-cloud-scheduler not installed"),
+        ):
+            await CloudSchedulerJob.create_pruning_job(
+                project_id="test-project",
+                cloud_run_url="https://example.run.app",
+            )
 
-    def test_job_config_has_required_fields(self):
+    def test_job_config_has_required_fields(self) -> None:
         """Test that job config contains all required fields."""
-        config = CloudSchedulerJob.get_job_config()
+        config = CloudSchedulerJob.get_job_config("example.run.app")
 
         for job_name in ["decay_job", "pruning_job"]:
             job = config[job_name]
@@ -221,3 +241,8 @@ class TestCloudSchedulerJob:
             assert "uri" in job["http_target"]
             assert "http_method" in job["http_target"]
             assert job["http_target"]["http_method"] == "POST"
+
+    def test_build_target_uri_rejects_empty_url(self) -> None:
+        """Target URI builder should reject empty Cloud Run URLs."""
+        with pytest.raises(ValueError, match="cloud_run_url cannot be empty"):
+            CloudSchedulerJob._build_target_uri("", "/internal/decay-weights")

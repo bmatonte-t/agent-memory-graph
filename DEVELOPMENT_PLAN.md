@@ -1,16 +1,16 @@
 # Development Plan: Cognitive Agent Memory Graph
 
-**Status**: Phase planning and roadmap definition  
-**Last Updated**: 2026-06-16  
+**Status**: Phase planning and roadmap definition
+**Last Updated**: 2026-06-16
 **Target Launch**: Google Cloud Marketplace (end of phase 6)
 
 ## Overview
 
-This plan structures the build of the Cognitive Agent Memory Graph from architecture implementation through marketplace launch. Each phase includes specific deliverables, success criteria, and testing gates aligned to the [Marketplace Readiness Checklist](marketplace-readiness-checklist.md) and [ADR-0001](architecture/adr/ADR-0001-phase-one-architecture.md).
+This plan structures the build of the Cognitive Agent Memory Graph from architecture implementation through marketplace launch. Each phase includes specific deliverables, success criteria, and testing gates aligned to the [Marketplace Readiness Checklist](docs/marketplace-readiness-checklist.md) and [ADR-0001](docs/architecture/adr/ADR-0001-phase-one-architecture.md).
 
 ## Phase 1: Foundation and Core Memory Layer
 
-**Duration**: 4-6 weeks  
+**Duration**: 4-6 weeks
 **Goal**: Build and validate the tripartite memory model and Spanner Graph schema.
 
 ### Deliverables
@@ -52,7 +52,7 @@ This plan structures the build of the Cognitive Agent Memory Graph from architec
 
 ## Phase 2: MindMap Query Pipeline
 
-**Duration**: 4-6 weeks  
+**Duration**: 4-6 weeks
 **Goal**: Implement the Mine -> Aggregate -> Serialize -> Synthesize pipeline with grounding enforcement.
 
 ### Deliverables
@@ -67,7 +67,7 @@ This plan structures the build of the Cognitive Agent Memory Graph from architec
    - GQL-based variable-length path traversal with cognitive horizon filtering
    - Implement retrieval that respects `cognitive_weight > 0.30` (configurable)
    - Query optimization for multi-hop traversal on interleaved schema
-   - Support for Context + Semantic graph simultaneous traversal
+   - Enforce staged retrieval across memory tiers so Context, Semantic, and Audit reads are isolated per transaction
    - Return edge metadata for provenance linking
 
 3. **Evidence Serialization**
@@ -106,7 +106,7 @@ This plan structures the build of the Cognitive Agent Memory Graph from architec
 
 ## Phase 3: Agent Orchestration and Tool Integration
 
-**Duration**: 3-4 weeks  
+**Duration**: 3-4 weeks
 **Goal**: Wire memory layer to Vertex AI agents via Model Context Protocol (MCP).
 
 ### Deliverables
@@ -145,7 +145,7 @@ This plan structures the build of the Cognitive Agent Memory Graph from architec
 
 ## Phase 4: Security, Observability, and Marketplace Readiness
 
-**Duration**: 4-6 weeks  
+**Duration**: 4-6 weeks
 **Goal**: Harden system for enterprise and marketplace standards.
 
 ### Deliverables
@@ -188,7 +188,7 @@ This plan structures the build of the Cognitive Agent Memory Graph from architec
 - Security audit passes with no critical findings
 - Observability dashboard shows system health metrics
 - Runbooks and troubleshooting guide are complete and validated
-- All items in [Marketplace Readiness Checklist](marketplace-readiness-checklist.md) are marked pass
+- All items in [Marketplace Readiness Checklist](docs/marketplace-readiness-checklist.md) are marked pass
 - Deployment on test marketplace instance is successful
 - Documentation review by internal security and product teams passes
 
@@ -196,7 +196,7 @@ This plan structures the build of the Cognitive Agent Memory Graph from architec
 
 ## Phase 5: Comparative User Testing Pilot
 
-**Duration**: 3-4 weeks  
+**Duration**: 3-4 weeks
 **Goal**: Design and execute a structured user testing pilot that compares this agent with similar tools available in GCP Marketplace.
 
 ### Deliverables
@@ -236,7 +236,7 @@ This plan structures the build of the Cognitive Agent Memory Graph from architec
 
 ## Phase 6: Marketplace Launch and Go-Live
 
-**Duration**: 2-4 weeks  
+**Duration**: 2-4 weeks
 **Goal**: Finalize listing, launch, and establish stable support operations.
 
 ### Deliverables
