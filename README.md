@@ -1,6 +1,8 @@
 # Agent Memory Graph
 
-Agent Memory Graph is a GCP-native memory system for AI agents built around a tripartite graph model, grounded responses, and auditable orchestration.
+Agent Memory Graph is a GCP-native shared memory system for AI agents built around a tripartite graph model, grounded responses, and auditable orchestration.
+
+The product is designed for multiple agents operating inside the same GCP project or organization, with deterministic behavior, strict safety boundaries, low token-spending retrieval, and low-hallucination output generation.
 
 It combines:
 - Durable long-term knowledge in Google Cloud Spanner Graph
@@ -16,10 +18,11 @@ This repository addresses those gaps with:
 - A grounding-first retrieval and synthesis pipeline (MindMap)
 - MCP tool contracts for stable integration with orchestrators and agent runtimes
 - End-to-end request correlation and telemetry
+- Explicit no-evidence behavior (the system reports insufficient graph evidence instead of guessing)
 
 ## Memory Topology
 
-The system models memory as three isolated but connected graph tiers:
+The system models memory as three strictly isolated graph tiers with auditable cross-tier references:
 
 - CONTEXT
   - Session-scoped conversation and turn history.
