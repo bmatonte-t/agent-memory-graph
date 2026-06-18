@@ -67,7 +67,7 @@ class MCPToolService:
             elif request.tool_name == MCPToolName.MEMORY_RECALL_CONTEXT:
                 result = await self._memory_recall_context(request)
             else:
-                raise MCPToolServiceError(
+                raise MCPToolServiceError(  # noqa: TRY301
                     code="validation_error",
                     message=f"unsupported tool_name: {request.tool_name}",
                 )

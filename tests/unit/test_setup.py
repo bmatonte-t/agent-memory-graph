@@ -62,13 +62,9 @@ class TestProjectSetup:
         )
         assert fact.entity_type == "PERSON"
 
-        audit = AuditResponse(
-            event_id="test", event_type="TEST", timestamp=datetime.now(UTC)
-        )
+        audit = AuditResponse(event_id="test", event_type="TEST", timestamp=datetime.now(UTC))
         assert audit.event_type == "TEST"
 
-        context = ContextResponse(
-            session_id="test", turns=[], retrieved_at=datetime.now(UTC)
-        )
+        context = ContextResponse(session_id="test", turns=[], retrieved_at=datetime.now(UTC))
         assert context.session_id == "test"
         assert len(context.turns) == 0

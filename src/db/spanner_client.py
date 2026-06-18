@@ -1,7 +1,8 @@
 """Spanner client initialization and connection pooling."""
 
-import os
-from typing import Optional
+from __future__ import annotations
+
+from typing import Self
 
 from google.cloud import spanner
 
@@ -9,12 +10,12 @@ from google.cloud import spanner
 class SpannerClient:
     """Singleton Spanner client for managing database connections."""
 
-    _instance: Optional["SpannerClient"] = None
-    _client: Optional[spanner.Client] = None
-    _instance_ref: Optional[spanner.Instance] = None
-    _database: Optional[spanner.Database] = None
+    _instance: SpannerClient | None = None
+    _client: spanner.Client | None = None
+    _instance_ref: spanner.Instance | None = None
+    _database: spanner.Database | None = None
 
-    def __new__(cls) -> "SpannerClient":
+    def __new__(cls) -> Self:
         """Ensure only one instance exists."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
@@ -26,9 +27,8 @@ class SpannerClient:
         project_id: str,
         instance_id: str,
         database_id: str,
-    ) -> "SpannerClient":
-        """
-        Initialize the Spanner client and return the singleton instance.
+    ) -> SpannerClient:
+        """Initialize the Spanner client and return the singleton instance.
 
         Args:
             project_id: GCP project ID
@@ -49,24 +49,21 @@ class SpannerClient:
     def get_client(cls) -> spanner.Client:
         """Get the Spanner client. Raises error if not initialized."""
         if cls._client is None:
-            raise RuntimeError(
-                "SpannerClient not initialized. Call initialize() first."
-            )
+            msg = "SpannerClient not initialized. Call initialize() first."
+            raise RuntimeError(msg)
         return cls._client
 
     @classmethod
     def get_database(cls) -> spanner.Database:
         """Get the Spanner database. Raises error if not initialized."""
         if cls._database is None:
-            raise RuntimeError(
-                "SpannerClient not initialized. Call initialize() first."
-            )
+            msg = "SpannerClient not initialized. Call initialize() first."
+            raise RuntimeError(msg)
         return cls._database
 
     @classmethod
-    def execute_sql(cls, sql: str, params: Optional[dict] = None) -> list:
-        """
-        Execute a SQL query and return results.
+    def execute_sql(cls, sql: str, params: dict | None = None) -> list:
+        """Execute a SQL query and return results.
 
         Args:
             sql: SQL query string
@@ -81,9 +78,8 @@ class SpannerClient:
             return list(results)
 
     @classmethod
-    def execute_update(cls, sql: str, params: Optional[dict] = None) -> int:
-        """
-        Execute a DML update and return rows affected.
+    def execute_update(cls, sql: str, params: dict | None = None) -> int:
+        """Execute a DML update and return rows affected.
 
         Args:
             sql: DML query string
@@ -94,8 +90,7 @@ class SpannerClient:
         """
         database = cls.get_database()
         with database.batch() as batch:
-            row_count = batch.execute_update(sql, params or {})
-        return row_count
+            return batch.execute_update(sql, params or {})
 
     @classmethod
     def close(cls) -> None:

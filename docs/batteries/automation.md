@@ -14,7 +14,7 @@ Calculate and compare code complexity metrics using `radon` on each opened PR.
 
 ### PR Style Checker
 
-Ensures titles are well formatted and that PRs have assignees and tags so that automatic release notes look pretty.
+Ensures titles are well formatted and warns when PRs are missing assignees or tags so that automatic release notes stay tidy without blocking merges.
 
 ### Pre-commit Auto-update
 

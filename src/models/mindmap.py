@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime  # noqa: TC003
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -86,6 +86,8 @@ class SerializedFact(BaseModel):
     statement: str = Field(..., min_length=1)
     path_id: str = Field(..., min_length=1)
     edge_ids: list[str] = Field(default_factory=list)
+    rel_type: str = Field(..., min_length=1)
+    weight: float = Field(...)
 
 
 class SerializationResult(BaseModel):

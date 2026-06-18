@@ -25,13 +25,14 @@ class VertexAgentAdapter(Protocol):
         Returns:
             AgentOrchestrationResponse: Orchestrated agent response.
         """
+        ...
 
 
 @dataclass(slots=True)
 class NotConfiguredVertexAdapter:
     """Fallback adapter used when Vertex runtime is not configured."""
 
-    async def respond(self, request: AgentOrchestrationRequest) -> AgentOrchestrationResponse:
+    async def respond(self, request: AgentOrchestrationRequest) -> AgentOrchestrationResponse:  # noqa: ARG002
         """Raise explicit runtime error for missing Vertex configuration.
 
         Args:
@@ -40,10 +41,11 @@ class NotConfiguredVertexAdapter:
         Raises:
             RuntimeError: Always raised because adapter is a placeholder.
         """
-        raise RuntimeError(
+        msg = (
             "Vertex adapter is not configured for this environment. "
             "Use execution mode 'single' or provide a concrete VertexAgentAdapter."
         )
+        raise RuntimeError(msg)
 
 
 @dataclass(slots=True)

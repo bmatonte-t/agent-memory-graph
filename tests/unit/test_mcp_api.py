@@ -2,19 +2,27 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi.testclient import TestClient
 
 from src.api.main import app
+from src.models.mcp import MCPInvokeRequest, MCPInvokeResponse, MCPToolName
+
+if TYPE_CHECKING:
+    import pytest
+
+HTTP_OK = 200
+HTTP_UNPROCESSABLE_ENTITY = 422
 
 
 class TestMCPApi:
     """HTTP contract tests for MCP invocation endpoint."""
 
-    def test_invoke_endpoint_calls_tool_service(self, monkeypatch) -> None:
+    def test_invoke_endpoint_calls_tool_service(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Endpoint should return normalized tool response from service."""
-        from src.models.mcp import MCPInvokeResponse, MCPToolName
 
-        async def fake_invoke(_self, _request):
+        async def fake_invoke(_self: object, _request: MCPInvokeRequest) -> MCPInvokeResponse:
             return MCPInvokeResponse(
                 tool_name=MCPToolName.MEMORY_SEARCH,
                 success=True,
@@ -35,7 +43,7 @@ class TestMCPApi:
             },
         )
 
-        assert response.status_code == 200
+        assert response.status_code == HTTP_OK
         payload = response.json()
         assert payload["tool_name"] == "memory_search"
         assert payload["success"] is True
@@ -50,4 +58,4 @@ class TestMCPApi:
             json={"tool_name": "unknown_tool", "arguments": {}},
         )
 
-        assert response.status_code == 422
+        assert response.status_code == HTTP_UNPROCESSABLE_ENTITY

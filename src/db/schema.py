@@ -1,12 +1,15 @@
 """Schema initialization, migrations, and validation."""
 
-import os
+import logging
 from pathlib import Path
-from typing import List
+from typing import ClassVar
 
-from google.cloud import spanner
+from google.api_core import exceptions as gcp_exceptions
+from google.cloud import spanner  # noqa: TC002
 
-from src.db.spanner_client import SpannerClient
+logger = logging.getLogger(__name__)
+
+_MINIMUM_INDEX_COUNT = 3
 
 
 class SchemaManager:
@@ -15,18 +18,38 @@ class SchemaManager:
     MIGRATIONS_DIR = Path(__file__).parent.parent.parent / "migrations"
 
     @classmethod
-    def get_migration_files(cls) -> List[str]:
+    def get_migration_files(cls) -> list[str]:
         """Get sorted list of migration files."""
         if not cls.MIGRATIONS_DIR.exists():
             return []
 
-        migrations = sorted([f.name for f in cls.MIGRATIONS_DIR.glob("*.sql")])
-        return migrations
+        return sorted([f.name for f in cls.MIGRATIONS_DIR.glob("*.sql")])
+
+    @staticmethod
+    def _parse_sql_statements(sql: str) -> list[str]:
+        """Parse SQL file content into executable statements.
+
+        Removes line comments and splits on semicolons.
+
+        Args:
+            sql: Raw SQL file content.
+
+        Returns:
+            list[str]: Non-empty SQL statements.
+        """
+        uncommented_lines: list[str] = []
+        for line in sql.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("--"):
+                continue
+            uncommented_lines.append(line)
+
+        cleaned_sql = "\n".join(uncommented_lines)
+        return [statement.strip() for statement in cleaned_sql.split(";") if statement.strip()]
 
     @classmethod
     def init_schema(cls, database: spanner.Database) -> None:
-        """
-        Initialize schema by running migrations in order.
+        """Initialize schema by running migrations in order.
 
         Args:
             database: Spanner database instance
@@ -37,34 +60,31 @@ class SchemaManager:
         migration_files = cls.get_migration_files()
 
         if not migration_files:
-            raise RuntimeError(f"No migration files found in {cls.MIGRATIONS_DIR}")
+            msg = f"No migration files found in {cls.MIGRATIONS_DIR}"
+            raise RuntimeError(msg)
 
         for migration_file in migration_files:
             migration_path = cls.MIGRATIONS_DIR / migration_file
-            with open(migration_path, "r") as f:
+            with open(migration_path) as f:
                 sql = f.read()
 
-            # Split by semicolon for multiple statements
-            statements = [s.strip() for s in sql.split(";") if s.strip()]
+            statements = cls._parse_sql_statements(sql)
+            if not statements:
+                logger.warning(
+                    "Skipping migration with no executable statements: %s", migration_file
+                )
+                continue
 
-            for statement in statements:
-                # Skip comments
-                if statement.startswith("--"):
-                    continue
-
-                try:
-                    # Use execute_update for DDL
-                    with database.batch() as batch:
-                        batch.execute_update(statement)
-                    print(f"✓ Executed: {statement[:50]}...")
-                except Exception as e:
-                    print(f"✗ Failed to execute migration {migration_file}: {e}")
-                    # Continue with other migrations; some may be idempotent
+            try:
+                operation = database.update_ddl(statements=statements)
+                operation.result()
+            except (gcp_exceptions.GoogleAPICallError, gcp_exceptions.RetryError) as error:
+                msg = f"Failed to apply migration {migration_file}: {error}"
+                raise RuntimeError(msg) from error
 
     @classmethod
     def validate_schema(cls, database: spanner.Database) -> dict:
-        """
-        Validate that the expected schema exists.
+        """Validate that the expected schema exists.
 
         Args:
             database: Spanner database instance
@@ -83,47 +103,62 @@ class SchemaManager:
         try:
             with database.snapshot() as snapshot:
                 results = snapshot.execute_sql(
-                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'MemoryNode'"
+                    "SELECT column_name"
+                    " FROM information_schema.columns"
+                    " WHERE table_name = 'MemoryNode'"
                 )
                 columns = list(results)
                 if columns:
                     validation_results["memory_node_exists"] = True
-        except Exception as e:
-            print(f"Error checking MemoryNode table: {e}")
+        except Exception:  # noqa: BLE001
+            logger.debug("Error checking MemoryNode table", exc_info=True)
 
         # Check if MemoryEdge table exists
         try:
             with database.snapshot() as snapshot:
                 results = snapshot.execute_sql(
-                    "SELECT column_name FROM information_schema.columns WHERE table_name = 'MemoryEdge'"
+                    "SELECT column_name"
+                    " FROM information_schema.columns"
+                    " WHERE table_name = 'MemoryEdge'"
                 )
                 columns = list(results)
                 if columns:
                     validation_results["memory_edge_exists"] = True
-        except Exception as e:
-            print(f"Error checking MemoryEdge table: {e}")
+        except Exception:  # noqa: BLE001
+            logger.debug("Error checking MemoryEdge table", exc_info=True)
 
-        # Check if property graph exists (may not be queryable the same way)
-        validation_results["property_graph_exists"] = True  # Assume success if no error
+        # Check if property graph exists
+        try:
+            with database.snapshot() as snapshot:
+                results = snapshot.execute_sql(
+                    "SELECT property_graph_name"
+                    " FROM information_schema.property_graphs"
+                    " WHERE property_graph_name = 'AgentMemoryGraph'"
+                )
+                if list(results):
+                    validation_results["property_graph_exists"] = True
+        except Exception:  # noqa: BLE001
+            logger.debug("Error checking property graph", exc_info=True)
 
         # Check if indexes exist
         try:
             with database.snapshot() as snapshot:
                 results = snapshot.execute_sql(
-                    "SELECT index_name FROM information_schema.statistics WHERE table_name IN ('MemoryNode', 'MemoryEdge')"
+                    "SELECT index_name"
+                    " FROM information_schema.statistics"
+                    " WHERE table_name IN ('MemoryNode', 'MemoryEdge')"
                 )
                 indexes = list(results)
-                if len(indexes) >= 3:  # We expect at least 3 indexes
+                if len(indexes) >= _MINIMUM_INDEX_COUNT:  # We expect at least 3 indexes
                     validation_results["indexes_exist"] = True
-        except Exception as e:
-            print(f"Error checking indexes: {e}")
+        except Exception:  # noqa: BLE001
+            logger.debug("Error checking indexes", exc_info=True)
 
         return validation_results
 
     @classmethod
     def reset_schema_for_testing(cls, database: spanner.Database) -> None:
-        """
-        Reset schema for testing (truncate all tables).
+        """Reset schema for testing (truncate all tables).
 
         WARNING: This destroys all data!
 
@@ -135,10 +170,9 @@ class SchemaManager:
         for table in tables:
             try:
                 with database.batch() as batch:
-                    batch.execute_update(f"DELETE FROM {table} WHERE true")
-                print(f"✓ Truncated table: {table}")
-            except Exception as e:
-                print(f"✗ Error truncating {table}: {e}")
+                    batch.execute_update(f"DELETE FROM {table} WHERE true")  # noqa: S608
+            except Exception:  # noqa: BLE001
+                logger.debug("Error truncating %s", table, exc_info=True)
 
 
 class SchemaConfig:
@@ -148,7 +182,11 @@ class SchemaConfig:
     MEMORY_TIER_CONTEXT = "CONTEXT"
     MEMORY_TIER_SEMANTIC = "SEMANTIC"
     MEMORY_TIER_AUDIT = "AUDIT"
-    VALID_MEMORY_TIERS = {MEMORY_TIER_CONTEXT, MEMORY_TIER_SEMANTIC, MEMORY_TIER_AUDIT}
+    VALID_MEMORY_TIERS: ClassVar[set[str]] = {
+        MEMORY_TIER_CONTEXT,
+        MEMORY_TIER_SEMANTIC,
+        MEMORY_TIER_AUDIT,
+    }
 
     # POLE+O Entity Types
     ENTITY_TYPE_PERSON = "PERSON"
@@ -156,7 +194,7 @@ class SchemaConfig:
     ENTITY_TYPE_LOCATION = "LOCATION"
     ENTITY_TYPE_EVENT = "EVENT"
     ENTITY_TYPE_ORGANIZATION = "ORGANIZATION"
-    VALID_ENTITY_TYPES = {
+    VALID_ENTITY_TYPES: ClassVar[set[str]] = {
         ENTITY_TYPE_PERSON,
         ENTITY_TYPE_OBJECT,
         ENTITY_TYPE_LOCATION,

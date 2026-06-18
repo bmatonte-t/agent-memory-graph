@@ -9,7 +9,7 @@ import pytest
 
 from src.mcp.service import MCPToolService
 from src.models.mcp import MCPInvokeRequest, MCPToolName
-from src.models.mindmap import MindMapTrace, StageTiming, SynthesisResult
+from src.models.mindmap import MindMapResponse, MindMapTrace, StageTiming, SynthesisResult
 from src.models.schemas import AuditResponse, ContextResponse, FactResponse
 
 
@@ -146,9 +146,7 @@ class TestMCPToolService:
         assert response.result["session_id"] == "sess_1"
 
     @staticmethod
-    def _build_mindmap_response():
-        from src.models.mindmap import MindMapResponse
-
+    def _build_mindmap_response() -> MindMapResponse:
         return MindMapResponse(
             query="what happened?",
             synthesis=SynthesisResult(

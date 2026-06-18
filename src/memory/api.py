@@ -1,10 +1,11 @@
 """Core memory API implementations."""
 
+import json
 import logging
 import math
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Dict, List, Optional
+from typing import Any, Protocol
 
 from src.db.schema import SchemaConfig
 from src.db.spanner_client import SpannerClient
@@ -19,8 +20,81 @@ from src.models.schemas import (
 logger = logging.getLogger(__name__)
 
 
+class _SpannerBatch(Protocol):
+    """Protocol for the subset of batch API used by MemoryAPI."""
+
+    def execute_update(self, sql: str, params: dict[str, Any]) -> int: ...
+
+
 class MemoryAPI:
     """Core memory API for tripartite memory operations."""
+
+    @staticmethod
+    def _serialize_json_attributes(attributes: dict[str, Any]) -> str:
+        """Serialize attributes payload to JSON string.
+
+        Args:
+            attributes: Attribute mapping to persist.
+
+        Returns:
+            str: JSON-encoded payload.
+        """
+        return json.dumps(attributes, separators=(",", ":"), default=str)
+
+    @staticmethod
+    def _insert_audit_event_in_batch(
+        *,
+        batch: _SpannerBatch,
+        event_type: str,
+        source_node_id: str,
+        context: dict[str, Any] | None,
+        timestamp: datetime,
+    ) -> AuditResponse:
+        """Insert an audit event inside an existing write batch.
+
+        Args:
+            batch: Active Spanner batch.
+            event_type: Audit event type.
+            source_node_id: Source node identifier.
+            context: Optional context payload.
+            timestamp: Event timestamp.
+
+        Returns:
+            AuditResponse: Created audit event descriptor.
+        """
+        event_id = str(uuid.uuid4())
+        event_attributes = {
+            "event_type": event_type,
+            "source_node_id": source_node_id,
+            **(dict(context) if context else {}),
+        }
+
+        sql = """
+            INSERT INTO MemoryNode (
+                NodeId, MemoryTier, Label, LogOddsWeight,
+                LastAccessed, Attributes, CreatedAt, UpdatedAt
+            ) VALUES (
+                @node_id, @tier, @label, @weight,
+                @now, JSON(@attributes), @now, @now
+            )
+        """
+        batch.execute_update(
+            sql,
+            {
+                "node_id": event_id,
+                "tier": SchemaConfig.MEMORY_TIER_AUDIT,
+                "label": "Event",
+                "weight": SchemaConfig.INITIAL_WEIGHT,
+                "now": timestamp,
+                "attributes": MemoryAPI._serialize_json_attributes(event_attributes),
+            },
+        )
+
+        return AuditResponse(
+            event_id=event_id,
+            event_type=event_type,
+            timestamp=timestamp,
+        )
 
     @staticmethod
     def _get_node_memory_tier(node_id: str) -> str | None:
@@ -47,7 +121,8 @@ class MemoryAPI:
             with database.snapshot() as snapshot:
                 rows = list(snapshot.execute_sql(query, {"node_id": node_id}))
         except Exception as error:
-            raise RuntimeError(f"Failed to lookup node tier: {error}") from error
+            msg = f"Failed to lookup node tier: {error}"
+            raise RuntimeError(msg) from error
 
         if not rows:
             return None
@@ -56,10 +131,9 @@ class MemoryAPI:
 
     @staticmethod
     async def create_session(
-        session_id: str, user_id: str, metadata: Optional[Dict[str, Any]] = None
+        session_id: str, user_id: str, metadata: dict[str, Any] | None = None
     ) -> SessionResponse:
-        """
-        Create a new session and initialize Context Graph.
+        """Create a new session and initialize Context Graph.
 
         Args:
             session_id: Unique session identifier
@@ -74,7 +148,8 @@ class MemoryAPI:
             RuntimeError: If database write fails
         """
         if not session_id or not user_id:
-            raise ValueError("session_id and user_id cannot be empty")
+            msg = "session_id and user_id cannot be empty"
+            raise ValueError(msg)
 
         created_at = datetime.now(UTC)
 
@@ -101,12 +176,17 @@ class MemoryAPI:
                         "label": "Session",
                         "weight": SchemaConfig.INITIAL_WEIGHT,
                         "now": created_at,
-                        "attributes": str(attributes),
+                        "attributes": MemoryAPI._serialize_json_attributes(attributes),
                     },
                 )
 
-            # Log audit event
-            await MemoryAPI.record_audit_event("CREATE_SESSION", session_id, {"user_id": user_id})
+                MemoryAPI._insert_audit_event_in_batch(
+                    batch=batch,
+                    event_type="CREATE_SESSION",
+                    source_node_id=session_id,
+                    context={"user_id": user_id},
+                    timestamp=created_at,
+                )
 
             return SessionResponse(
                 session_id=session_id,
@@ -114,17 +194,17 @@ class MemoryAPI:
                 status="active",
             )
         except Exception as e:
-            raise RuntimeError(f"Failed to create session: {e}")
+            msg = f"Failed to create session: {e}"
+            raise RuntimeError(msg) from e
 
     @staticmethod
     async def add_semantic_fact(
         entity_type: str,
         entity_id: str,
-        attributes: Optional[Dict[str, Any]] = None,
-        relationship: Optional[Dict[str, str]] = None,
+        attributes: dict[str, Any] | None = None,
+        relationship: dict[str, str] | None = None,
     ) -> FactResponse:
-        """
-        Ingest an entity into Semantic Graph with baseline cognitive weight.
+        """Ingest an entity into Semantic Graph with baseline cognitive weight.
 
         Args:
             entity_type: POLE+O entity type (PERSON, OBJECT, etc.)
@@ -140,15 +220,16 @@ class MemoryAPI:
             RuntimeError: If database write fails
         """
         if entity_type not in SchemaConfig.VALID_ENTITY_TYPES:
-            raise ValueError(
-                f"Invalid entity_type. Must be one of: {SchemaConfig.VALID_ENTITY_TYPES}"
-            )
+            msg = f"Invalid entity_type. Must be one of: {SchemaConfig.VALID_ENTITY_TYPES}"
+            raise ValueError(msg)
         if not entity_id:
-            raise ValueError("entity_id cannot be empty")
+            msg = "entity_id cannot be empty"
+            raise ValueError(msg)
         if relationship and relationship.get("source_id"):
             source_tier = MemoryAPI._get_node_memory_tier(relationship["source_id"])
             if source_tier == SchemaConfig.MEMORY_TIER_AUDIT:
-                raise ValueError("relationship source cannot be an AUDIT tier node")
+                msg = "relationship source cannot be an AUDIT tier node"
+                raise ValueError(msg)
 
         created_at = datetime.now(UTC)
         node_attributes = {
@@ -178,7 +259,7 @@ class MemoryAPI:
                         "label": entity_type,
                         "weight": SchemaConfig.INITIAL_WEIGHT,
                         "now": created_at,
-                        "attributes": str(node_attributes),
+                        "attributes": MemoryAPI._serialize_json_attributes(node_attributes),
                     },
                 )
 
@@ -209,12 +290,13 @@ class MemoryAPI:
                             },
                         )
 
-            # Log audit event
-            await MemoryAPI.record_audit_event(
-                "ADD_SEMANTIC_FACT",
-                entity_id,
-                {"entity_type": entity_type, "relationship": relationship},
-            )
+                MemoryAPI._insert_audit_event_in_batch(
+                    batch=batch,
+                    event_type="ADD_SEMANTIC_FACT",
+                    source_node_id=entity_id,
+                    context={"entity_type": entity_type, "relationship": relationship},
+                    timestamp=created_at,
+                )
 
             # Update weight on successful creation
             await MemoryAPI._update_weight_on_successful_use([entity_id])
@@ -227,16 +309,16 @@ class MemoryAPI:
                 created_at=created_at,
             )
         except Exception as e:
-            raise RuntimeError(f"Failed to add semantic fact: {e}")
+            msg = f"Failed to add semantic fact: {e}"
+            raise RuntimeError(msg) from e
 
     @staticmethod
     async def record_audit_event(
         event_type: str,
         source_node_id: str,
-        context: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> AuditResponse:
-        """
-        Record an immutable audit event in Audit Graph.
+        """Record an immutable audit event in Audit Graph.
 
         Args:
             event_type: Type of audit event
@@ -251,54 +333,28 @@ class MemoryAPI:
             RuntimeError: If database write fails
         """
         if not event_type or not source_node_id:
-            raise ValueError("event_type and source_node_id cannot be empty")
+            msg = "event_type and source_node_id cannot be empty"
+            raise ValueError(msg)
 
         timestamp = datetime.now(UTC)
-        event_id = str(uuid.uuid4())
-        event_attributes = {
-            "event_type": event_type,
-            "source_node_id": source_node_id,
-            **(context or {}),
-        }
-
-        # Insert audit event node (append-only)
-        sql = """
-            INSERT INTO MemoryNode (
-                NodeId, MemoryTier, Label, LogOddsWeight,
-                LastAccessed, Attributes, CreatedAt, UpdatedAt
-            ) VALUES (
-                @node_id, @tier, @label, @weight,
-                @now, JSON(@attributes), @now, @now
-            )
-        """
-
         try:
             database = SpannerClient.get_database()
             with database.batch() as batch:
-                batch.execute_update(
-                    sql,
-                    {
-                        "node_id": event_id,
-                        "tier": SchemaConfig.MEMORY_TIER_AUDIT,
-                        "label": "Event",
-                        "weight": SchemaConfig.INITIAL_WEIGHT,
-                        "now": timestamp,
-                        "attributes": str(event_attributes),
-                    },
+                return MemoryAPI._insert_audit_event_in_batch(
+                    batch=batch,
+                    event_type=event_type,
+                    source_node_id=source_node_id,
+                    context=context,
+                    timestamp=timestamp,
                 )
 
-            return AuditResponse(
-                event_id=event_id,
-                event_type=event_type,
-                timestamp=timestamp,
-            )
         except Exception as e:
-            raise RuntimeError(f"Failed to record audit event: {e}")
+            msg = f"Failed to record audit event: {e}"
+            raise RuntimeError(msg) from e
 
     @staticmethod
     async def retrieve_context_window(session_id: str, window_size: int = 10) -> ContextResponse:
-        """
-        Retrieve recent session history via GQL with edge metadata.
+        """Retrieve recent session history via GQL with edge metadata.
 
         Args:
             session_id: Session identifier
@@ -312,9 +368,11 @@ class MemoryAPI:
             RuntimeError: If database query fails
         """
         if not session_id:
-            raise ValueError("session_id cannot be empty")
-        if not (1 <= window_size <= 100):
-            raise ValueError("window_size must be between 1 and 100")
+            msg = "session_id cannot be empty"
+            raise ValueError(msg)
+        if not (1 <= window_size <= 100):  # noqa: PLR2004
+            msg = "window_size must be between 1 and 100"
+            raise ValueError(msg)
 
         retrieved_at = datetime.now(UTC)
 
@@ -346,7 +404,7 @@ class MemoryAPI:
                 )
 
                 for row in results:
-                    turn_id, label, attributes, weight, created_at, rel_type = row
+                    turn_id, label, attributes, weight, created_at, _rel_type = row
                     turn = ContextTurn(
                         turn_id=turn_id,
                         node_id=turn_id,
@@ -380,15 +438,15 @@ class MemoryAPI:
                 retrieved_at=retrieved_at,
             )
         except Exception as e:
-            raise RuntimeError(f"Failed to retrieve context window: {e}")
+            msg = f"Failed to retrieve context window: {e}"
+            raise RuntimeError(msg) from e
 
     @staticmethod
     async def _update_weight_on_successful_use(
-        node_ids: List[str],
+        node_ids: list[str],
         memory_tier: str = SchemaConfig.MEMORY_TIER_SEMANTIC,
     ) -> None:
-        """
-        Update cognitive weights on successful use (confirmation bias).
+        """Update cognitive weights on successful use (confirmation bias).
 
         Internal method: increments LogOddsWeight by ln(BF) where BF=1.25.
 
@@ -404,12 +462,12 @@ class MemoryAPI:
             return
 
         if memory_tier not in SchemaConfig.VALID_MEMORY_TIERS:
-            raise ValueError(
-                f"invalid memory_tier. Must be one of: {SchemaConfig.VALID_MEMORY_TIERS}"
-            )
+            msg = f"invalid memory_tier. Must be one of: {SchemaConfig.VALID_MEMORY_TIERS}"
+            raise ValueError(msg)
 
         if memory_tier == SchemaConfig.MEMORY_TIER_AUDIT:
-            raise ValueError("audit tier is append-only and cannot be updated")
+            msg = "audit tier is append-only and cannot be updated"
+            raise ValueError(msg)
 
         # Bayesian log-odds update: ln(1.25) ≈ 0.223
         bayes_factor_ln = math.log(SchemaConfig.BAYES_FACTOR_SUCCESS)
@@ -434,6 +492,6 @@ class MemoryAPI:
                         "tier": memory_tier,
                     },
                 )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001
             # Log but don't raise - weight update is not critical to operation
             logger.warning("failed to update weights", exc_info=e)
