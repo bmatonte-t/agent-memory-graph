@@ -76,7 +76,7 @@ backoff(attempt: int) = min(
 - `_update_weight_on_successful_use()`: One key per batch
 - `record_audit_event()`: One key per event (append-only, lower risk)
 
-**Rationale**: 
+**Rationale**:
 - Spanner lacks native idempotency support
 - We cannot persistently track keys without adding overhead
 - For Phase 2, we focus on within-transaction idempotency
@@ -91,7 +91,7 @@ backoff(attempt: int) = min(
 **Proposed Behavior** (Phase 2): Explicit with recovery
 1. Attempt weight update with retry logic
 2. If succeeds after retry: log success
-3. If fails after max retries: 
+3. If fails after max retries:
    - Log error with context (tenant_id, node_ids, attempt count)
    - Raise WeightUpdateFailed exception
    - Caller can decide: fail forward or suppress

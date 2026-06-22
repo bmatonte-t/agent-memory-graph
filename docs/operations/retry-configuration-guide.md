@@ -285,6 +285,6 @@ ORDER BY total_attempts DESC;
 
 ---
 
-**Last Updated**: 2026-06-22  
-**Maintainer**: Agent Memory Graph Team  
+**Last Updated**: 2026-06-22
+**Maintainer**: Agent Memory Graph Team
 **Phase**: 2 (Lock Resilience)

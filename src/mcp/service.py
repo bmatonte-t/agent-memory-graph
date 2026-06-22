@@ -304,7 +304,7 @@ class MCPToolService:
             ) from error
 
         try:
-            # TODO(Phase2-Observability): Update mindmap_pipeline.execute to accept tenant_id
+            # Invoke MindMap pipeline with tenant isolation and authorization scope
             response = await self.mindmap_pipeline.execute(
                 query=query,
                 session_id=session_id,

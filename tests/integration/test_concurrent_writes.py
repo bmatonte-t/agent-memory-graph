@@ -38,12 +38,8 @@ class TestConcurrentWrites:
                 )
 
             mock_db.batch.side_effect = batch_context_manager
-            mock_db.execute_query.return_value.__enter__ = MagicMock(
-                return_value=mock_snapshot
-            )
-            mock_db.execute_query.return_value.__exit__ = MagicMock(
-                return_value=None
-            )
+            mock_db.execute_query.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.execute_query.return_value.__exit__ = MagicMock(return_value=None)
             mock_snapshot.data.return_value = []
             mock_client.get_database.return_value = mock_db
 
@@ -84,12 +80,8 @@ class TestConcurrentWrites:
                 )
 
             mock_db.batch.side_effect = batch_context_manager
-            mock_db.execute_query.return_value.__enter__ = MagicMock(
-                return_value=mock_snapshot
-            )
-            mock_db.execute_query.return_value.__exit__ = MagicMock(
-                return_value=None
-            )
+            mock_db.execute_query.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.execute_query.return_value.__exit__ = MagicMock(return_value=None)
             mock_snapshot.data.return_value = []
             mock_client.get_database.return_value = mock_db
 
@@ -124,12 +116,8 @@ class TestConcurrentWrites:
                 )
 
             mock_db.batch.side_effect = batch_context_manager
-            mock_db.execute_query.return_value.__enter__ = MagicMock(
-                return_value=mock_snapshot
-            )
-            mock_db.execute_query.return_value.__exit__ = MagicMock(
-                return_value=None
-            )
+            mock_db.execute_query.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.execute_query.return_value.__exit__ = MagicMock(return_value=None)
             mock_snapshot.data.return_value = []
             mock_client.get_database.return_value = mock_db
 
@@ -175,12 +163,8 @@ class TestConcurrentWrites:
                 )
 
             mock_db.batch.side_effect = batch_context_manager
-            mock_db.execute_query.return_value.__enter__ = MagicMock(
-                return_value=mock_snapshot
-            )
-            mock_db.execute_query.return_value.__exit__ = MagicMock(
-                return_value=None
-            )
+            mock_db.execute_query.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.execute_query.return_value.__exit__ = MagicMock(return_value=None)
             mock_snapshot.data.return_value = []
             mock_client.get_database.return_value = mock_db
 
