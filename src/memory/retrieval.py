@@ -340,16 +340,119 @@ class NeighborEnricher:
         Raises:
             NeighborRetrievalError: If query fails or timeout
         """
-        # TODO: Phase 4C implementation
-        # 1. Build Tier 1 query: MATCH (e:Entity)-[r]->(n) WHERE ...
-        # 2. Apply context_flags to WHERE clause
-        # 3. Execute with retry/backoff (Phase 2 resilience)
-        # 4. Limit to max_neighbors_per_entity (hard cap)
-        # 5. Serialize as "entity->rel->neighbor1,neighbor2,..." (CSV)
-        # 6. Validate total chars < max_chars, fail gracefully
-        # 7. Return (serialized_neighbors, total_chars) tuple
-        logger.warning("enrich_neighbors() not yet implemented (Phase 4C)")
-        return [], 0
+        tenant_id = validate_tenant_id(tenant_id)
+        entity_id = validate_required_string(entity_id, field_name="entity_id")
+        context_flags = context_flags or {}
+
+        async def _execute_query() -> tuple[list[str], int]:
+            try:
+                # Tier 1: Direct neighbors (1-hop)
+                query_tier1 = f"""
+                    MATCH (e:Node)-[r]->(n:Node)
+                    WHERE e.Attributes.entity_id = @entity_id
+                    RETURN DISTINCT r.RelType as rel_type, n.Attributes.entity_id as neighbor_id
+                    ORDER BY r.RelType ASC
+                    LIMIT @max_direct_neighbors;
+                """
+
+                from src.db.spanner_client import SpannerClient
+
+                database = SpannerClient.get_database()
+                neighbors_by_rel: dict[str, list[str]] = {}
+
+                with database.snapshot() as snapshot:
+                    params = {
+                        "entity_id": entity_id,
+                        "max_direct_neighbors": self.max_direct_neighbors,
+                    }
+
+                    rows = snapshot.execute_sql(query_tier1, params)
+
+                    for row in rows:
+                        rel_type = row[0]  # rel_type
+                        neighbor_id = row[1]  # neighbor_id
+
+                        if not rel_type or not neighbor_id:
+                            continue
+
+                        # Clean underscores
+                        rel_type_clean = str(rel_type).replace("_", " ")
+                        neighbor_id_clean = str(neighbor_id).replace("_", " ")
+
+                        # Group neighbors by relationship type
+                        if rel_type_clean not in neighbors_by_rel:
+                            neighbors_by_rel[rel_type_clean] = []
+
+                        neighbors_by_rel[rel_type_clean].append(neighbor_id_clean)
+
+                # Tier 2: Apply context flags (conditional refinement)
+                skip_redundant = context_flags.get("skip_redundant_paths", False)
+                prioritize_labels = context_flags.get("prioritize_labels", [])
+
+                # Filter based on context flags
+                filtered_neighbors: dict[str, list[str]] = {}
+                for rel_type, neighbors in neighbors_by_rel.items():
+                    # Skip redundant paths if flag set
+                    if skip_redundant and rel_type in ["is_same_as", "has_duplicate"]:
+                        continue
+
+                    # Limit neighbors per relationship to max_neighbors_per_entity
+                    filtered_neighbors[rel_type] = neighbors[: self.max_neighbors_per_entity]
+
+                # Serialize: "entity->rel->neighbor1,neighbor2,..."
+                serialized_neighbors = []
+                for rel_type, neighbors in filtered_neighbors.items():
+                    serialized = f"{entity_id}->{rel_type}->{','.join(neighbors)}"
+                    serialized_neighbors.append(serialized)
+
+                # Calculate total character count
+                total_chars = sum(len(s) for s in serialized_neighbors)
+
+                # Check if total exceeds max_chars budget
+                if total_chars > self.max_chars:
+                    logger.warning(
+                        "neighbor_enrichment_exceeded_char_budget tenant_id=%s "
+                        "total_chars=%d max_chars=%d",
+                        tenant_id,
+                        total_chars,
+                        self.max_chars,
+                    )
+                    # Truncate to fit budget
+                    truncated = []
+                    running_total = 0
+                    for neighbor_str in serialized_neighbors:
+                        if running_total + len(neighbor_str) <= self.max_chars:
+                            truncated.append(neighbor_str)
+                            running_total += len(neighbor_str)
+                        else:
+                            break
+                    serialized_neighbors = truncated
+                    total_chars = running_total
+
+                logger.info(
+                    "neighbor_enrichment_complete tenant_id=%s neighbor_count=%d "
+                    "total_chars=%d",
+                    tenant_id,
+                    len(serialized_neighbors),
+                    total_chars,
+                )
+
+                return serialized_neighbors, total_chars
+
+            except Exception as e:
+                msg = f"neighbor_retrieval_failed: {e}"
+                logger.exception(msg)
+                raise NeighborRetrievalError(msg) from e
+
+        try:
+            return await async_retry_with_backoff(
+                _execute_query,
+                tenant_id=tenant_id,
+                max_attempts=3,
+                initial_backoff_seconds=0.25,
+            )
+        except Exception as e:
+            raise NeighborRetrievalError(f"neighbor_enrichment_failed_after_retries: {e}") from e
 
 
 class EvidenceTracker:
@@ -398,14 +501,63 @@ class EvidenceTracker:
             ValueError: If inputs invalid
             RuntimeError: If write fails
         """
-        # TODO: Phase 4D implementation
-        # 1. Generate evidence_id (UUID)
-        # 2. INSERT into ENGRAM_EVIDENCE with tenant_id isolation
-        # 3. Set created_at = now, usage_count = 0
-        # 4. Link to audit_log_ref if provided
-        # 5. Return evidence_id for synthesis stage tracking
-        logger.warning("record_evidence_retrieved() not yet implemented (Phase 4D)")
-        return str(uuid.uuid4())
+        tenant_id = validate_tenant_id(tenant_id)
+        source_type = validate_required_string(source_type, field_name="source_type")
+        graph_path = validate_required_string(graph_path, field_name="graph_path")
+
+        evidence_id = str(uuid.uuid4())
+
+        try:
+            from src.db.spanner_client import SpannerClient
+
+            database = SpannerClient.get_database()
+            now = datetime.now(timezone.utc)
+
+            insert_sql = """
+                INSERT INTO ENGRAM_EVIDENCE (
+                    TenantId, EvidenceId, SourceType, EvidenceNumber,
+                    GraphPath, SerializedForm, AccessTimestamp, UsageCount,
+                    CognitiveWeight, AuditLogRef, CreatedAt
+                ) VALUES (
+                    @tenant_id, @evidence_id, @source_type, @evidence_number,
+                    @graph_path, @serialized_form, @now, 0,
+                    @cognitive_weight, @audit_log_ref, @now
+                )
+            """
+
+            with database.batch() as batch:
+                batch.execute_update(
+                    insert_sql,
+                    {
+                        "tenant_id": tenant_id,
+                        "evidence_id": evidence_id,
+                        "source_type": source_type,
+                        "evidence_number": evidence_number,
+                        "graph_path": graph_path,
+                        "serialized_form": serialized_form,
+                        "now": now,
+                        "cognitive_weight": cognitive_weight,
+                        "audit_log_ref": audit_log_ref,
+                    },
+                )
+
+            logger.info(
+                "evidence_recorded tenant_id=%s evidence_id=%s source_type=%s",
+                tenant_id,
+                evidence_id,
+                source_type,
+            )
+
+            return evidence_id
+
+        except Exception as e:
+            logger.exception(
+                "evidence_recording_failed tenant_id=%s source_type=%s: %s",
+                tenant_id,
+                source_type,
+                e,
+            )
+            raise RuntimeError(f"evidence_recording_failed: {e}") from e
 
     async def link_evidence_to_synthesis(
         self,
@@ -427,10 +579,55 @@ class EvidenceTracker:
             ValueError: If IDs invalid
             RuntimeError: If update fails
         """
-        # TODO: Phase 4D implementation
-        # 1. UPDATE ENGRAM_EVIDENCE SET SynthesisRefs = ARRAY_CONCAT(...)
-        # 2. Increment UsageCount
-        # 3. Update LastUsedTimestamp
-        # NOTE: ENGRAM_EVIDENCE is append-only in schema, so this
-        # is a one-time update after insert (not true UPDATE pattern)
-        logger.warning("link_evidence_to_synthesis() not yet implemented (Phase 4D)")
+        tenant_id = validate_tenant_id(tenant_id)
+        evidence_id = validate_required_string(evidence_id, field_name="evidence_id")
+        synthesis_id = validate_required_string(synthesis_id, field_name="synthesis_id")
+
+        try:
+            from src.db.spanner_client import SpannerClient
+
+            database = SpannerClient.get_database()
+            now = datetime.now(timezone.utc)
+
+            # Update ENGRAM_EVIDENCE to link synthesis_id
+            # Note: This is a targeted update after initial INSERT
+            # (ENGRAM_EVIDENCE table is append-only at schema level,
+            # but individual fields can be updated post-insert)
+            update_sql = """
+                UPDATE ENGRAM_EVIDENCE
+                SET SynthesisRefs = ARRAY_CONCAT(
+                    COALESCE(SynthesisRefs, []),
+                    [@synthesis_id]
+                ),
+                UsageCount = UsageCount + 1,
+                LastAccessedTimestamp = @now
+                WHERE TenantId = @tenant_id AND EvidenceId = @evidence_id
+            """
+
+            with database.batch() as batch:
+                batch.execute_update(
+                    update_sql,
+                    {
+                        "tenant_id": tenant_id,
+                        "evidence_id": evidence_id,
+                        "synthesis_id": synthesis_id,
+                        "now": now,
+                    },
+                )
+
+            logger.info(
+                "evidence_linked_to_synthesis tenant_id=%s evidence_id=%s "
+                "synthesis_id=%s",
+                tenant_id,
+                evidence_id,
+                synthesis_id,
+            )
+
+        except Exception as e:
+            logger.exception(
+                "evidence_linking_failed tenant_id=%s evidence_id=%s: %s",
+                tenant_id,
+                evidence_id,
+                e,
+            )
+            raise RuntimeError(f"evidence_linking_failed: {e}") from e
