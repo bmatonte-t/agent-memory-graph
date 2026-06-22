@@ -198,9 +198,11 @@ def _format_request_validation_error(exc: RequestValidationError) -> str:
     """
     body_fields: set[str] = set()
 
+    minimum_body_location_depth = 2
+
     for error in exc.errors():
         location = error.get("loc", ())
-        if len(location) >= 2 and location[0] == "body":
+        if len(location) >= minimum_body_location_depth and location[0] == "body":
             field_name = str(location[-1])
             if field_name:
                 body_fields.add(field_name)
@@ -213,7 +215,7 @@ def _format_request_validation_error(exc: RequestValidationError) -> str:
 
 
 @app.exception_handler(Exception)
-async def global_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+async def global_exception_handler(_request: Request, _exc: Exception) -> JSONResponse:
     """Global fallback exception handler for unhandled errors."""
     logger.exception("Unhandled exception")
     return _error_response(

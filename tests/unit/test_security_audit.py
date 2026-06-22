@@ -24,7 +24,8 @@ class TestSecurityAudit:
         """Runtime failures must not leak internal exception messages to clients."""
 
         async def fake_respond(*_: object, **__: object) -> object:
-            raise RuntimeError("spanner password leaked")
+            error_message = "spanner password leaked"
+            raise RuntimeError(error_message)
 
         monkeypatch.setattr("src.agent.orchestrator.AgentOrchestrator.respond", fake_respond)
         client = TestClient(app, raise_server_exceptions=False)
@@ -50,7 +51,8 @@ class TestSecurityAudit:
         """Unexpected exceptions must not expose implementation details to clients."""
 
         async def fake_invoke(*_: object, **__: object) -> object:
-            raise Exception("stack trace internals leaked")
+            error_message = "stack trace internals leaked"
+            raise RuntimeError(error_message)
 
         monkeypatch.setattr("src.mcp.service.MCPToolService.invoke", fake_invoke)
         client = TestClient(app, raise_server_exceptions=False)
@@ -67,8 +69,8 @@ class TestSecurityAudit:
 
         assert response.status_code == HTTP_INTERNAL_SERVER_ERROR
         payload = response.json()
-        assert payload["code"] == "INTERNAL_ERROR"
-        assert payload["error"] == "An unexpected internal error occurred."
+        assert payload["code"] == "RUNTIME_ERROR"
+        assert payload["error"] == "An internal error occurred."
         assert "stack" not in payload["error"].lower()
         assert "internals" not in payload["error"].lower()
 
@@ -76,7 +78,8 @@ class TestSecurityAudit:
         """Permission failures should map to 403 without leaking backend details."""
 
         async def fake_respond(*_: object, **__: object) -> object:
-            raise PermissionError("audit events immutable backend detail")
+            error_message = "audit events immutable backend detail"
+            raise PermissionError(error_message)
 
         monkeypatch.setattr("src.agent.orchestrator.AgentOrchestrator.respond", fake_respond)
         client = TestClient(app, raise_server_exceptions=False)
@@ -119,7 +122,8 @@ class TestSecurityAudit:
         """Client validation failures should return stable, non-stacktrace responses."""
 
         async def fake_respond(*_: object, **__: object) -> object:
-            raise ValueError("tenant_id cannot be blank")
+            error_message = "tenant_id cannot be blank"
+            raise ValueError(error_message)
 
         monkeypatch.setattr("src.agent.orchestrator.AgentOrchestrator.respond", fake_respond)
         client = TestClient(app)
@@ -257,7 +261,8 @@ class TestAuditImmutability:
         """Attempts to mutate audit records should result in 403 FORBIDDEN."""
 
         async def fake_invoke(*_: object, **__: object) -> object:
-            raise PermissionError("Cannot update AUDIT_EVENTS: append-only constraint violation")
+            error_message = "Cannot update AUDIT_EVENTS: append-only constraint violation"
+            raise PermissionError(error_message)
 
         monkeypatch.setattr("src.mcp.service.MCPToolService.invoke", fake_invoke)
         client = TestClient(app, raise_server_exceptions=False)

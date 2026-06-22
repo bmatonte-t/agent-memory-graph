@@ -7,6 +7,7 @@ from enum import StrEnum
 from pydantic import BaseModel, Field
 
 from src.models.mcp import MCPToolName  # noqa: TC001
+from src.security.governance import AuthorizationScope  # noqa: TC001
 
 
 class AgentExecutionMode(StrEnum):
@@ -21,10 +22,12 @@ class AgentOrchestrationRequest(BaseModel):
     """Agent orchestration request payload."""
 
     tenant_id: str = Field(..., min_length=1)
+    agent_id: str | None = Field(default=None, min_length=1)
     prompt: str = Field(..., min_length=1)
     session_id: str = Field(..., min_length=1)
     request_id: str | None = Field(default=None)
     mode: AgentExecutionMode = Field(default=AgentExecutionMode.SINGLE)
+    authorization_scope: AuthorizationScope | None = Field(default=None)
 
 
 class AgentToolCallTrace(BaseModel):
@@ -46,4 +49,5 @@ class AgentOrchestrationResponse(BaseModel):
     execution_mode: AgentExecutionMode
     response_text: str = Field(..., min_length=1)
     grounded: bool
+    tool_call_count: int = Field(default=0, ge=0)
     tool_calls: list[AgentToolCallTrace] = Field(default_factory=list)

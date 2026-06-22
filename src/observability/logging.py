@@ -8,12 +8,14 @@ rather than needing to parse the message string.
 from __future__ import annotations
 
 import json
-import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from logging import Logger
 
 
 def structured_log(
-    log: logging.Logger,
+    log: Logger,
     level: int,
     event: str,
     fields: dict[str, Any],

@@ -9,14 +9,9 @@ Pending fix: src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from fastapi.testclient import TestClient
 
 from src.api.main import app
-
-if TYPE_CHECKING:
-    import pytest
 
 HTTP_OK = 200
 HTTP_BAD_REQUEST = 400
@@ -138,7 +133,7 @@ class TestRequestValidationBoundary:
 
         # Arguments defaults to empty dict, so this should pass validation
         # (see src/models/mcp.py MCPInvokeRequest.arguments default_factory)
-        assert response.status_code == HTTP_UNPROCESSABLE_ENTITY or response.status_code == HTTP_OK
+        assert response.status_code in {HTTP_UNPROCESSABLE_ENTITY, HTTP_OK}
 
     def test_null_tool_name_rejected(self) -> None:
         """Null tool_name should be rejected."""
@@ -233,7 +228,7 @@ class TestTenantIdValidation:
         )
 
         # Tenant_id field validation passes; blocked by Phase 4B service layer bug
-        # TODO Phase 4C: Fix src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258
+        # TODO: Phase 4C: Fix src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258
         # Tenant isolation is enforced downstream
         assert response.status_code in (HTTP_OK, HTTP_INTERNAL_SERVER_ERROR)
 
@@ -256,7 +251,7 @@ class TestArgumentsStructureValidation:
         )
 
         # Dict structure is valid at API boundary; blocked by Phase 4B service layer bug
-        # TODO Phase 4C: Fix src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258
+        # TODO: Phase 4C: Fix src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258
         assert response.status_code in (HTTP_OK, HTTP_INTERNAL_SERVER_ERROR)
 
     def test_arguments_as_empty_dict_passes_validation(self) -> None:
@@ -311,6 +306,6 @@ class TestArgumentsStructureValidation:
         )
 
         # Dict structure is valid at API boundary; blocked by Phase 4B service layer bug
-        # TODO Phase 4C: Fix src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258
+        # TODO: Phase 4C: Fix src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258
         # Content safety is downstream responsibility: parameterized queries, no code execution
         assert response.status_code in (HTTP_OK, HTTP_INTERNAL_SERVER_ERROR)

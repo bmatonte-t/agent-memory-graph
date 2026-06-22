@@ -6,18 +6,19 @@ orchestrator, MCP service, and MindMap pipeline execution paths.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from opentelemetry.trace import StatusCode
 
 from src.agent.orchestrator import AgentOrchestrator
 from src.mcp.service import MCPToolService
 from src.memory.mindmap_pipeline import MindMapPipeline
 from src.models.agent import AgentOrchestrationRequest
 from src.models.mcp import MCPInvokeRequest, MCPInvokeResponse, MCPTokenUsage, MCPToolName
+from src.models.schemas import AuditResponse
 from src.observability.tracing import configure_tracer, trace_span
 
 
@@ -61,11 +62,10 @@ class TestTraceSpanHelper:
         self, span_exporter: InMemorySpanExporter
     ) -> None:
         """Exceptions inside the span body should be recorded with ERROR status."""
-        from opentelemetry.trace import StatusCode
+        error_message = "test error"
 
-        with pytest.raises(ValueError, match="test error"):
-            with trace_span("test.error_span"):
-                raise ValueError("test error")
+        with pytest.raises(ValueError, match=error_message), trace_span("test.error_span"):
+            raise ValueError(error_message)
 
         spans = span_exporter.get_finished_spans()
         assert len(spans) == 1
@@ -76,12 +76,12 @@ class TestTraceSpanHelper:
         self, span_exporter: InMemorySpanExporter
     ) -> None:
         """Inner spans should be children of the outer span."""
-        with trace_span("parent.span"):
-            with trace_span("child.span"):
-                pass
+        with trace_span("parent.span"), trace_span("child.span"):
+            pass
 
         spans = span_exporter.get_finished_spans()
-        assert len(spans) == 2
+        expected_span_count = 2
+        assert len(spans) == expected_span_count
         span_names = {s.name for s in spans}
         assert "parent.span" in span_names
         assert "child.span" in span_names
@@ -142,7 +142,11 @@ class TestOrchestratorTracing:
 class TestMCPServiceTracing:
     """Verify span emission from the MCP tool service."""
 
-    async def test_invoke_emits_mcp_span(self, span_exporter: InMemorySpanExporter) -> None:
+    async def test_invoke_emits_mcp_span(
+        self,
+        span_exporter: InMemorySpanExporter,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """mcp.invoke span should carry tool name, tenant, session, and request context."""
         fake_pipeline = AsyncMock()
         fake_pipeline.execute.return_value = MagicMock(
@@ -151,6 +155,12 @@ class TestMCPServiceTracing:
             }
         )
         service = MCPToolService(mindmap_pipeline=fake_pipeline)
+
+        # Mock the session action counter to avoid SpannerClient initialization
+        monkeypatch.setattr(
+            "src.memory.api.MemoryAPI._increment_session_action_count",
+            lambda *_: None,
+        )
 
         await service.invoke(
             MCPInvokeRequest(
@@ -182,9 +192,6 @@ class TestMindMapPipelineTracing:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """mindmap.execute span should carry session, tenant, and query length attributes."""
-        from datetime import UTC, datetime
-
-        from src.models.schemas import AuditResponse
 
         async def fake_audit(**_: object) -> AuditResponse:
             """Return a stub audit response."""

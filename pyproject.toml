@@ -169,6 +169,10 @@ unfixable = [
     "SLF001", # Testing my own class demands private member access.
 ]
 
+"src/db/retry.py" = [
+    "ANN401", # ANN401 - Generic retry utility accepts Any callable, args, kwargs, and returns Any.
+]
+
 "**/notebooks/**/*.{py,ipynb}" = [
     "E501",    # E501: line too long
     "E402",    # E402: module level import not at top of file

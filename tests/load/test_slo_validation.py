@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from src.agent.orchestrator import AgentOrchestrator
 from src.models.agent import AgentOrchestrationRequest
@@ -23,6 +26,7 @@ CONCURRENCY_LIMIT = 10
 TARGET_AVAILABILITY = 0.99
 TARGET_ERROR_RATE = 0.02
 TARGET_P95_LATENCY_MS = 5000.0
+DEGRADED_REQUEST_INDEX = 42
 
 
 @dataclass(slots=True)
@@ -141,7 +145,7 @@ class TestSLOValidation:
 
             if request.tool_name == MCPToolName.MEMORY_SEARCH:
                 # Inject exactly one degraded turn (1/100 = 1%) to validate error budget.
-                if request_index == 42:
+                if request_index == DEGRADED_REQUEST_INDEX:
                     return MCPInvokeResponse(
                         tool_name=request.tool_name,
                         request_id=request.request_id,

@@ -97,11 +97,10 @@ class TestAuditImmutability:
         with patch.object(
             MemoryAPI,
             "_enforce_audit_append_only",
-        ) as mock_guard:
-            with pytest.raises(ValueError, match="append-only"):
-                await MemoryAPI._update_weight_on_successful_use(
-                    tenant_id="tenant_a",
-                    node_ids=["audit_node_1"],
-                    memory_tier="AUDIT",
-                )
+        ) as mock_guard, pytest.raises(ValueError, match="append-only"):
+            await MemoryAPI._update_weight_on_successful_use(
+                tenant_id="tenant_a",
+                node_ids=["audit_node_1"],
+                memory_tier="AUDIT",
+            )
         mock_guard.assert_called_once_with("UPDATE")

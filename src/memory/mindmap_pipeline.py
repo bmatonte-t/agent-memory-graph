@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -35,6 +35,9 @@ from src.observability.metrics import pipeline_execution_histogram, pipeline_fac
 from src.observability.tracing import trace_span
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from src.security.governance import AuthorizationScope
 
 
 class MindMapPipelineError(RuntimeError):
@@ -212,6 +215,7 @@ class TraceRecorder(Protocol):
             query (str): Original user query.
             session_id (str | None): Session identifier if available.
             tenant_id (str | None): Tenant identifier if available.
+            authorization_scope (AuthorizationScope | None): Authorization scope for the request.
         """
 
 
@@ -226,6 +230,7 @@ class NoOpTraceRecorder:
         query: str,
         session_id: str | None,
         tenant_id: str | None,
+        authorization_scope: AuthorizationScope | None = None,
     ) -> None:
         """Record trace metadata as a no-op.
 
@@ -234,7 +239,9 @@ class NoOpTraceRecorder:
             query (str): Original user query.
             session_id (str | None): Session identifier if available.
             tenant_id (str | None): Tenant identifier if available.
+            authorization_scope (AuthorizationScope | None): Authorization scope for the request.
         """
+        del authorization_scope
         logger.debug(
             "mindmap.trace.noop",
             extra={
@@ -257,6 +264,7 @@ class AuditTraceRecorder:
         query: str,
         session_id: str | None,
         tenant_id: str | None,
+        authorization_scope: AuthorizationScope | None = None,
     ) -> None:
         """Persist trace metadata using Memory API audit events.
 
@@ -265,6 +273,7 @@ class AuditTraceRecorder:
             query (str): Original user query.
             session_id (str | None): Session identifier if available.
             tenant_id (str | None): Tenant identifier if available.
+            authorization_scope (AuthorizationScope | None): Authorization scope for the request.
 
         Raises:
             MindMapPipelineError: If trace cannot be persisted.
@@ -286,6 +295,7 @@ class AuditTraceRecorder:
                 event_type="MINDMAP_EXECUTION",
                 source_node_id=source_node_id,
                 context=context,
+                authorization_scope=authorization_scope,
             )
         except RuntimeError as error:
             raise MindMapPipelineError(
@@ -540,6 +550,7 @@ class MindMapPipeline:
         query: str,
         session_id: str | None = None,
         tenant_id: str | None = None,
+        authorization_scope: AuthorizationScope | None = None,
     ) -> MindMapResponse:
         """Run full MindMap pipeline and return grounded result.
 
@@ -548,6 +559,8 @@ class MindMapPipeline:
             session_id (str | None, optional): Session identifier. Defaults to None.
             tenant_id (str | None, optional): Tenant identifier for request scoping.
                 Defaults to None.
+            authorization_scope (AuthorizationScope | None, optional): Authorization scope
+                for the request. Defaults to None.
 
         Returns:
             MindMapResponse: Final response with traceability envelope.
@@ -640,6 +653,7 @@ class MindMapPipeline:
                 query=query,
                 session_id=session_id,
                 tenant_id=tenant_id,
+                authorization_scope=authorization_scope,
             )
 
             return MindMapResponse(query=query, synthesis=synthesis_result, trace=trace)

@@ -7,12 +7,24 @@ pipeline.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import InMemoryMetricReader
 
+from src.agent.orchestrator import AgentOrchestrator
+from src.mcp.service import MCPToolService
+from src.memory.mindmap_pipeline import MindMapPipeline
+from src.models.agent import AgentOrchestrationRequest
+from src.models.mcp import (
+    MCPInvokeRequest,
+    MCPInvokeResponse,
+    MCPTokenUsage,
+    MCPToolName,
+)
+from src.models.schemas import AuditResponse
 from src.observability.metrics import (
     configure_metrics,
     mcp_tool_error_counter,
@@ -81,10 +93,6 @@ class TestOrchestratorMetricsEmission:
 
     async def test_respond_emits_request_counter(self) -> None:
         """orchestrator.respond should call orchestrator_request_counter().add(1, ...)."""
-        from src.agent.orchestrator import AgentOrchestrator
-        from src.models.agent import AgentOrchestrationRequest
-        from src.models.mcp import MCPInvokeRequest, MCPInvokeResponse, MCPTokenUsage, MCPToolName
-
         fake_service = AsyncMock()
 
         async def fake_invoke(request: MCPInvokeRequest) -> MCPInvokeResponse:
@@ -131,9 +139,6 @@ class TestMCPServiceMetricsEmission:
 
     async def test_invoke_success_emits_invocation_counter(self) -> None:
         """Successful invocations should emit to mcp_tool_invocation_counter."""
-        from src.mcp.service import MCPToolService
-        from src.models.mcp import MCPInvokeRequest, MCPToolName
-
         fake_pipeline = AsyncMock()
         fake_pipeline.execute.return_value = MagicMock(
             model_dump=lambda mode: {"synthesis": {"response_text": "ok", "grounded": True}}
@@ -155,9 +160,6 @@ class TestMCPServiceMetricsEmission:
 
     async def test_invoke_failure_emits_error_counter(self) -> None:
         """Failed invocations should emit to mcp_tool_error_counter."""
-        from src.mcp.service import MCPToolService
-        from src.models.mcp import MCPInvokeRequest, MCPToolName
-
         service = MCPToolService(mindmap_pipeline=AsyncMock())
 
         mock_counter = MagicMock()
@@ -180,11 +182,7 @@ class TestPipelineMetricsEmission:
     async def test_execute_emits_histogram_and_fact_counter(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """pipeline execution should record to histogram and fact counter."""
-        from datetime import UTC, datetime
-
-        from src.memory.mindmap_pipeline import MindMapPipeline
-        from src.models.schemas import AuditResponse
+        """Pipeline execution should record to histogram and fact counter."""
 
         async def fake_audit(**_: object) -> AuditResponse:
             """Return stub audit response."""

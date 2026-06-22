@@ -26,6 +26,16 @@ _DML_TABLE_PATTERN_BY_OPERATION: dict[str, re.Pattern[str]] = {
     "MERGE": re.compile(r"^\s*MERGE\s+INTO\s+`?([A-Za-z_][A-Za-z0-9_]*)`?", re.IGNORECASE),
 }
 
+_AUDIT_MUTATION_PATTERNS: dict[str, re.Pattern[str]] = {
+    "UPDATE": re.compile(r"\bUPDATE\s+`?AUDIT_EVENTS`?\b", re.IGNORECASE),
+    "DELETE": re.compile(r"\bDELETE\s+FROM\s+`?AUDIT_EVENTS`?\b", re.IGNORECASE),
+    "MERGE": re.compile(r"\bMERGE\s+INTO\s+`?AUDIT_EVENTS`?\b", re.IGNORECASE),
+    "TRUNCATE": re.compile(
+        r"\bTRUNCATE(?:\s+TABLE)?\s+`?AUDIT_EVENTS`?\b",
+        re.IGNORECASE,
+    ),
+}
+
 
 class SpannerClient:
     """Singleton Spanner client for managing database connections."""
@@ -108,7 +118,10 @@ class SpannerClient:
         Returns:
             Number of rows affected
         """
-        mutation_target = cls._extract_dml_target(sql)
+        normalized_sql = cls._strip_leading_sql_comments(sql)
+        cls._validate_audit_table_mutation(normalized_sql)
+
+        mutation_target = cls._extract_dml_target(normalized_sql)
         if mutation_target is not None:
             operation, table_name = mutation_target
             cls._validate_audit_mutation_forbidden(table_name, operation)
@@ -141,6 +154,44 @@ class SpannerClient:
             return None
 
         return operation, match.group(1)
+
+    @staticmethod
+    def _strip_leading_sql_comments(sql: str) -> str:
+        """Remove leading SQL comments before policy inspection.
+
+        Args:
+            sql: Raw SQL statement text.
+
+        Returns:
+            str: SQL text with leading comments removed.
+        """
+        normalized_sql = sql.lstrip()
+
+        while normalized_sql.startswith(("--", "/*")):
+            if normalized_sql.startswith("--"):
+                newline_index = normalized_sql.find("\n")
+                if newline_index == -1:
+                    return ""
+                normalized_sql = normalized_sql[newline_index + 1 :].lstrip()
+                continue
+
+            comment_end_index = normalized_sql.find("*/")
+            if comment_end_index == -1:
+                return ""
+            normalized_sql = normalized_sql[comment_end_index + 2 :].lstrip()
+
+        return normalized_sql
+
+    @classmethod
+    def _validate_audit_table_mutation(cls, sql: str) -> None:
+        """Reject wrapped or prefixed mutations against the audit table.
+
+        Args:
+            sql: SQL statement text with leading comments removed.
+        """
+        for operation, pattern in _AUDIT_MUTATION_PATTERNS.items():
+            if pattern.search(sql):
+                cls._validate_audit_mutation_forbidden("AUDIT_EVENTS", operation)
 
     @classmethod
     def close(cls) -> None:

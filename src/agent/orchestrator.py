@@ -119,10 +119,12 @@ class AgentOrchestrator:
         context_response = await self._invoke_tool(
             MCPInvokeRequest(
                 tenant_id=request.tenant_id,
+                agent_id=request.agent_id,
                 tool_name=MCPToolName.MEMORY_RECALL_CONTEXT,
                 arguments={"window_size": 10},
                 session_id=request.session_id,
                 request_id=request_id,
+                authorization_scope=request.authorization_scope,
             )
         )
         tool_calls.append(self._to_tool_trace(context_response))
@@ -130,10 +132,12 @@ class AgentOrchestrator:
         search_response = await self._invoke_tool(
             MCPInvokeRequest(
                 tenant_id=request.tenant_id,
+                agent_id=request.agent_id,
                 tool_name=MCPToolName.MEMORY_SEARCH,
                 arguments={"query": request.prompt},
                 session_id=request.session_id,
                 request_id=request_id,
+                authorization_scope=request.authorization_scope,
             )
         )
         tool_calls.append(self._to_tool_trace(search_response))
@@ -150,6 +154,7 @@ class AgentOrchestrator:
         log_response = await self._invoke_tool(
             MCPInvokeRequest(
                 tenant_id=request.tenant_id,
+                agent_id=request.agent_id,
                 tool_name=MCPToolName.MEMORY_LOG_TRACE,
                 arguments={
                     "event_type": "AGENT_ORCHESTRATION_TURN",
@@ -158,6 +163,7 @@ class AgentOrchestrator:
                 },
                 session_id=request.session_id,
                 request_id=request_id,
+                authorization_scope=request.authorization_scope,
             )
         )
         tool_calls.append(self._to_tool_trace(log_response))
@@ -191,6 +197,7 @@ class AgentOrchestrator:
             execution_mode=execution_mode,
             response_text=response_text,
             grounded=grounded,
+            tool_call_count=len(tool_calls),
             tool_calls=tool_calls,
         )
 
@@ -224,17 +231,21 @@ class AgentOrchestrator:
 
         context_request = MCPInvokeRequest(
             tenant_id=request.tenant_id,
+            agent_id=request.agent_id,
             tool_name=MCPToolName.MEMORY_RECALL_CONTEXT,
             arguments={"window_size": 20},
             session_id=request.session_id,
             request_id=request_id,
+            authorization_scope=request.authorization_scope,
         )
         search_request = MCPInvokeRequest(
             tenant_id=request.tenant_id,
+            agent_id=request.agent_id,
             tool_name=MCPToolName.MEMORY_SEARCH,
             arguments={"query": request.prompt},
             session_id=request.session_id,
             request_id=request_id,
+            authorization_scope=request.authorization_scope,
         )
 
         context_response, search_response = await asyncio.gather(
@@ -258,6 +269,7 @@ class AgentOrchestrator:
         log_response = await self._invoke_tool(
             MCPInvokeRequest(
                 tenant_id=request.tenant_id,
+                agent_id=request.agent_id,
                 tool_name=MCPToolName.MEMORY_LOG_TRACE,
                 arguments={
                     "event_type": "AGENT_ORCHESTRATION_SUPERVISOR_WORKER_TURN",
@@ -266,6 +278,7 @@ class AgentOrchestrator:
                 },
                 session_id=request.session_id,
                 request_id=request_id,
+                authorization_scope=request.authorization_scope,
             )
         )
         tool_calls.append(self._to_tool_trace(log_response))
@@ -290,6 +303,7 @@ class AgentOrchestrator:
             execution_mode=AgentExecutionMode.SUPERVISOR_WORKER,
             response_text=response_text,
             grounded=grounded,
+            tool_call_count=len(tool_calls),
             tool_calls=tool_calls,
         )
 

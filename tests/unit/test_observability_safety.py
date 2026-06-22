@@ -1,4 +1,4 @@
-"""Observability Safety Tests - Phase 4C
+"""Observability Safety Tests - Phase 4C.
 
 Phase 4C focuses on validating observability (logs, traces, metrics) doesn't leak:
 - Sensitive field values (tenant_ids, session_ids, query contents)
@@ -14,13 +14,12 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-import pytest
 from fastapi.testclient import TestClient
 
 from src.api.main import app
 
 if TYPE_CHECKING:
-    from pytest import LogCaptureFixture
+    import pytest
 
 HTTP_UNPROCESSABLE_ENTITY = 422
 
@@ -51,7 +50,7 @@ class TestValidationErrorMessageContent:
         assert "Invalid request payload" in error_message
 
     def test_validation_error_message_omits_file_and_line_details(
-        self, caplog: LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Client validation messages should not include file path or line details."""
         client = TestClient(app)
@@ -168,13 +167,13 @@ class TestLoggingConfigurationSafety:
     """Validate logging system respects observability boundaries."""
 
     def test_request_validation_logs_include_helpful_context(
-        self, caplog: LogCaptureFixture
+        self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Validation error logs should help with debugging without exposing internals."""
         client = TestClient(app)
 
         with caplog.at_level("WARNING"):
-            response = client.post(
+            client.post(
                 "/api/v1/mcp/invoke",
                 json={
                     "tenant_id": "tenant_a",
@@ -186,7 +185,9 @@ class TestLoggingConfigurationSafety:
         # Logs should indicate validation error occurred
         assert len(caplog.records) > 0
 
-    def test_successful_requests_log_minimal_details(self, caplog: LogCaptureFixture) -> None:
+    def test_successful_requests_log_minimal_details(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
         """Request/response logging should not expose raw query text."""
         client = TestClient(app, raise_server_exceptions=False)
 

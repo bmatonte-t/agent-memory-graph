@@ -78,6 +78,7 @@ class MCPToolService:
                 },
             )
             try:
+                self._authorize_request(request)
                 if request.tool_name == MCPToolName.MEMORY_SEARCH:
                     result = await self._memory_search(request)
                 elif request.tool_name == MCPToolName.MEMORY_ADD_FACT:
@@ -130,6 +131,33 @@ class MCPToolService:
                     {
                         "tool.name": str(request.tool_name),
                         "error.code": error.code,
+                        "tenant.id": request.tenant_id,
+                    },
+                )
+                return response
+            except PermissionError as error:
+                token_usage = self._estimate_token_usage(
+                    arguments=request.arguments,
+                    result=None,
+                    error_message=str(error),
+                )
+                response = MCPInvokeResponse(
+                    tool_name=request.tool_name,
+                    request_id=request.request_id,
+                    success=False,
+                    latency_ms=(perf_counter() - started) * 1000,
+                    error=MCPToolError(
+                        code="permission_denied",
+                        message=str(error),
+                        retryable=False,
+                    ),
+                    token_usage=token_usage,
+                )
+                mcp_tool_error_counter().add(
+                    1,
+                    {
+                        "tool.name": str(request.tool_name),
+                        "error.code": "permission_denied",
                         "tenant.id": request.tenant_id,
                     },
                 )
@@ -205,6 +233,54 @@ class MCPToolService:
             estimated=True,
         )
 
+    @staticmethod
+    def _authorize_request(request: MCPInvokeRequest) -> None:
+        """Enforce deny-by-default authorization before tool dispatch."""
+        from src.project_base.settings import settings  # noqa: PLC0415
+
+        scope_required_message = "authorization scope is required"
+        denied_request_message = "authorization denied for request"
+
+        if not settings.governance.authorization.enabled:
+            return
+
+        scope = request.authorization_scope
+        if scope is None:
+            raise PermissionError(scope_required_message)
+
+        if request.tool_name == MCPToolName.MEMORY_SEARCH:
+            allowed = scope.allows_resource(
+                node_id=request.session_id or request.arguments.get("session_id"),
+                label="Session",
+                memory_tier="CONTEXT",
+            )
+        elif request.tool_name == MCPToolName.MEMORY_ADD_FACT:
+            relationship = request.arguments.get("relationship")
+            rel_type = relationship.get("type") if isinstance(relationship, dict) else None
+            allowed = scope.allows_resource(
+                node_id=request.arguments.get("entity_id"),
+                label=request.arguments.get("entity_type"),
+                memory_tier="SEMANTIC",
+                relationship_type=rel_type,
+            )
+        elif request.tool_name == MCPToolName.MEMORY_LOG_TRACE:
+            allowed = scope.allows_resource(
+                node_id=request.session_id or request.arguments.get("source_node_id"),
+                label="AUDIT_EVENT",
+                memory_tier="AUDIT",
+            )
+        elif request.tool_name == MCPToolName.MEMORY_RECALL_CONTEXT:
+            allowed = scope.allows_resource(
+                node_id=request.session_id or request.arguments.get("session_id"),
+                label="Session",
+                memory_tier="CONTEXT",
+            )
+        else:
+            allowed = False
+
+        if not allowed:
+            raise PermissionError(denied_request_message)
+
     async def _memory_search(self, request: MCPInvokeRequest) -> dict[str, Any]:
         """Invoke the MindMap query pipeline.
 
@@ -233,6 +309,7 @@ class MCPToolService:
                 query=query,
                 session_id=session_id,
                 tenant_id=tenant_id,
+                authorization_scope=request.authorization_scope,
             )
         except MindMapPipelineError as error:
             raise MCPToolServiceError(
@@ -240,6 +317,12 @@ class MCPToolService:
                 message=str(error),
                 retryable=False,
             ) from error
+
+        if request.session_id is not None:
+            MemoryAPI._increment_session_action_count(  # noqa: SLF001
+                request.tenant_id,
+                request.session_id,
+            )
 
         return response.model_dump(mode="json")
 
@@ -280,6 +363,8 @@ class MCPToolService:
                 entity_id=entity_id,
                 attributes=attributes,
                 relationship=relationship,
+                session_id=request.session_id,
+                authorization_scope=request.authorization_scope,
             )
         except ValueError as error:
             raise MCPToolServiceError(
@@ -330,6 +415,7 @@ class MCPToolService:
                 event_type=event_type,
                 source_node_id=source_node_id,
                 context=decision_context,
+                authorization_scope=request.authorization_scope,
             )
         except ValueError as error:
             raise MCPToolServiceError(
@@ -372,6 +458,7 @@ class MCPToolService:
                 tenant_id=tenant_id,
                 session_id=session_id,
                 window_size=window_size,
+                authorization_scope=request.authorization_scope,
             )
         except ValueError as error:
             raise MCPToolServiceError(

@@ -6,7 +6,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.db.schema import SchemaConfig
 from src.memory.api import MemoryAPI
 
 P95_SESSION_TARGET_MS = 50

@@ -240,6 +240,7 @@ class LoggingConfiguration:
             labels: Resource labels attached to every exported log entry.
             log_level: Minimum log level to export to Cloud Logging.
         """
+        del labels
         try:
             import google.cloud.logging  # noqa: PLC0415
 

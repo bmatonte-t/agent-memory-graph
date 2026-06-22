@@ -8,16 +8,27 @@ Provides a lightweight tracer abstraction that works with:
 
 from __future__ import annotations
 
-import logging
-from collections.abc import Generator
 from contextlib import contextmanager
+from importlib import import_module
+from logging import getLogger
+from typing import TYPE_CHECKING
 
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor, SpanExporter
 from opentelemetry.trace import Span, StatusCode
 
-logger = logging.getLogger(__name__)
+if TYPE_CHECKING:
+    from collections.abc import Generator
+
+try:
+    CloudTraceSpanExporter = import_module(
+        "opentelemetry.exporter.cloud_trace"
+    ).CloudTraceSpanExporter
+except ImportError:
+    CloudTraceSpanExporter = None
+
+logger = getLogger(__name__)
 
 _TRACER_NAME = "agent-memory-graph"
 
@@ -56,15 +67,11 @@ def configure_tracer(
         provider.add_span_processor(SimpleSpanProcessor(span_exporter))
         logger.info("tracer configured exporter=%s", type(span_exporter).__name__)
     elif project_id:
-        try:
-            from opentelemetry.exporter.cloud_trace import (  # type: ignore[import-not-found]
-                CloudTraceSpanExporter,
-            )
-
+        if CloudTraceSpanExporter is not None:
             exporter = CloudTraceSpanExporter(project_id=project_id)
             provider.add_span_processor(SimpleSpanProcessor(exporter))
             logger.info("tracer configured cloud_trace project=%s", project_id)
-        except ImportError:
+        else:
             logger.warning(
                 "Cloud Trace exporter unavailable. "
                 "Install opentelemetry-exporter-gcp-trace to enable export."
@@ -89,7 +96,7 @@ def get_tracer() -> trace.Tracer:
 def trace_span(
     name: str,
     attributes: dict[str, str | int | float | bool] | None = None,
-) -> Generator[Span, None, None]:
+) -> Generator[Span]:
     """Context manager that creates and manages a trace span.
 
     Sets ERROR status and records exceptions automatically when the body raises.

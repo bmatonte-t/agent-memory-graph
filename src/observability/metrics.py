@@ -11,8 +11,9 @@ is installed and a project_id is provided. Falls back to no-op without configura
 
 from __future__ import annotations
 
-import logging
 from functools import lru_cache
+from importlib import import_module
+from logging import getLogger
 
 from opentelemetry.metrics import Counter, Histogram, Meter, get_meter_provider
 from opentelemetry.sdk.metrics import MeterProvider
@@ -21,7 +22,14 @@ from opentelemetry.sdk.metrics.export import (
     PeriodicExportingMetricReader,
 )
 
-logger = logging.getLogger(__name__)
+try:
+    CloudMonitoringMetricsExporter = import_module(
+        "opentelemetry.exporter.cloud_monitoring"
+    ).CloudMonitoringMetricsExporter
+except ImportError:
+    CloudMonitoringMetricsExporter = None
+
+logger = getLogger(__name__)
 
 _METER_NAME = "agent-memory-graph"
 
@@ -49,15 +57,11 @@ def configure_metrics(
         readers.append(PeriodicExportingMetricReader(ConsoleMetricExporter()))
         logger.info("metrics configured exporter=console")
     elif project_id:
-        try:
-            from opentelemetry.exporter.cloud_monitoring import (  # type: ignore[import-not-found]
-                CloudMonitoringMetricsExporter,
-            )
-
+        if CloudMonitoringMetricsExporter is not None:
             exporter = CloudMonitoringMetricsExporter(project_id=project_id)
             readers.append(PeriodicExportingMetricReader(exporter))
             logger.info("metrics configured cloud_monitoring project=%s", project_id)
-        except ImportError:
+        else:
             logger.warning(
                 "Cloud Monitoring exporter unavailable. "
                 "Install opentelemetry-exporter-gcp-monitoring to enable export."

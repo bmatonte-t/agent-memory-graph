@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
-import pytest
+if TYPE_CHECKING:
+    import pytest
 
 from src.mcp.service import MCPToolService
 from src.models.mcp import MCPInvokeRequest, MCPToolName
@@ -16,15 +18,24 @@ from src.models.schemas import AuditResponse, ContextResponse, FactResponse
 class TestMCPToolService:
     """Contract tests for tenant propagation through MCP tools."""
 
-    async def test_memory_search_passes_tenant_to_pipeline(self) -> None:
+    async def test_memory_search_passes_tenant_to_pipeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Search invocations should forward tenant_id into the pipeline boundary."""
         fake_pipeline = AsyncMock()
         fake_pipeline.execute.return_value = self._build_mindmap_response()
         service = MCPToolService(mindmap_pipeline=fake_pipeline)
 
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count",
+            lambda *_: 1,
+        )
+
         response = await service.invoke(
             MCPInvokeRequest(
                 tenant_id="tenant_a",
+                session_id="sess_1",
                 tool_name=MCPToolName.MEMORY_SEARCH,
                 arguments={"query": "what happened?", "session_id": "sess_1"},
                 request_id="req_1",
@@ -36,15 +47,25 @@ class TestMCPToolService:
             query="what happened?",
             session_id="sess_1",
             tenant_id="tenant_a",
+            authorization_scope=None,
         )
 
-    async def test_memory_search_validation_error_preserves_tenant_request(self) -> None:
+    async def test_memory_search_validation_error_preserves_tenant_request(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
         """Validation failures should still return the stable MCP contract."""
         service = MCPToolService(mindmap_pipeline=AsyncMock())
+
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count",
+            lambda *_: 1,
+        )
 
         response = await service.invoke(
             MCPInvokeRequest(
                 tenant_id="tenant_a",
+                session_id="sess_1",
                 tool_name=MCPToolName.MEMORY_SEARCH,
                 arguments={"query": "   "},
                 request_id="req_2",
@@ -76,11 +97,15 @@ class TestMCPToolService:
             )
         )
         monkeypatch.setattr("src.mcp.service.MemoryAPI.add_semantic_fact", mock_add)
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count", lambda *_: 3
+        )
 
         response = await service.invoke(
             MCPInvokeRequest(
                 tenant_id="tenant_a",
                 tool_name=MCPToolName.MEMORY_ADD_FACT,
+                session_id="sess_1",
                 arguments={"entity_type": "PERSON", "entity_id": "ent_1"},
             )
         )
@@ -92,6 +117,8 @@ class TestMCPToolService:
             entity_id="ent_1",
             attributes={},
             relationship=None,
+            session_id="sess_1",
+            authorization_scope=None,
         )
 
     async def test_memory_log_trace_passes_tenant_to_memory_api(
@@ -110,6 +137,9 @@ class TestMCPToolService:
             )
         )
         monkeypatch.setattr("src.mcp.service.MemoryAPI.record_audit_event", mock_record)
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count", lambda *_: 2
+        )
 
         response = await service.invoke(
             MCPInvokeRequest(
@@ -126,6 +156,7 @@ class TestMCPToolService:
             event_type="AGENT_REASONING_STEP",
             source_node_id="sess_1",
             context={"step": "mine"},
+            authorization_scope=None,
         )
 
     async def test_memory_recall_context_passes_tenant_to_memory_api(
@@ -145,6 +176,9 @@ class TestMCPToolService:
             )
         )
         monkeypatch.setattr("src.mcp.service.MemoryAPI.retrieve_context_window", mock_recall)
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count", lambda *_: 2
+        )
 
         response = await service.invoke(
             MCPInvokeRequest(
@@ -160,6 +194,7 @@ class TestMCPToolService:
             tenant_id="tenant_a",
             session_id="sess_1",
             window_size=5,
+            authorization_scope=None,
         )
 
     @staticmethod

@@ -39,9 +39,10 @@ class InMemoryTraceRecorder:
         query: str,
         session_id: str | None,
         tenant_id: str | None,
+        authorization_scope: object | None = None,
     ) -> None:
         """Capture trace payload and invocation metadata."""
-        del query, session_id, tenant_id
+        del query, session_id, tenant_id, authorization_scope
         self.calls += 1
         self.last_trace = trace
 

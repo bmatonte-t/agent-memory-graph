@@ -7,6 +7,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.security.governance import AuthorizationScope  # noqa: TC001
+
 
 class MCPToolName(StrEnum):
     """Supported Phase 3 MCP tool names."""
@@ -21,10 +23,12 @@ class MCPInvokeRequest(BaseModel):
     """Tool invocation request payload."""
 
     tenant_id: str = Field(...)
+    agent_id: str | None = Field(default=None, min_length=1)
     tool_name: MCPToolName
     arguments: dict[str, Any] = Field(default_factory=dict)
     session_id: str | None = Field(default=None)
     request_id: str | None = Field(default=None)
+    authorization_scope: AuthorizationScope | None = Field(default=None)
 
 
 class MCPToolError(BaseModel):

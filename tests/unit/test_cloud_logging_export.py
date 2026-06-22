@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
-import pytest
+if TYPE_CHECKING:
+    import pytest
 
 from src.observability.logging import structured_log
 from src.project_base.logging import LoggingConfiguration
-from src.project_base.settings.models import CloudLogging, Logging
+from src.project_base.settings.models import CloudLogging
 
 
 class TestStructuredLog:

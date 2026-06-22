@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import cast
 
 
 def validate_tenant_id(tenant_id: str | None) -> str:
@@ -34,7 +34,7 @@ def validate_required_string(value: str | None, *, field_name: str) -> str:
     Raises:
         ValueError: If value is missing, non-string, or blank.
     """
-    if value is None or not isinstance(value, str):
+    if value is None:
         msg = f"{field_name} must be a non-empty string"
         raise ValueError(msg)
 
@@ -64,7 +64,7 @@ def validate_optional_string(value: str | None, *, field_name: str) -> str | Non
     return validate_required_string(value, field_name=field_name)
 
 
-def validate_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
+def validate_mapping(value: object, *, field_name: str) -> dict[str, object]:
     """Validate that a value is a JSON-like object.
 
     Args:
@@ -72,18 +72,22 @@ def validate_mapping(value: Any, *, field_name: str) -> dict[str, Any]:
         field_name: Field label used in error messages.
 
     Returns:
-        dict[str, Any]: Copy of mapping as dictionary.
+        dict[str, object]: Copy of mapping as dictionary.
 
     Raises:
-        ValueError: If value is not a mapping.
+        TypeError: If value is not a mapping.
     """
     if not isinstance(value, Mapping):
         msg = f"{field_name} must be an object"
-        raise ValueError(msg)
-    return dict(value)
+        raise TypeError(msg)
+    return dict(cast(dict[str, object], value))
 
 
-def validate_optional_mapping(value: Any | None, *, field_name: str) -> dict[str, Any] | None:
+def validate_optional_mapping(
+    value: object | None,
+    *,
+    field_name: str,
+) -> dict[str, object] | None:
     """Validate optional mapping values.
 
     Args:
@@ -91,7 +95,7 @@ def validate_optional_mapping(value: Any | None, *, field_name: str) -> dict[str
         field_name: Field label used in error messages.
 
     Returns:
-        dict[str, Any] | None: Mapping copy when provided, else None.
+        dict[str, object] | None: Mapping copy when provided, else None.
 
     Raises:
         ValueError: If provided value is not a mapping.
@@ -101,7 +105,12 @@ def validate_optional_mapping(value: Any | None, *, field_name: str) -> dict[str
     return validate_mapping(value, field_name=field_name)
 
 
-def validate_window_size(window_size: int, *, minimum: int = 1, maximum: int = 100) -> int:
+def validate_window_size(
+    window_size: object,
+    *,
+    minimum: int = 1,
+    maximum: int = 100,
+) -> int:
     """Validate context window bounds.
 
     Args:
@@ -117,7 +126,7 @@ def validate_window_size(window_size: int, *, minimum: int = 1, maximum: int = 1
     """
     if not isinstance(window_size, int):
         msg = "window_size must be an integer"
-        raise ValueError(msg)
+        raise TypeError(msg)
     if not (minimum <= window_size <= maximum):
         msg = f"window_size must be between {minimum} and {maximum}"
         raise ValueError(msg)
@@ -139,12 +148,12 @@ def validate_entity_type(entity_type: str, *, allowed_entity_types: set[str]) ->
     """
     normalized_type = validate_required_string(entity_type, field_name="entity_type")
     if normalized_type not in allowed_entity_types:
-        msg = f"Invalid entity_type. Must be one of: {allowed_entity_types}"
+        msg = "Invalid entity_type."
         raise ValueError(msg)
     return normalized_type
 
 
-def validate_relationship(relationship: dict[str, Any] | None) -> dict[str, str] | None:
+def validate_relationship(relationship: dict[str, object] | None) -> dict[str, str] | None:
     """Validate relationship object used for edge creation.
 
     Args:

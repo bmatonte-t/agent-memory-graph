@@ -94,6 +94,7 @@ class TestAgentOrchestrator:
         assert response.execution_mode == AgentExecutionMode.SINGLE
         assert response.grounded is True
         assert response.response_text == "Grounded answer"
+        assert response.tool_call_count == EXPECTED_TOOL_CALLS
         assert len(response.tool_calls) == EXPECTED_TOOL_CALLS
         assert [request.tenant_id for request in seen_requests] == ["tenant_a"] * 3
 
@@ -140,6 +141,7 @@ class TestAgentOrchestrator:
         assert response.execution_mode == AgentExecutionMode.SINGLE
         assert response.grounded is False
         assert response.response_text == "Insufficient graph evidence."
+        assert response.tool_call_count == EXPECTED_TOOL_CALLS
         assert len(response.tool_calls) == EXPECTED_TOOL_CALLS
 
     async def test_supervisor_worker_mode_preserves_tenant(self) -> None:
@@ -173,6 +175,7 @@ class TestAgentOrchestrator:
 
         assert response.execution_mode == AgentExecutionMode.SUPERVISOR_WORKER
         assert response.grounded is True
+        assert response.tool_call_count == EXPECTED_TOOL_CALLS
         assert len(response.tool_calls) == EXPECTED_TOOL_CALLS
         assert [request.tenant_id for request in seen_requests] == ["tenant_a"] * 3
 
@@ -207,5 +210,6 @@ class TestAgentOrchestrator:
 
         assert response.execution_mode == AgentExecutionMode.SINGLE
         assert response.grounded is True
+        assert response.tool_call_count == EXPECTED_TOOL_CALLS
         assert len(response.tool_calls) == EXPECTED_TOOL_CALLS
         assert [request.tenant_id for request in seen_requests] == ["tenant_a"] * 3

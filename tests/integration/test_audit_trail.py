@@ -5,8 +5,12 @@ from __future__ import annotations
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from src.memory.api import MemoryAPI
 
@@ -42,7 +46,6 @@ class _ManagedResource(AbstractContextManager[object]):
 
     def __exit__(self, *args: object) -> None:
         """No-op exit hook for compatibility with ``with`` blocks."""
-        return None
 
 
 @dataclass(slots=True)
@@ -61,6 +64,13 @@ class _FakeMemoryDatabase:
     def snapshot(self) -> _ManagedResource:
         """Return a snapshot context manager for read operations."""
         return _ManagedResource(_FakeSnapshot(self))
+
+    def run_in_transaction(
+        self,
+        callback: Callable[[_FakeTransaction], object],
+    ) -> object:
+        """Execute a transaction callback against the fake database."""
+        return callback(_FakeTransaction(self))
 
     def seed_context_turns(
         self,
@@ -116,6 +126,7 @@ class _FakeBatch:
                     "label": params["label"],
                     "weight": params["weight"],
                     "attributes": params["attributes"],
+                    "session_action_count": 0,
                 }
             )
             return 1
@@ -133,6 +144,19 @@ class _FakeBatch:
         if "INSERT INTO AUDIT_EVENTS" in normalized_sql:
             self.database.audit_events.append(dict(params))
             return 1
+        if normalized_sql.startswith("UPDATE MemoryNode") and (
+            "SessionActionCount" in normalized_sql
+        ):
+            updated_count = 0
+            for node in self.database.nodes:
+                if (
+                    node["tenant_id"] == params["tenant_id"]
+                    and node["tier"] == params["tier"]
+                    and node["node_id"] == params["session_id"]
+                ):
+                    node["session_action_count"] = int(node.get("session_action_count", 0)) + 1
+                    updated_count += 1
+            return updated_count
         if normalized_sql.startswith("UPDATE MemoryNode"):
             updated_count = 0
             for node in self.database.nodes:
@@ -178,6 +202,18 @@ class _FakeSnapshot:
             if matching_node is None:
                 return []
             return [(matching_node["tier"],)]
+        if normalized_sql.startswith("SELECT SessionActionCount FROM MemoryNode"):
+            matching_node = next(
+                (
+                    node
+                    for node in self.database.nodes
+                    if node["tenant_id"] == tenant_id and node["node_id"] == params["session_id"]
+                ),
+                None,
+            )
+            if matching_node is None:
+                return []
+            return [(matching_node.get("session_action_count", 0),)]
         if normalized_sql.startswith("MATCH p = (s:Node)-[e]->(t:Node)"):
             matching_turns = [
                 turn
@@ -199,6 +235,21 @@ class _FakeSnapshot:
             ]
         msg = f"Unexpected SQL in fake snapshot: {normalized_sql}"
         raise AssertionError(msg)
+
+
+@dataclass(slots=True)
+class _FakeTransaction:
+    """Transaction shim that reuses the fake batch and snapshot behavior."""
+
+    database: _FakeMemoryDatabase
+
+    def execute_sql(self, sql: str, params: dict[str, object]) -> list[tuple[object, ...]]:
+        """Delegate read execution to the snapshot fake."""
+        return _FakeSnapshot(self.database).execute_sql(sql, params)
+
+    def execute_update(self, sql: str, params: dict[str, object]) -> int:
+        """Delegate write execution to the batch fake."""
+        return _FakeBatch(self.database).execute_update(sql, params)
 
 
 class TestTenantIsolatedMemoryFlow:

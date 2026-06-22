@@ -7,8 +7,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Protocol
 
+from google.cloud.spanner_v1.transaction import Transaction  # noqa: TC002
+
+from src.db.idempotency import IdempotencyContext
+from src.db.retry import async_retry_with_backoff, get_retry_policy
 from src.db.schema import SchemaConfig
 from src.db.spanner_client import SpannerClient
+from src.memory.exceptions import WeightUpdateFailedError
 from src.models.schemas import (
     AuditResponse,
     ContextResponse,
@@ -16,6 +21,8 @@ from src.models.schemas import (
     FactResponse,
     SessionResponse,
 )
+from src.project_base.settings import settings
+from src.security.governance import AuthorizationScope  # noqa: TC001
 from src.security.validators import (
     validate_entity_type,
     validate_optional_mapping,
@@ -38,6 +45,87 @@ class MemoryAPI:
     """Core memory API for tripartite memory operations."""
 
     @staticmethod
+    def _record_authorization_decision(
+        *,
+        tenant_id: str,
+        event_type: str,
+        source_node_id: str,
+        context: dict[str, Any],
+    ) -> None:
+        """Persist an authorization decision without re-entering policy checks."""
+        tenant_id = validate_tenant_id(tenant_id)
+        event_type = validate_required_string(event_type, field_name="event_type")
+        source_node_id = validate_required_string(source_node_id, field_name="source_node_id")
+
+        timestamp = datetime.now(UTC)
+        database = SpannerClient.get_database()
+        with database.batch() as batch:
+            MemoryAPI._insert_audit_event_in_batch(
+                batch=batch,
+                tenant_id=tenant_id,
+                event_type=event_type,
+                source_node_id=source_node_id,
+                context=context,
+                timestamp=timestamp,
+            )
+
+    @staticmethod
+    def _authorize_operation(
+        *,
+        operation: str,
+        tenant_id: str,
+        authorization_scope: AuthorizationScope | None,
+        node_id: str | None = None,
+        label: str | None = None,
+        memory_tier: str | None = None,
+        relationship_type: str | None = None,
+    ) -> None:
+        """Enforce deny-by-default authorization and audit the decision."""
+        policy = settings.governance.authorization
+        if not policy.enabled:
+            return
+
+        allowed = policy.authorize(
+            authorization_scope,
+            node_id=node_id,
+            label=label,
+            memory_tier=memory_tier,
+            relationship_type=relationship_type,
+        )
+        decision_context = {
+            "operation": operation,
+            "tenant_id": tenant_id,
+            "node_id": node_id,
+            "label": label,
+            "memory_tier": memory_tier,
+            "relationship_type": relationship_type,
+            "agent_id": authorization_scope.agent_id if authorization_scope else None,
+            "allowed_node_ids": authorization_scope.allowed_node_ids if authorization_scope else [],
+            "allowed_labels": authorization_scope.allowed_labels if authorization_scope else [],
+            "allowed_memory_tiers": (
+                authorization_scope.allowed_memory_tiers if authorization_scope else []
+            ),
+            "allowed_relationship_types": (
+                authorization_scope.allowed_relationship_types if authorization_scope else []
+            ),
+            "allowed": allowed,
+        }
+
+        try:
+            MemoryAPI._record_authorization_decision(
+                tenant_id=tenant_id,
+                event_type="AUTHZ_ALLOW" if allowed else "AUTHZ_DENY",
+                source_node_id=node_id or operation,
+                context=decision_context,
+            )
+        except RuntimeError:
+            logger.warning("failed to record authorization decision", exc_info=True)
+
+        if not allowed:
+            msg = f"authorization denied for {operation}"
+            raise PermissionError(msg)
+
+    @staticmethod
     def _enforce_audit_append_only(operation: str) -> None:
         """Validate that audit table mutations remain append-only.
 
@@ -47,7 +135,7 @@ class MemoryAPI:
         Raises:
             PermissionError: If the requested operation violates immutability.
         """
-        SpannerClient._validate_audit_mutation_forbidden("AUDIT_EVENTS", operation)
+        SpannerClient._validate_audit_mutation_forbidden("AUDIT_EVENTS", operation)  # noqa: SLF001
 
     @staticmethod
     def _serialize_json_attributes(attributes: dict[str, Any]) -> str:
@@ -177,6 +265,7 @@ class MemoryAPI:
         session_id: str,
         user_id: str,
         metadata: dict[str, Any] | None = None,
+        authorization_scope: AuthorizationScope | None = None,
     ) -> SessionResponse:
         """Create a new session and initialize Context Graph.
 
@@ -185,6 +274,7 @@ class MemoryAPI:
             session_id: Unique session identifier
             user_id: User ID associated with session
             metadata: Optional session metadata
+            authorization_scope: Authorization scope for the request.
 
         Returns:
             SessionResponse with session details
@@ -198,16 +288,25 @@ class MemoryAPI:
         user_id = validate_required_string(user_id, field_name="user_id")
         metadata = validate_optional_mapping(metadata, field_name="metadata") or None
 
+        MemoryAPI._authorize_operation(
+            operation="create_session",
+            tenant_id=tenant_id,
+            authorization_scope=authorization_scope,
+            node_id=session_id,
+            label="Session",
+            memory_tier=SchemaConfig.MEMORY_TIER_CONTEXT,
+        )
+
         created_at = datetime.now(UTC)
 
         # Create Session node in MemoryNode with tenant isolation
         attributes = {"user_id": user_id, **(metadata or {})}
         node_sql = """
             INSERT INTO MemoryNode (
-                NodeId, TenantId, MemoryTier, Label, LogOddsWeight,
+                NodeId, TenantId, MemoryTier, Label, LogOddsWeight, SessionActionCount,
                 LastAccessed, Attributes, CreatedAt, UpdatedAt
             ) VALUES (
-                @node_id, @tenant_id, @tier, @label, @weight,
+                @node_id, @tenant_id, @tier, @label, @weight, @action_count,
                 @now, JSON(@attributes), @now, @now
             )
         """
@@ -223,6 +322,7 @@ class MemoryAPI:
                         "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
                         "label": "Session",
                         "weight": SchemaConfig.INITIAL_WEIGHT,
+                        "action_count": 0,
                         "now": created_at,
                         "attributes": MemoryAPI._serialize_json_attributes(attributes),
                     },
@@ -254,6 +354,9 @@ class MemoryAPI:
         entity_id: str,
         attributes: dict[str, Any] | None = None,
         relationship: dict[str, str] | None = None,
+        session_id: str | None = None,
+        session_action_count: int | None = None,
+        authorization_scope: AuthorizationScope | None = None,
     ) -> FactResponse:
         """Ingest an entity into Semantic Graph with baseline cognitive weight.
 
@@ -263,6 +366,9 @@ class MemoryAPI:
             entity_id: Unique entity identifier
             attributes: Entity attributes as JSON
             relationship: Optional relationship to existing node (type, source_id)
+            session_id: Session identifier used for durable action counting.
+            session_action_count: Cumulative per-session action count.
+            authorization_scope: Authorization scope for the request.
 
         Returns:
             FactResponse with entity details
@@ -279,10 +385,27 @@ class MemoryAPI:
         entity_id = validate_required_string(entity_id, field_name="entity_id")
         attributes = validate_optional_mapping(attributes, field_name="attributes") or None
         relationship = validate_relationship(relationship)
+
+        MemoryAPI._authorize_operation(
+            operation="add_semantic_fact",
+            tenant_id=tenant_id,
+            authorization_scope=authorization_scope,
+            node_id=entity_id,
+            label=entity_type,
+            memory_tier=SchemaConfig.MEMORY_TIER_SEMANTIC,
+        )
         if relationship and relationship.get("source_id"):
             source_tier = MemoryAPI._get_node_memory_tier(
                 tenant_id,
                 relationship["source_id"],
+            )
+            MemoryAPI._authorize_operation(
+                operation="add_semantic_fact.relationship",
+                tenant_id=tenant_id,
+                authorization_scope=authorization_scope,
+                node_id=relationship["source_id"],
+                relationship_type=relationship.get("type"),
+                memory_tier=source_tier,
             )
             if source_tier == SchemaConfig.MEMORY_TIER_AUDIT:
                 msg = "relationship source cannot be an AUDIT tier node"
@@ -310,7 +433,7 @@ class MemoryAPI:
 
         try:
             database = SpannerClient.get_database()
-            with database.batch() as batch:
+            with IdempotencyContext(), database.batch() as batch:
                 batch.execute_update(
                     node_sql,
                     {
@@ -331,14 +454,14 @@ class MemoryAPI:
                     if source_id:
                         edge_id = str(uuid.uuid4())
                         edge_sql = """
-                            INSERT INTO MemoryEdge (
-                                SourceNodeId, TenantId, EdgeId, DestNodeId, RelType,
-                                LogOddsWeight, LastAccessed, CreatedAt, UpdatedAt
-                            ) VALUES (
-                                @source_id, @tenant_id, @edge_id, @dest_id, @rel_type,
-                                @weight, @now, @now, @now
-                            )
-                        """
+                                INSERT INTO MemoryEdge (
+                                    SourceNodeId, TenantId, EdgeId, DestNodeId, RelType,
+                                    LogOddsWeight, LastAccessed, CreatedAt, UpdatedAt
+                                ) VALUES (
+                                    @source_id, @tenant_id, @edge_id, @dest_id, @rel_type,
+                                    @weight, @now, @now, @now
+                                )
+                            """
                         batch.execute_update(
                             edge_sql,
                             {
@@ -361,10 +484,17 @@ class MemoryAPI:
                     timestamp=created_at,
                 )
 
+            if session_action_count is None and session_id is not None:
+                session_action_count = MemoryAPI._increment_session_action_count(
+                    tenant_id,
+                    session_id,
+                )
+
             # Update weight on successful creation
             await MemoryAPI._update_weight_on_successful_use(
                 tenant_id,
                 [entity_id],
+                session_action_count=session_action_count,
             )
 
             return FactResponse(
@@ -385,6 +515,7 @@ class MemoryAPI:
         event_type: str,
         source_node_id: str,
         context: dict[str, Any] | None = None,
+        authorization_scope: AuthorizationScope | None = None,
     ) -> AuditResponse:
         """Record an immutable audit event in Audit Graph.
 
@@ -393,6 +524,7 @@ class MemoryAPI:
             event_type: Type of audit event
             source_node_id: Node that triggered the event
             context: Event context information
+            authorization_scope: Authorization scope for the request.
 
         Returns:
             AuditResponse with event details
@@ -405,6 +537,15 @@ class MemoryAPI:
         event_type = validate_required_string(event_type, field_name="event_type")
         source_node_id = validate_required_string(source_node_id, field_name="source_node_id")
         context = validate_optional_mapping(context, field_name="context") or None
+
+        MemoryAPI._authorize_operation(
+            operation="record_audit_event",
+            tenant_id=tenant_id,
+            authorization_scope=authorization_scope,
+            node_id=source_node_id,
+            label="AUDIT_EVENT",
+            memory_tier=SchemaConfig.MEMORY_TIER_AUDIT,
+        )
 
         timestamp = datetime.now(UTC)
         try:
@@ -428,6 +569,8 @@ class MemoryAPI:
         tenant_id: str,
         session_id: str,
         window_size: int = 10,
+        session_action_count: int | None = None,
+        authorization_scope: AuthorizationScope | None = None,
     ) -> ContextResponse:
         """Retrieve recent session history via GQL with edge metadata.
 
@@ -435,6 +578,8 @@ class MemoryAPI:
             tenant_id: Tenant identifier for isolation.
             session_id: Session identifier
             window_size: Number of turns to retrieve (1-100)
+            session_action_count: Cumulative per-session action count.
+            authorization_scope: Authorization scope for the request.
 
         Returns:
             ContextResponse with context turns
@@ -446,6 +591,15 @@ class MemoryAPI:
         tenant_id = validate_tenant_id(tenant_id)
         session_id = validate_required_string(session_id, field_name="session_id")
         window_size = validate_window_size(window_size)
+
+        MemoryAPI._authorize_operation(
+            operation="retrieve_context_window",
+            tenant_id=tenant_id,
+            authorization_scope=authorization_scope,
+            node_id=session_id,
+            label="Session",
+            memory_tier=SchemaConfig.MEMORY_TIER_CONTEXT,
+        )
 
         retrieved_at = datetime.now(UTC)
 
@@ -498,15 +652,22 @@ class MemoryAPI:
                 "RETRIEVE_CONTEXT_WINDOW",
                 session_id,
                 {"window_size": window_size, "turns_retrieved": len(turns)},
+                authorization_scope=authorization_scope,
             )
 
             # Update weights on successful retrieval
             turn_ids = [turn.turn_id for turn in turns]
             if turn_ids:
+                if session_action_count is None:
+                    session_action_count = MemoryAPI._increment_session_action_count(
+                        tenant_id,
+                        session_id,
+                    )
                 await MemoryAPI._update_weight_on_successful_use(
                     tenant_id,
                     turn_ids,
                     memory_tier=SchemaConfig.MEMORY_TIER_CONTEXT,
+                    session_action_count=session_action_count,
                 )
 
             return ContextResponse(
@@ -521,10 +682,53 @@ class MemoryAPI:
             raise RuntimeError(msg) from e
 
     @staticmethod
+    async def _do_weight_update_batch(
+        tenant_id: str,
+        node_ids: list[str],
+        memory_tier: str,
+        bayes_factor_ln: float,
+    ) -> None:
+        """Execute weight update batch operation (retryable).
+
+        This is a separate method to isolate the database operation for retry logic.
+
+        Args:
+            tenant_id: Tenant identifier.
+            node_ids: Node IDs to update.
+            memory_tier: Memory tier for the update.
+            bayes_factor_ln: Log-odds delta (ln(BF)).
+
+        Raises:
+            Exception: Any exception from Spanner (to be retried).
+        """
+        sql = """
+            UPDATE MemoryNode
+            SET LogOddsWeight = LogOddsWeight + @delta,
+                LastAccessed = CURRENT_TIMESTAMP(),
+                UpdatedAt = CURRENT_TIMESTAMP()
+            WHERE TenantId = @tenant_id
+              AND NodeId IN UNNEST(@node_ids)
+              AND MemoryTier = @tier
+        """
+
+        database = SpannerClient.get_database()
+        with database.batch() as batch:
+            batch.execute_update(
+                sql,
+                {
+                    "tenant_id": tenant_id,
+                    "delta": bayes_factor_ln,
+                    "node_ids": node_ids,
+                    "tier": memory_tier,
+                },
+            )
+
+    @staticmethod
     async def _update_weight_on_successful_use(
         tenant_id: str,
         node_ids: list[str],
         memory_tier: str = SchemaConfig.MEMORY_TIER_SEMANTIC,
+        session_action_count: int | None = None,
     ) -> None:
         """Update cognitive weights on successful use (confirmation bias).
 
@@ -534,10 +738,11 @@ class MemoryAPI:
             tenant_id: Tenant identifier for isolation.
             node_ids: List of node IDs to update
             memory_tier: Target tier for update.
+            session_action_count: Cumulative per-session action count.
 
         Raises:
             ValueError: If tenant_id is empty, memory_tier is invalid, or tier is immutable.
-            RuntimeError: If update fails
+            WeightUpdateFailed: If update fails after retries.
         """
         tenant_id = validate_tenant_id(tenant_id)
         if not node_ids:
@@ -558,31 +763,118 @@ class MemoryAPI:
             msg = "audit tier is append-only and cannot be updated"
             raise ValueError(msg)
 
+        weighting_policy = settings.governance.weighting
+
+        # Skip weighting entirely if disabled
+        if not weighting_policy.enabled:
+            logger.debug("weighting_disabled tenant_id=%s memory_tier=%s", tenant_id, memory_tier)
+            return
+
+        # Skip weighting if action count below threshold (when enabled)
+        if session_action_count is not None and not weighting_policy.should_trigger(
+            session_action_count
+        ):
+            logger.info(
+                ("weight_update_skipped tenant_id=%s memory_tier=%s action_count=%s threshold=%s"),
+                tenant_id,
+                memory_tier,
+                session_action_count,
+                weighting_policy.action_count_threshold,
+            )
+            return
+
         # Bayesian log-odds update: ln(1.25) ≈ 0.223
         bayes_factor_ln = math.log(SchemaConfig.BAYES_FACTOR_SUCCESS)
+        retry_policy = get_retry_policy()
 
-        sql = """
+        try:
+            # Execute with retry logic
+            await async_retry_with_backoff(
+                MemoryAPI._do_weight_update_batch,
+                tenant_id,
+                node_ids,
+                memory_tier,
+                bayes_factor_ln,
+                max_attempts=retry_policy.max_attempts,
+                initial_backoff_seconds=retry_policy.initial_backoff_seconds,
+                max_backoff_seconds=retry_policy.max_backoff_seconds,
+            )
+            logger.info(
+                "weight_update_completed tenant_id=%s node_count=%d memory_tier=%s",
+                tenant_id,
+                len(node_ids),
+                memory_tier,
+            )
+        except Exception as e:
+            logger.exception(
+                ("weight_update_exhausted tenant_id=%s node_count=%d memory_tier=%s attempts=%d"),
+                tenant_id,
+                len(node_ids),
+                memory_tier,
+                retry_policy.max_attempts,
+            )
+            raise WeightUpdateFailedError(
+                tenant_id=tenant_id,
+                node_ids=node_ids,
+                attempts=retry_policy.max_attempts,
+                last_error=e,
+            ) from e
+
+    @staticmethod
+    def _increment_session_action_count(tenant_id: str, session_id: str) -> int:
+        """Atomically increment and return the cumulative per-session action counter."""
+        tenant_id = validate_tenant_id(tenant_id)
+        session_id = validate_required_string(session_id, field_name="session_id")
+
+        select_sql = """
+            SELECT SessionActionCount
+            FROM MemoryNode
+            WHERE TenantId = @tenant_id
+              AND NodeId = @session_id
+              AND MemoryTier = @tier
+            LIMIT 1
+        """
+        update_sql = """
             UPDATE MemoryNode
-            SET LogOddsWeight = LogOddsWeight + @delta,
-                LastAccessed = CURRENT_TIMESTAMP(),
+            SET SessionActionCount = SessionActionCount + 1,
                 UpdatedAt = CURRENT_TIMESTAMP()
             WHERE TenantId = @tenant_id
-              AND NodeId IN UNNEST(@node_ids)
+              AND NodeId = @session_id
               AND MemoryTier = @tier
         """
 
-        try:
-            database = SpannerClient.get_database()
-            with database.batch() as batch:
-                batch.execute_update(
-                    sql,
+        database = SpannerClient.get_database()
+
+        def _transaction(transaction: Transaction) -> int:
+            rows = list(
+                transaction.execute_sql(
+                    select_sql,
                     {
                         "tenant_id": tenant_id,
-                        "delta": bayes_factor_ln,
-                        "node_ids": node_ids,
-                        "tier": memory_tier,
+                        "session_id": session_id,
+                        "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
                     },
                 )
-        except Exception as e:  # noqa: BLE001
-            # Log but don't raise - weight update is not critical to operation
-            logger.warning("failed to update weights for tenant %s", tenant_id, exc_info=e)
+            )
+            if not rows:
+                msg = f"session {session_id} not found in tenant"
+                raise ValueError(msg)
+
+            current_count = rows[0][0] or 0
+            transaction.execute_update(
+                update_sql,
+                {
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
+                },
+            )
+            return int(current_count) + 1
+
+        try:
+            return database.run_in_transaction(_transaction)
+        except ValueError:
+            raise
+        except Exception as error:
+            msg = f"Failed to increment session action count: {error}"
+            raise RuntimeError(msg) from error

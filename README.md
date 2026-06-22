@@ -158,6 +158,7 @@ Deployment templates and scripts:
 - Phase 2: MindMap retrieval and grounding pipeline complete.
 - Phase 3: MCP tooling and orchestration integration complete.
 - Phase 4: Security, observability, and marketplace hardening in progress.
+- Phase 4C: Observability safety baseline complete.
 - Phase 5-6: Comparative pilot and launch preparation planned.
 
 Roadmap reference:
@@ -173,6 +174,7 @@ Roadmap reference:
 - docs/architecture/adr/
 - docs/development/phase3-agent-integration-guide.md
 - docs/development/phase3-mcp-tool-reference.md
+- docs/development/phase4-local-user-testing.md
 
 ## Contributing
 

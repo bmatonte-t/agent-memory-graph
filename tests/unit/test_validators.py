@@ -35,7 +35,7 @@ class TestSecurityValidators:
 
     def test_validate_mapping_rejects_non_object(self) -> None:
         """Mapping validator should reject scalar values."""
-        with pytest.raises(ValueError, match="attributes must be an object"):
+        with pytest.raises(TypeError, match="attributes must be an object"):
             validate_mapping("not-a-dict", field_name="attributes")
 
     def test_validate_window_size_rejects_out_of_range(self) -> None:
@@ -45,13 +45,13 @@ class TestSecurityValidators:
 
     def test_validate_entity_type_rejects_invalid_value(self) -> None:
         """Entity-type validator should reject values outside allowed set."""
-        with pytest.raises(ValueError, match="Invalid entity_type"):
+        with pytest.raises(ValueError, match=r"^Invalid entity_type\.$"):
             validate_entity_type("INVALID", allowed_entity_types={"PERSON", "OBJECT"})
 
     def test_validate_relationship_rejects_invalid_source_type(self) -> None:
         """Relationship validator should reject non-string source identifiers."""
         relationship: dict[str, Any] = {"source_id": 123, "type": "REFERENCES"}
-        with pytest.raises(ValueError, match="relationship.source_id must be a string"):
+        with pytest.raises(ValueError, match=r"relationship\.source_id must be a string"):
             validate_relationship(relationship)
 
     def test_validate_relationship_returns_normalized_payload(self) -> None:

@@ -159,6 +159,7 @@ class TestMindMapPipeline:
                 query: str,
                 session_id: str | None,
                 tenant_id: str | None,
+                authorization_scope: object | None = None,
             ) -> None:
                 """Capture trace metadata in memory.
 
@@ -167,8 +168,9 @@ class TestMindMapPipeline:
                     query (str): Original query.
                     session_id (str | None): Session identifier.
                     tenant_id (str | None): Tenant identifier.
+                    authorization_scope (object | None): Optional auth scope.
                 """
-                del query, session_id, tenant_id
+                del query, session_id, tenant_id, authorization_scope
                 self.calls += 1
                 self.latest_trace_id = trace.trace_id
 

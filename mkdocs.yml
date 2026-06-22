@@ -155,6 +155,7 @@ nav:
       - Scripts: development/scripts.md
       - Initialization Modes: development/initialization_modes.md
       - Testing Changes: development/testing_changes.md
+      - Phase 4 Local User Testing: development/phase4-local-user-testing.md
       - Documentation: development/documentation.md
       - Release Strategy: development/release_strategy.md
   - Operations:
