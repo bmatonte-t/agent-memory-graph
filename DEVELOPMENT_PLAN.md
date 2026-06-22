@@ -1,363 +1,318 @@
 # Development Plan: Cognitive Agent Memory Graph
 
-**Status**: Phase planning and roadmap definition
-**Last Updated**: 2026-06-16
-**Target Launch**: Google Cloud Marketplace (end of phase 6)
+**Status**: Phase planning and roadmap definition with visible progress tracking
+**Version**: v0.2 development plan
+**Last Updated**: 2026-06-22
+**Target Launch**: Google Cloud Marketplace
 
 ## Overview
 
-This plan structures the build of the Cognitive Agent Memory Graph from architecture implementation through marketplace launch. Each phase includes specific deliverables, success criteria, and testing gates aligned to the [Marketplace Readiness Checklist](docs/marketplace-readiness-checklist.md) and [ADR-0001](docs/architecture/adr/ADR-0001-phase-one-architecture.md).
+Version 0.1 established the tripartite memory baseline, MindMap pipeline, MCP orchestration, and the first security/observability pass.
 
-## Phase 1: Foundation and Core Memory Layer
+Version 0.2 expands the product into a harder production system with:
 
-**Duration**: 4-6 weeks
-**Goal**: Build and validate the tripartite memory model and Spanner Graph schema.
+- tenant-scaled cognitive weighting tied to agent activity volume,
+- better lock resilience for semantic and audit writes,
+- real authorization for agents over subgraphs and node sets,
+- selected MindMap evidence-quality improvements,
+- selected Engram confidence and contradiction improvements.
 
-### Deliverables
+This document keeps v0.1 as the completed foundation and defines the development path for v0.2.
 
-1. **Spanner Graph Schema and Schema-as-Code**
-   - Define MemoryNode and MemoryEdge tables with interleaving optimization
-   - Create property graph mappings for Context, Semantic, and Audit tiers
-   - Implement schemaless JSON handling for dynamic attribute growth
-   - Version control all DDL
+## Progress Snapshot
 
-2. **Core Memory APIs**
-   - `memory.create_session()` - initialize Context Graph for a session
-   - `memory.add_semantic_fact()` - ingest entities into Semantic Graph with baseline weights
-   - `memory.record_audit_event()` - append events to Audit Graph
-   - `memory.retrieve_context_window()` - fetch recent session history via GQL
-   - All APIs return typed responses and error handling
+- v0.1: Complete. Core memory, MindMap, MCP, and baseline hardening are in place.
+- v0.2: Planned/in progress. Hardening, authorization, resilience, and evidence-quality work are the current focus.
 
-3. **Cognitive Weighting Implementation**
-   - Implement `cognitive_weight` and `last_accessed` fields on all semantic nodes/edges
-   - Build baseline weight assignment (e.g., 0.50 for new facts)
-   - Implement weight update logic: confirmation bias loop (+0.15 on successful use)
-   - Implement temporal decay background job (Cloud Run + Cloud Scheduler)
+### Completed v0.1 Baseline
 
-4. **Testing and Validation**
-   - Unit tests for memory API contracts
-   - Integration tests for tripartite memory isolation
-   - Load test for schema performance (10K nodes, 100K edges)
-   - Audit trail verification tests
+- Tripartite memory model, schema, and audit trail foundation.
+- Grounded MindMap retrieval and synthesis with traceability.
+- MCP tool contract and orchestration integration.
+- Observability safety baseline and local validation guidance.
 
-### Success Criteria
+## v0.2 Development Goals
 
-- Schema deployed on test Spanner instance with baseline performance metrics
-- Memory APIs pass all unit and integration tests
-- Cognitive weight updates are transactional and auditable
-- Decay job runs idempotently and maintains data consistency
-- Documentation: data model spec and API reference
+### 1. Tenant-Scaled Cognitive Weighting
 
----
+Add configuration so cognitive weighting frequency and/or strength can scale with tenant agent activity volume.
 
-## Phase 2: MindMap Query Pipeline
+#### What this means
 
-**Duration**: 4-6 weeks
-**Goal**: Implement the Mine -> Aggregate -> Serialize -> Synthesize pipeline with grounding enforcement.
+- A tenant with 1 million agent actions per day should receive more weighting opportunities than a tenant with 100 actions per day.
+- Keep the current baseline behavior available as a safe default.
+- Prefer thresholded tiers over simple per-call linear scaling.
 
-### Deliverables
+#### Deliverables
 
-1. **Mining and Entity Extraction**
-   - Vertex AI Gemini Flash integration for intent/entity extraction
-   - JSON Schema output constraint for structured entity payloads
-   - Type validation for extracted entities
-   - Telemetry: track extraction latency and error rates
+- Add config and settings options for weighting tiers.
+- Count successful agent actions at orchestration/MCP boundaries.
+- Feed trigger tier context into existing weight updates.
+- Preserve immediate weighting as a fallback when tiering is disabled.
 
-2. **Graph Aggregation (GQL)**
-   - GQL-based variable-length path traversal with cognitive horizon filtering
-   - Implement retrieval that respects `cognitive_weight > 0.30` (configurable)
-   - Query optimization for multi-hop traversal on interleaved schema
-   - Enforce staged retrieval across memory tiers so Context, Semantic, and Audit reads are isolated per transaction
-   - Return edge metadata for provenance linking
+#### Success Criteria
 
-3. **Evidence Serialization**
-   - Convert GQL result sets to structured fact statements (markdown or JSON)
-   - Include edge labels and weights in serialized output
-   - Support human-readable and machine-parseable formats
-   - Validation: facts match GQL results bidirectionally
+- High-volume tenants trigger more weighting than low-volume tenants.
+- Phase 0 baseline is in place with the cumulative session counter feeding the weighting trigger path.
+- Existing APIs still work with the new config disabled.
 
-4. **Grounded Synthesis**
-   - Vertex AI Gemini Pro integration for response generation
-   - System prompt enforcement: "Use ONLY provided facts; if insufficient, return 'Insufficient graph evidence.'"
-   - Response validation: all claims trace back to serialized facts
-   - Fallback behavior when graph evidence is incomplete
+### 2. Lock Resilience and Write Safety
 
-5. **Traceability and Audit**
-   - Link each response to (mined entities) -> (traversal paths) -> (serialized facts)
-   - Record MindMap execution subgraph in Audit memory
-   - Create example reasoning chains for documentation
+Improve concurrent write behavior so semantic and audit paths survive contention and retries without duplicating effects.
 
-6. **Testing and Validation**
-   - Unit tests for each pipeline stage (mine, aggregate, serialize, synthesize)
-   - Integration tests for end-to-end MindMap flow
-   - Adversarial tests: prompts with insufficient evidence should trigger insufficiency
-   - Latency benchmarks for p95 retrieval + synthesis
-   - Traceability verification tests
+#### Deliverables
 
-### Success Criteria
+- Classify transient Spanner failures.
+- Add bounded retry/backoff for write operations.
+- Add idempotency boundaries for mutation paths.
+- Make critical weight-update behavior observable instead of silent-best-effort.
 
-- MindMap pipeline passes all integration tests
-- Response grounding is demonstrable with audit trail
-- Insufficient evidence returns explicit statement (no guessing)
-- Latency targets: extraction <500ms, aggregation <2s, synthesis <3s (p95)
-- Documentation: pipeline architecture, example reasoning chains, error handling
+#### Success Criteria
 
----
+- Concurrent writes do not create duplicate semantic side effects.
+- Transient contention errors recover automatically within bounded retry limits.
+- Audit writes remain append-only and traceable.
 
-## Phase 3: Agent Orchestration and Tool Integration
+### 3. Real Agent Authorization
 
-**Duration**: 3-4 weeks
-**Goal**: Wire memory layer to Vertex AI agents via Model Context Protocol (MCP).
+Replace binary tenant-only access with ABAC rules that can scope agents to specific subgraphs, node sets, labels, and relationship families.
 
-### Deliverables
+#### Deliverables
 
-1. **MCP Server Implementation**
-   - Expose memory layer as MCP tools:
-     - `memory_search(query)` - invoke MindMap pipeline
-     - `memory_add_fact(entity, attributes)` - ingest into Semantic Graph
-     - `memory_log_trace(decision_context)` - record reasoning step to Audit
-     - `memory_recall_context()` - fetch session context window
-   - Tool error contract and fallback handling
-   - Tool execution telemetry (latency, errors, token usage)
+- Extend request contracts with agent identity and policy attributes.
+- Enforce ABAC at MCP dispatch.
+- Enforce ABAC on MemoryAPI reads and writes.
+- Audit grant/deny decisions with reason codes.
+- Support resource predicates based on tenant, tier, node IDs, labels, and path scope.
 
-2. **Agent Framework Integration**
-   - Connect Vertex AI agent to MCP server
-   - Implement agent orchestration loop: prompt -> MCP call -> response
-   - Support supervisor/worker agent pattern if multi-agent required
-   - Enforce MCP tools as primary memory interaction path
+#### Success Criteria
 
-3. **Testing and Validation**
-   - Unit tests for MCP tool contracts
-   - Agent end-to-end tests (multi-turn conversation with memory)
-   - Memory consistency tests across agent sessions
-   - Load test: concurrent agent sessions
-   - Observability validation (tracing shows request ID through tool chain)
+- A denied agent cannot read or write outside its allowed subgraph.
+- Authorization failures are auditable and client-safe.
+- The current implementation already enforces deny-by-default checks at MCP and MemoryAPI boundaries for the core memory and trace paths.
 
-### Success Criteria
+### 4. MindMap-Inspired Evidence Quality
 
-- MCP server deployment on Cloud Run with auto-scaling
-- Agent successfully uses memory tools
-- Memory updates are visible in subsequent turns
-- Observability shows end-to-end request tracing
-- Documentation: MCP tool reference, agent integration guide
+Adopt the useful parts of the original MindMap implementation without adopting the research-script architecture wholesale.
 
----
+#### Deliverables
 
-## Phase 4: Security, Observability, and Marketplace Readiness
+- Add richer evidence provenance to serialized paths.
+- Add bounded neighbor-based enrichment where it improves grounding.
+- Keep retrieval deterministic and compact.
+- Preserve explicit insufficient-evidence behavior.
 
-**Duration**: 4-6 weeks
-**Goal**: Harden system for enterprise and marketplace standards.
+#### Success Criteria
 
-### Deliverables
+- Evidence is easier to inspect and trace.
+- Returned context stays bounded and policy-compliant.
 
-1. **Security Hardening**
-   - IAM policies: least-privilege service accounts
-   - Audit memory immutability: controls that reject deletion/updates
-   - Tenant isolation if multi-tenant (append tenant_id to all nodes)
-   - Input validation on all API boundaries
-   - Error messages that don't leak system internals
+### 5. Engram-Inspired Confidence Quality
 
-2. **Observability Stack**
-   - Cloud Trace integration: propagate request ID through entire pipeline
-   - Cloud Logging: structured logs for all memory operations
-   - Cloud Monitoring: SLI dashboards for availability, latency, error rate
-   - Custom metrics: cognitive weight distribution, graph size, token consumption
-   - Alert rules for SLO violations
+Adopt the useful parts of Engram’s confidence and contradiction handling without replacing the current memory model.
 
-3. **Documentation and Runbooks**
-   - Operations guide: deployment architecture, scaling, backups
-   - Troubleshooting guide: common failure modes and diagnostics
-   - Admin guide: tenant management, retention policies, cost controls
-   - Support playbook: escalation paths and RCA process
+#### Deliverables
 
-4. **Testing and Compliance**
-   - Security audit: IAM, data handling, compliance controls
-   - Penetration testing basics (input injection, access boundary violations)
-   - Compliance checklist review (CCPA, GDPR readiness basics)
-   - SLO and SLI validation under load
-   - Chaos/resilience testing for failure modes
+- Add source-aware confidence metadata.
+- Add freshness awareness to synthesis eligibility.
+- Add a lightweight contradiction/tension detection hook at ingest.
+- Gate high-impact synthesis claims on confidence and contradiction status.
 
-5. **Marketplace Package**
-   - Publish security architecture document
-   - Create quickstart and deployment guide for buyers
-   - Define pricing/editions model (if applicable)
-   - Prepare listing assets (screenshots, architecture diagrams, demo)
+#### Success Criteria
 
-### Success Criteria
+- Confidence and freshness influence whether a fact is used.
+- Conflicting facts are visible rather than silently absorbed.
 
-- Security audit passes with no critical findings
-- Observability dashboard shows system health metrics
-- Runbooks and troubleshooting guide are complete and validated
-- All items in [Marketplace Readiness Checklist](docs/marketplace-readiness-checklist.md) are marked pass
-- Deployment on test marketplace instance is successful
-- Documentation review by internal security and product teams passes
+## v0.2 Phases
 
----
+### Phase 0: Decision Freeze
 
-## Phase 5: Comparative User Testing Pilot
+**Goal**: Lock the v0.2 design so implementation stays consistent across weighting, resilience, and authorization.
 
-**Duration**: 3-4 weeks
-**Goal**: Design and execute a structured user testing pilot that compares this agent with similar tools available in GCP Marketplace.
+#### Deliverables
 
-### Deliverables
+1. Define tenant action-trigger thresholds and how they affect weighting.
+2. Define the ABAC policy model for agents and graph resources.
+3. Define transient error classification and idempotency strategy.
 
-1. **Comparative Study Design**
-   - Define competitor set (3-5 similar Marketplace tools by category and use case)
-   - Define user profiles and tasks (operators, developers, data teams)
-   - Define test protocol: moderated tasks, scripted prompts, and scoring rubric
-   - Pre-register evaluation criteria to reduce bias
+#### Success Criteria
 
-2. **Evaluation Framework and Instrumentation**
-   - Standardize scenarios and data across all tools
-   - Metrics: task success rate, time-to-completion, perceived trust, explainability, and setup effort
-   - Technical metrics: latency, error rate, grounding confidence, and operational complexity
-   - Add survey instruments (SUS or equivalent, confidence/trust questions)
+- A single canonical policy exists for weighting, authorization, and retries.
 
-3. **Pilot Execution**
-   - Recruit 8-15 participants across target buyer profiles
-   - Run A/B or round-robin sessions across compared tools
-   - Collect quantitative and qualitative feedback
-   - Capture friction logs and support burden observations
+### Phase 1: Action-Scaled Weighting
 
-4. **Analysis and Product Actions**
-   - Build comparative scorecard and strengths/gaps analysis
-   - Prioritize remediation backlog from pilot findings
-   - Update messaging and differentiation based on evidence
-   - Update docs, onboarding, and UX gaps discovered in pilot
+**Goal**: Make weighting scale with tenant activity volume.
 
-### Success Criteria
+#### Deliverables
 
-- Comparative test completes with enough participant coverage
-- Scorecard clearly demonstrates strengths/weaknesses vs similar tools
-- Top-priority usability and trust issues are converted into actionable backlog
-- Updated value proposition is evidence-backed and buyer-relevant
+1. Add config for weighting tiers and scaling strategy.
+2. Count successful agent actions in the orchestration/MCP path.
+3. Pass trigger context into weight updates for context and semantic memory.
+4. Add tests that compare high-volume and low-volume tenant behavior.
 
----
+#### Success Criteria
 
-## Phase 6: Marketplace Launch and Go-Live
+- High-volume tenants get more weighting opportunities than low-volume tenants.
 
-**Duration**: 2-4 weeks
-**Goal**: Finalize listing, launch, and establish stable support operations.
+### Phase 2: Lock Resilience
 
-### Deliverables
+**Goal**: Make write paths robust under contention.
 
-1. **Marketplace Listing**
-   - Submit to Google Cloud Marketplace with all required materials
-   - Coordinate with Google for review and approval
-   - Prepare launch communication (blog, announcement)
+#### Deliverables
 
-2. **Go-Live Support**
-   - Establish support process (Slack, email, ticketing)
-   - Prepare incident response team
-   - Document known limitations for launch
-   - Prepare week-1 and week-4 launch health reviews
+1. Add retry/backoff around transient write failures.
+2. Add idempotency keys to mutation flows.
+3. Make weight-update failures visible and recoverable.
+4. Add contention and duplicate-request tests.
 
-3. **Post-Launch Validation**
-   - Validate production SLO metrics and support SLAs
-   - Track onboarding completion and time-to-value
-   - Confirm top pilot remediations are reflected in launch artifacts
+#### Success Criteria
 
-### Success Criteria
+- Concurrent writes recover safely and do not duplicate effects.
 
-- Marketplace approval is granted
-- Go-live metrics meet or exceed targets (availability >99.9%, p95 latency <5s)
-- Support process is operational
-- Launch KPIs and support KPIs are stable for first 30 days
+### Phase 3: ABAC Authorization
 
----
+**Goal**: Enforce real authorization for agent access to graph resources.
+
+#### Deliverables
+
+1. Add agent identity and authorization attributes to request contracts.
+2. Enforce policy at MCP tool dispatch.
+3. Enforce policy at MemoryAPI query/mutation boundaries.
+4. Audit grant/deny decisions.
+5. Add allow/deny tests for node-set and subgraph access.
+
+#### Success Criteria
+
+- Unauthorized reads and writes are denied at the boundary.
+
+### Phase 4: MindMap Evidence Quality
+
+**Goal**: Improve evidence traceability and usefulness.
+
+#### Deliverables
+
+1. Add provenance to serialized path evidence.
+2. Add bounded neighbor evidence when appropriate.
+3. Keep evidence compact and deterministic.
+4. Verify no-evidence behavior remains explicit.
+
+#### Success Criteria
+
+- Evidence quality improves without expanding the system into a research prototype.
+
+### Phase 5: Engram Confidence Quality
+
+**Goal**: Improve confidence and contradiction handling.
+
+#### Deliverables
+
+1. Add source-aware confidence metadata.
+2. Add freshness gating.
+3. Add contradiction/tension detection hooks.
+4. Use confidence signals to gate synthesis.
+
+#### Success Criteria
+
+- Low-confidence or conflicting facts do not dominate responses.
+
+### Phase 6: Documentation and Rollout
+
+**Goal**: Prepare v0.2 for validation and rollout.
+
+#### Deliverables
+
+1. Update the development plan and API docs.
+2. Document new config knobs and policy rules.
+3. Update runbooks for retries, auth boundaries, and evidence quality.
+4. Add rollout notes for shadow mode and canary behavior.
+
+#### Success Criteria
+
+- v0.2 is documented, testable, and safe to roll out incrementally.
 
 ## Development Practices
 
 ### Specification-Driven Approach
 
 Before implementing each phase, a detailed spec is reviewed and approved:
-- Acceptance criteria are explicit
-- Interfaces and contracts are defined
-- Architecture decisions are documented
-- Testing strategy is planned upfront
+
+- Acceptance criteria are explicit.
+- Interfaces and contracts are defined.
+- Architecture decisions are documented.
+- Testing strategy is planned upfront.
 
 ### Test-Driven Development
 
-- Unit tests are written before implementation
-- Integration tests validate contracts across components
-- Load and chaos tests ensure operational readiness
-- All tests pass before code review
+- Unit tests are written before implementation.
+- Integration tests validate contracts across components.
+- Load and chaos tests ensure operational readiness.
+- All tests pass before code review.
 
 ### Incremental Implementation
 
-- Each phase delivers a working, testable increment
-- Features are decoupled to allow partial progress
-- Backward compatibility is maintained across phases
-- Rollback strategy exists for each phase
+- Each phase delivers a working, testable increment.
+- Features are decoupled to allow partial progress.
+- Backward compatibility is maintained across phases.
+- Rollback strategy exists for each phase.
 
 ### Code Review and Quality
 
 - All code changes pass peer review across five dimensions:
-  - Correctness: code works and handles edge cases
-  - Readability: clear intent and maintainability
-  - Architecture: alignment with mandates and decisions
-  - Security: no data leaks, proper auth/audit
-  - Performance: meets latency and cost targets
-- Automated checks: lint, type checking, test coverage
+  - Correctness: code works and handles edge cases.
+  - Readability: clear intent and maintainability.
+  - Architecture: alignment with mandates and decisions.
+  - Security: no data leaks, proper auth/audit.
+  - Performance: meets latency and cost targets.
+- Automated checks: lint, type checking, test coverage.
 
 ### Observability from Day One
 
-- Instrumentation is built into every phase
-- Request IDs propagate through all layers
-- Metrics are exported continuously
-- Runbooks are written in parallel with features
-
----
+- Instrumentation is built into every phase.
+- Request IDs propagate through all layers.
+- Metrics are exported continuously.
+- Runbooks are written in parallel with features.
 
 ## Success Metrics
 
 ### Phase-Level Gates
 
-| Phase | Go/No-Go Gate | Owner |
-|-------|---------------|-------|
-| Phase 1 | Schema deployed, memory APIs functional | Eng Lead |
-| Phase 2 | MindMap pipeline passes end-to-end tests | Eng Lead |
-| Phase 3 | Agent orchestration live and tested | Eng Lead |
-| Phase 4 | Marketplace Readiness Checklist all pass | Product + Eng |
-| Phase 5 | Comparative user testing completed and analyzed | Product Research |
-| Phase 6 | Marketplace launch approved and stable | Product Lead |
+- Phase 0 gate: policy and implementation contracts frozen.
+- Phase 1 gate: tenant-scaled weighting works and is configurable.
+- Phase 2 gate: retry/idempotency behavior survives contention.
+- Phase 3 gate: ABAC is enforced for tool and subgraph access.
+- Phase 4 gate: MindMap evidence quality improvements are in place.
+- Phase 5 gate: Engram-inspired confidence handling is in place.
+- Phase 6 gate: docs and rollout plan are ready for internal validation.
 
-### Product Metrics (Phase 4+)
+### Product Metrics (v0.2)
 
-- Availability: 99.9% (multi-region Spanner SLA)
-- Latency (p95): <5s for end-to-end response
-- Hallucination rate: <2% (graph-grounded responses)
-- Token efficiency: 40-80% reduction vs. baseline RAG
-- Auditability: 100% of responses traceable to evidence
-- User testing delta: measurable gain in trust and task success vs compared tools
-
----
+- Availability: 99.9% target.
+- Latency (p95): stable end-to-end response within current SLO.
+- Authorization coverage: all agent actions checked against policy.
+- Auditability: 100% of denied and granted policy decisions logged.
+- Weighting fairness: high-volume tenants trigger more weighting than low-volume tenants.
+- Evidence quality: grounded responses stay compact, traceable, and explicit when evidence is insufficient.
 
 ## Dependencies and Risks
 
 ### Critical Dependencies
 
-- Google Cloud Spanner Graph availability and maturity
-- Vertex AI Gemini Flash/Pro availability
-- GCP quota and service limits for pilot/launch scale
-- Availability of comparable Marketplace tools for fair benchmarking
+- Google Cloud Spanner Graph contention behavior.
+- Settings/config wiring for new v0.2 options.
+- Final ABAC policy source of truth.
+- Availability of the selected MindMap and Engram ideas that fit this architecture.
 
 ### Risks and Mitigations
 
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|-----------|
-| Spanner performance degrades with scale | Medium | High | Load test early, optimize schema interleaving |
-| MindMap latency exceeds targets | Medium | High | Profile and optimize GQL query planning |
-| Marketplace approval delayed | Low | Medium | Engage Google early, follow all guidelines |
-| Comparative pilot is biased or inconclusive | Medium | High | Pre-register rubric, standardize scenarios, independent review |
-| Security audit finds critical issues | Low | High | Security review in phase 4, penetration test early |
-
----
+- Risk: weighting becomes noisy for heavy tenants. Mitigation: thresholded tiers and bounded updates.
+- Risk: retry hides real data issues. Mitigation: classify transient vs permanent failures clearly.
+- Risk: ABAC becomes hard to reason about. Mitigation: keep policies declarative and audit every decision.
+- Risk: evidence enrichment expands context too much. Mitigation: cap neighbors and preserve deterministic insufficiency behavior.
+- Risk: contradiction handling causes false positives. Mitigation: start with annotate-only mode, then gate synthesis later.
 
 ## Next Steps
 
-1. Approve this plan and assign phase leads
-2. Create detailed task breakdown for Phase 1 (schema and core APIs)
-3. Create comparative testing protocol draft and tool short-list for Phase 5
-4. Set up development environment (test Spanner instance, Cloud Run project)
-5. Begin Phase 1 with spec-driven approach (write API specs before code)
+1. Approve this v0.2 plan.
+2. Break Phase 0 into implementation tickets.
+3. Define the new settings model and policy contract.
+4. Start Phase 1 with tests for tenant-scaled weighting tiers.

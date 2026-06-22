@@ -9,7 +9,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import perf_counter
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, Field
 
@@ -31,8 +31,13 @@ from src.models.mindmap import (
     StageTiming,
     SynthesisResult,
 )
+from src.observability.metrics import pipeline_execution_histogram, pipeline_fact_counter
+from src.observability.tracing import trace_span
 
 logger = logging.getLogger(__name__)
+
+if TYPE_CHECKING:
+    from src.security.governance import AuthorizationScope
 
 
 class MindMapPipelineError(RuntimeError):
@@ -195,13 +200,22 @@ class AggregationAdapter(Protocol):
 class TraceRecorder(Protocol):
     """Abstraction for persisting MindMap execution traces."""
 
-    async def record(self, *, trace: MindMapTrace, query: str, session_id: str | None) -> None:
+    async def record(
+        self,
+        *,
+        trace: MindMapTrace,
+        query: str,
+        session_id: str | None,
+        tenant_id: str | None,
+    ) -> None:
         """Persist trace metadata for observability and audit.
 
         Args:
             trace (MindMapTrace): Structured pipeline trace envelope.
             query (str): Original user query.
             session_id (str | None): Session identifier if available.
+            tenant_id (str | None): Tenant identifier if available.
+            authorization_scope (AuthorizationScope | None): Authorization scope for the request.
         """
 
 
@@ -209,20 +223,32 @@ class TraceRecorder(Protocol):
 class NoOpTraceRecorder:
     """Trace recorder that intentionally does nothing in local/test mode."""
 
-    async def record(self, *, trace: MindMapTrace, query: str, session_id: str | None) -> None:
+    async def record(
+        self,
+        *,
+        trace: MindMapTrace,
+        query: str,
+        session_id: str | None,
+        tenant_id: str | None,
+        authorization_scope: AuthorizationScope | None = None,
+    ) -> None:
         """Record trace metadata as a no-op.
 
         Args:
             trace (MindMapTrace): Structured pipeline trace envelope.
             query (str): Original user query.
             session_id (str | None): Session identifier if available.
+            tenant_id (str | None): Tenant identifier if available.
+            authorization_scope (AuthorizationScope | None): Authorization scope for the request.
         """
+        del authorization_scope
         logger.debug(
             "mindmap.trace.noop",
             extra={
                 "trace_id": trace.trace_id,
                 "query_length": len(query),
                 "session_id": session_id,
+                "tenant_id": tenant_id,
             },
         )
 
@@ -231,18 +257,29 @@ class NoOpTraceRecorder:
 class AuditTraceRecorder:
     """Trace recorder that writes MindMap execution metadata to Audit memory."""
 
-    async def record(self, *, trace: MindMapTrace, query: str, session_id: str | None) -> None:
+    async def record(
+        self,
+        *,
+        trace: MindMapTrace,
+        query: str,
+        session_id: str | None,
+        tenant_id: str | None,
+        authorization_scope: AuthorizationScope | None = None,
+    ) -> None:
         """Persist trace metadata using Memory API audit events.
 
         Args:
             trace (MindMapTrace): Structured pipeline trace envelope.
             query (str): Original user query.
             session_id (str | None): Session identifier if available.
+            tenant_id (str | None): Tenant identifier if available.
+            authorization_scope (AuthorizationScope | None): Authorization scope for the request.
 
         Raises:
             MindMapPipelineError: If trace cannot be persisted.
         """
         source_node_id = session_id or trace.trace_id
+        resolved_tenant_id = tenant_id or "tenant_mindmap"
         context = {
             "trace_id": trace.trace_id,
             "query": query,
@@ -254,9 +291,11 @@ class AuditTraceRecorder:
 
         try:
             await MemoryAPI.record_audit_event(
+                tenant_id=resolved_tenant_id,
                 event_type="MINDMAP_EXECUTION",
                 source_node_id=source_node_id,
                 context=context,
+                authorization_scope=authorization_scope,
             )
         except RuntimeError as error:
             raise MindMapPipelineError(
@@ -506,12 +545,22 @@ class MindMapPipeline:
         else:
             self.trace_recorder = NoOpTraceRecorder()
 
-    async def execute(self, query: str, session_id: str | None = None) -> MindMapResponse:
+    async def execute(
+        self,
+        query: str,
+        session_id: str | None = None,
+        tenant_id: str | None = None,
+        authorization_scope: AuthorizationScope | None = None,
+    ) -> MindMapResponse:
         """Run full MindMap pipeline and return grounded result.
 
         Args:
             query (str): User query string.
             session_id (str | None, optional): Session identifier. Defaults to None.
+            tenant_id (str | None, optional): Tenant identifier for request scoping.
+                Defaults to None.
+            authorization_scope (AuthorizationScope | None, optional): Authorization scope
+                for the request. Defaults to None.
 
         Returns:
             MindMapResponse: Final response with traceability envelope.
@@ -519,65 +568,95 @@ class MindMapPipeline:
         Raises:
             MindMapPipelineError: If validation fails.
         """
-        self._validate_query(query)
-        trace_id = f"trace_{uuid.uuid4()}"
-        stage_timings: list[StageTiming] = []
-
-        mining_result = await self.mining_adapter.mine(query)
-        stage_timings.append(
-            StageTiming(stage=PipelineStage.MINE, latency_ms=mining_result.latency_ms)
-        )
-
-        aggregation_result = await self.aggregation_adapter.aggregate(
-            mining_result=mining_result,
-            config=self.config,
-        )
-        stage_timings.append(
-            StageTiming(stage=PipelineStage.AGGREGATE, latency_ms=aggregation_result.latency_ms)
-        )
-
-        serialization_result = self._serialize(aggregation_result=aggregation_result)
-        stage_timings.append(
-            StageTiming(stage=PipelineStage.SERIALIZE, latency_ms=serialization_result.latency_ms)
-        )
-
-        if self.config.use_vertex_synthesis:
-            synthesis_result = self._synthesize_with_vertex(
-                serialization_result=serialization_result
-            )
-        else:
-            synthesis_result = self._synthesize(serialization_result=serialization_result)
-        self._validate_grounding(
-            synthesis_result=synthesis_result,
-            serialization_result=serialization_result,
-        )
-        stage_timings.append(
-            StageTiming(stage=PipelineStage.SYNTHESIZE, latency_ms=synthesis_result.latency_ms)
-        )
-
-        trace = MindMapTrace(
-            trace_id=trace_id,
-            mined_entities=[entity.entity_id for entity in mining_result.entities],
-            path_ids=[path.path_id for path in aggregation_result.paths],
-            fact_ids=[fact.fact_id for fact in serialization_result.facts],
-            stage_timings=stage_timings,
-            created_at=self._now(),
-        )
-
-        logger.info(
-            "mindmap.execute.complete",
-            extra={
-                "trace_id": trace_id,
-                "session_id": session_id,
-                "query_length": len(query),
-                "fact_count": len(serialization_result.facts),
-                "grounded": synthesis_result.grounded,
+        with trace_span(
+            "mindmap.execute",
+            attributes={
+                "session.id": session_id or "",
+                "tenant.id": tenant_id or "",
+                "query.length": len(query),
             },
-        )
+        ):
+            self._validate_query(query)
+            trace_id = f"trace_{uuid.uuid4()}"
+            stage_timings: list[StageTiming] = []
 
-        await self.trace_recorder.record(trace=trace, query=query, session_id=session_id)
+            mining_result = await self.mining_adapter.mine(query)
+            stage_timings.append(
+                StageTiming(stage=PipelineStage.MINE, latency_ms=mining_result.latency_ms)
+            )
 
-        return MindMapResponse(query=query, synthesis=synthesis_result, trace=trace)
+            aggregation_result = await self.aggregation_adapter.aggregate(
+                mining_result=mining_result,
+                config=self.config,
+            )
+            stage_timings.append(
+                StageTiming(stage=PipelineStage.AGGREGATE, latency_ms=aggregation_result.latency_ms)
+            )
+
+            serialization_result = self._serialize(aggregation_result=aggregation_result)
+            stage_timings.append(
+                StageTiming(
+                    stage=PipelineStage.SERIALIZE, latency_ms=serialization_result.latency_ms
+                )
+            )
+
+            if self.config.use_vertex_synthesis:
+                synthesis_result = self._synthesize_with_vertex(
+                    serialization_result=serialization_result
+                )
+            else:
+                synthesis_result = self._synthesize(serialization_result=serialization_result)
+            self._validate_grounding(
+                synthesis_result=synthesis_result,
+                serialization_result=serialization_result,
+            )
+            stage_timings.append(
+                StageTiming(stage=PipelineStage.SYNTHESIZE, latency_ms=synthesis_result.latency_ms)
+            )
+
+            trace = MindMapTrace(
+                trace_id=trace_id,
+                mined_entities=[entity.entity_id for entity in mining_result.entities],
+                path_ids=[path.path_id for path in aggregation_result.paths],
+                fact_ids=[fact.fact_id for fact in serialization_result.facts],
+                stage_timings=stage_timings,
+                created_at=self._now(),
+            )
+
+            logger.info(
+                "mindmap.execute.complete",
+                extra={
+                    "trace_id": trace_id,
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "query_length": len(query),
+                    "fact_count": len(serialization_result.facts),
+                    "grounded": synthesis_result.grounded,
+                },
+            )
+
+            total_latency_ms = sum(t.latency_ms for t in stage_timings)
+            pipeline_execution_histogram().record(
+                total_latency_ms,
+                {
+                    "grounded": str(synthesis_result.grounded),
+                    "tenant.id": tenant_id or "",
+                },
+            )
+            pipeline_fact_counter().add(
+                len(serialization_result.facts),
+                {"tenant.id": tenant_id or ""},
+            )
+
+            await self.trace_recorder.record(
+                trace=trace,
+                query=query,
+                session_id=session_id,
+                tenant_id=tenant_id,
+                authorization_scope=authorization_scope,
+            )
+
+            return MindMapResponse(query=query, synthesis=synthesis_result, trace=trace)
 
     def _validate_query(self, query: str) -> None:
         """Validate user query before pipeline execution.

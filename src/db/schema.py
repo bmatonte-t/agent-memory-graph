@@ -10,6 +10,7 @@ from google.cloud import spanner  # noqa: TC002
 logger = logging.getLogger(__name__)
 
 _MINIMUM_INDEX_COUNT = 3
+_MINIMUM_AUDIT_INDEX_COUNT = 3
 
 
 class SchemaManager:
@@ -95,8 +96,10 @@ class SchemaManager:
         validation_results = {
             "memory_node_exists": False,
             "memory_edge_exists": False,
+            "audit_events_exists": False,
             "property_graph_exists": False,
             "indexes_exist": False,
+            "audit_indexes_exist": False,
         }
 
         # Check if MemoryNode table exists
@@ -140,6 +143,19 @@ class SchemaManager:
         except Exception:  # noqa: BLE001
             logger.debug("Error checking property graph", exc_info=True)
 
+        # Check if AUDIT_EVENTS table exists
+        try:
+            with database.snapshot() as snapshot:
+                results = snapshot.execute_sql(
+                    "SELECT column_name"
+                    " FROM information_schema.columns"
+                    " WHERE table_name = 'AUDIT_EVENTS'"
+                )
+                if list(results):
+                    validation_results["audit_events_exists"] = True
+        except Exception:  # noqa: BLE001
+            logger.debug("Error checking AUDIT_EVENTS table", exc_info=True)
+
         # Check if indexes exist
         try:
             with database.snapshot() as snapshot:
@@ -153,6 +169,19 @@ class SchemaManager:
                     validation_results["indexes_exist"] = True
         except Exception:  # noqa: BLE001
             logger.debug("Error checking indexes", exc_info=True)
+
+        # Check if audit indexes exist
+        try:
+            with database.snapshot() as snapshot:
+                results = snapshot.execute_sql(
+                    "SELECT index_name"
+                    " FROM information_schema.statistics"
+                    " WHERE table_name = 'AUDIT_EVENTS'"
+                )
+                if len(list(results)) >= _MINIMUM_AUDIT_INDEX_COUNT:
+                    validation_results["audit_indexes_exist"] = True
+        except Exception:  # noqa: BLE001
+            logger.debug("Error checking audit indexes", exc_info=True)
 
         return validation_results
 
@@ -187,6 +216,8 @@ class SchemaConfig:
         MEMORY_TIER_SEMANTIC,
         MEMORY_TIER_AUDIT,
     }
+    AUDIT_TABLE_NAME = "AUDIT_EVENTS"
+    AUDIT_ALLOWED_OPERATIONS: ClassVar[set[str]] = {"INSERT"}
 
     # POLE+O Entity Types
     ENTITY_TYPE_PERSON = "PERSON"

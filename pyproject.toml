@@ -6,6 +6,7 @@ requires-python = ">=3.14"
 dependencies = [
     "asgi-correlation-id",
     "fastapi>=0.104.0",
+    "google-cloud-logging>=3.10",
     "google-cloud-spanner>=3.25.0",
     "httpx>=0.25.0",
     "pydantic>=2.0",
@@ -166,6 +167,10 @@ unfixable = [
     "D104",   # D104 - Package docstrings not required in test files.
     "ARG",    # ARG - Unused args are common in tests with mock patches and mock functions.
     "SLF001", # Testing my own class demands private member access.
+]
+
+"src/db/retry.py" = [
+    "ANN401", # ANN401 - Generic retry utility accepts Any callable, args, kwargs, and returns Any.
 ]
 
 "**/notebooks/**/*.{py,ipynb}" = [

@@ -117,6 +117,232 @@ Mandatory highlights:
 - In tests, assert exceptions with pytest.raises(..., match=...).
 - Do not use @pytest.mark.asyncio (asyncio_mode = auto).
 
+## Code Formatting and Linting Standards
+
+All code must pass `uv run ruff check` and `just check-all` without warnings.
+
+### Import Organization
+
+**Order**: future → stdlib → third-party → local (within each group, alphabetical)
+
+```python
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import TYPE_CHECKING
+
+from fastapi import FastAPI
+import pytest
+
+from src.memory.api import MemoryAPI
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+```
+
+**Rules**:
+- Type-only imports (used only in annotations) go behind `TYPE_CHECKING` block.
+- Group imports by type using blank lines to separate.
+- Never use `from typing import *` or wildcard imports; use explicit imports.
+- Move third-party test imports (`pytest`) into `TYPE_CHECKING` if used only for type hints (e.g., `pytest.MonkeyPatch`, `pytest.LogCaptureFixture`).
+- For type hints at runtime (e.g., `response: pytest.LogCaptureFixture`), use the fully qualified form after the `TYPE_CHECKING` import.
+
+### Line Length
+
+**Limit: 100 characters** (enforced by ruff rule E501)
+
+For long lines:
+- Function signatures: break after opening paren, indent parameters
+- Long conditionals: wrap with parentheses and break at logical operators
+- Long imports: use parentheses for multi-line imports
+- Long strings: use implicit string concatenation or textwrap
+
+```python
+# Good: function signature
+def long_function_name(
+    param1: str,
+    param2: int,
+    param3: bool = False,
+) -> None:
+
+# Good: long conditional
+if (
+    condition_a is not None
+    and condition_b == expected_value
+):
+
+# Good: long with statement
+with (
+    patch.object(API, "method_a", return_value=None),
+    patch.object(API, "method_b", new_callable=AsyncMock),
+):
+```
+
+### Variables and Assignments
+
+**Rules**:
+- Every variable must be used. Remove unused assignments and responses.
+- Use specific variable names, not `_` for throwaway results in comprehensions.
+- If a result is not used, do not assign it; just call the function:
+  ```python
+  # Bad
+  response = client.post(...)
+
+  # Good (if response isn't used)
+  client.post(...)
+  ```
+- Use single `with` statements where possible; combine nested contexts with parentheses:
+  ```python
+  # Bad
+  with patch.object(...) as mock_a:
+      with patch.object(...) as mock_b:
+          ...
+
+  # Good
+  with (
+      patch.object(...) as mock_a,
+      patch.object(...) as mock_b,
+  ):
+      ...
+  ```
+
+### Magic Numbers and Constants
+
+**Rule**: Replace hardcoded numbers with named constants at module scope.
+
+```python
+# Bad
+if request_index == 42:
+    ...
+
+# Good (at module scope)
+DEGRADED_REQUEST_INDEX = 42
+
+if request_index == DEGRADED_REQUEST_INDEX:
+    ...
+```
+
+Use sets for multiple comparisons:
+```python
+# Bad
+assert response.status_code == 200 or response.status_code == 404
+
+# Good
+assert response.status_code in {200, 404}
+```
+
+### Type Annotations
+
+**Rules**:
+- Every function parameter and return value must be annotated.
+- Use `| None` instead of `Optional[...]` (Python 3.10+ union syntax).
+- For complex callables, use `collections.abc.Callable` (not `typing.Callable`).
+- Use `TYPE_CHECKING` for forward references and circular imports.
+
+```python
+from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.models import CustomType
+
+def process(callback: Callable[[str], int]) -> None:
+    ...
+```
+
+### Docstrings
+
+**Style**: Google-style docstrings
+
+```python
+def retrieve_data(
+    tenant_id: str,
+    query: str,
+    limit: int = 100,
+) -> dict[str, object]:
+    """Retrieve data from the backend.
+
+    Args:
+        tenant_id: Tenant identifier for isolation.
+        query: Search query string.
+        limit: Maximum number of results (1-100).
+
+    Returns:
+        dict[str, object]: Query results indexed by key.
+
+    Raises:
+        ValueError: If tenant_id is empty or limit is out of range.
+        RuntimeError: If the backend is unavailable.
+    """
+```
+
+### Comments and TODOs
+
+**Rules**:
+- TODO comments must include a colon: `# TODO: Fix this in Phase X`
+- Comments should explain why, not what (code shows what).
+- Keep comments near the code they describe.
+
+```python
+# Good
+# TODO: Phase 4C: Fix src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258
+# Tenant isolation is enforced downstream
+assert response.status_code in {200, 500}
+
+# Bad
+# TODO Phase 4C: Fix...
+# response codes
+assert response.status_code in {200, 500}
+```
+
+### Exception Handling
+
+**Rules**:
+- Catch specific exceptions, not `Exception`.
+- Keep try/except blocks short (one operation if possible).
+- Use context managers and `pytest.raises()` in tests.
+
+```python
+try:
+    result = database.fetch(query)
+except ValueError as e:
+    logger.error("Validation failed: %s", e)
+    raise
+except Exception as e:
+    msg = f"Unexpected error: {e}"
+    raise RuntimeError(msg) from e
+```
+
+### Test Patterns
+
+**Rules**:
+- Use `pytest.raises(Exception, match="pattern")` for exception assertions.
+- Mock external dependencies at the module boundary.
+- Use `AsyncMock` for async functions; use `new_callable=AsyncMock` in patches.
+- Combine assertion messages with pytest fixtures in the test name and docstring.
+- Assert sets/lists with `assert ... in {...}` or `assert ... == {...}` for deterministic order.
+
+```python
+async def test_retrieval_fails_on_validation_error(self) -> None:
+    """Validation errors should be caught and logged."""
+    with pytest.raises(ValueError, match="invalid tenant"):
+        await MemoryAPI.retrieve(tenant_id="")
+
+def test_set_membership(self) -> None:
+    """Status codes should be in expected set."""
+    assert response.status_code in {200, 404}
+```
+
+### No Auto-fixable Violations at Commit Time
+
+**Before committing:**
+1. Run `uv run ruff check` → must show "All checks passed!"
+2. Run `just check-all` → must succeed (lint + tests + types + docstrings).
+3. Run `uv run pytest` on touched tests → all must pass.
+
+If ruff can auto-fix (with `uv run ruff check --fix`), do so, but review the output to ensure no behavior changes.
+
 ## CI Workflow Rules
 
 ### Blocking vs. non-blocking checks

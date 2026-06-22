@@ -1,0 +1,62 @@
+alertPolicies:
+  - displayName: Agent Memory Graph MCP Error Spike
+    documentation:
+      content: Trigger when MCP tool errors increase above the allowed threshold.
+      mimeType: text/markdown
+    combiner: OR
+    conditions:
+      - displayName: MCP tool errors > 10/min
+        conditionThreshold:
+          filter: metric.type="workload.googleapis.com/mcp.tool.errors"
+          aggregations:
+            - alignmentPeriod: 60s
+              perSeriesAligner: ALIGN_DELTA
+              crossSeriesReducer: REDUCE_SUM
+          comparison: COMPARISON_GT
+          thresholdValue: 10
+          duration: 300s
+          trigger:
+            count: 1
+    notificationChannels: []
+    alertStrategy:
+      autoClose: 1800s
+
+  - displayName: Agent Memory Graph MindMap p95 Latency
+    documentation:
+      content: Trigger when MindMap execution p95 latency exceeds the target for 5 minutes.
+      mimeType: text/markdown
+    combiner: OR
+    conditions:
+      - displayName: MindMap p95 > 2000ms
+        conditionThreshold:
+          filter: metric.type="workload.googleapis.com/mindmap.pipeline.execution_ms"
+          aggregations:
+            - alignmentPeriod: 60s
+              perSeriesAligner: ALIGN_PERCENTILE_95
+          comparison: COMPARISON_GT
+          thresholdValue: 2000
+          duration: 300s
+          trigger:
+            count: 1
+    notificationChannels: []
+    alertStrategy:
+      autoClose: 1800s
+
+  - displayName: Agent Memory Graph Orchestrator Throughput Drop
+    documentation:
+      content: Trigger when orchestrator request throughput drops unexpectedly to zero.
+      mimeType: text/markdown
+    combiner: OR
+    conditions:
+      - displayName: Orchestrator requests absent
+        conditionAbsent:
+          filter: metric.type="workload.googleapis.com/agent.orchestrator.requests"
+          aggregations:
+            - alignmentPeriod: 300s
+              perSeriesAligner: ALIGN_RATE
+          duration: 600s
+          trigger:
+            count: 1
+    notificationChannels: []
+    alertStrategy:
+      autoClose: 1800s

@@ -12,6 +12,9 @@ from src.project_base.settings._core import runtime_environment
 from src.project_base.settings.config import Settings
 from src.project_base.settings.enums import LogLevel
 from src.project_base.settings.models import Logging
+from src.security.governance import GovernanceSettings, WeightingTriggerPolicy
+
+EXPECTED_WEIGHTING_THRESHOLD = 7
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -28,13 +31,18 @@ class TestSettings:
     def test_with_environment(self) -> None:
         """Test that Settings can be instantiated with environment."""
         logging = Logging(log_level=LogLevel.INFO, third_party_log_level=LogLevel.WARNING)
+        governance = GovernanceSettings(
+            weighting=WeightingTriggerPolicy(enabled=True, action_count_threshold=5)
+        )
         config = Settings(
             environment=Environment.DEV,
             logging=logging,
+            governance=governance,
         )
         assert config.environment == Environment.DEV
         assert config.logging.log_level == LogLevel.INFO
         assert config.logging.third_party_log_level == LogLevel.WARNING
+        assert config.governance.weighting.should_trigger(5) is True
 
     def test_env_var_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Test that environment variables override defaults."""
@@ -42,12 +50,22 @@ class TestSettings:
         monkeypatch.setenv(
             f"{ENVIRONMENT_VARIABLE_PREFIX}LOGGING__THIRD_PARTY_LOG_LEVEL", "CRITICAL"
         )
+        monkeypatch.setenv(
+            f"{ENVIRONMENT_VARIABLE_PREFIX}GOVERNANCE__WEIGHTING__ENABLED",
+            "true",
+        )
+        monkeypatch.setenv(
+            f"{ENVIRONMENT_VARIABLE_PREFIX}GOVERNANCE__WEIGHTING__ACTION_COUNT_THRESHOLD",
+            "7",
+        )
         monkeypatch.setenv(f"{ENVIRONMENT_VARIABLE_PREFIX}ENVIRONMENT", "dev")
 
         # Don't pass logging parameter - let it load from env vars
         config = Settings(environment=Environment.DEV)  # type: ignore[call-arg]
         assert config.logging.log_level == LogLevel.ERROR
         assert config.logging.third_party_log_level == LogLevel.CRITICAL
+        assert config.governance.weighting.enabled is True
+        assert config.governance.weighting.action_count_threshold == EXPECTED_WEIGHTING_THRESHOLD
 
 
 class TestYAMLLoading:

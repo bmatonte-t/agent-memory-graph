@@ -1,11 +1,13 @@
-"""Unit tests for Phase 3 MCP tool service."""
+"""Unit tests for tenant-aware MCP tool service behavior."""
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
-import pytest
+if TYPE_CHECKING:
+    import pytest
 
 from src.mcp.service import MCPToolService
 from src.models.mcp import MCPInvokeRequest, MCPToolName
@@ -14,18 +16,26 @@ from src.models.schemas import AuditResponse, ContextResponse, FactResponse
 
 
 class TestMCPToolService:
-    """Contract tests for MCP tool invocations."""
+    """Contract tests for tenant propagation through MCP tools."""
 
-    @pytest.mark.asyncio
-    async def test_memory_search_success(self) -> None:
-        """memory_search returns serialized pipeline response."""
+    async def test_memory_search_passes_tenant_to_pipeline(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Search invocations should forward tenant_id into the pipeline boundary."""
         fake_pipeline = AsyncMock()
         fake_pipeline.execute.return_value = self._build_mindmap_response()
-
         service = MCPToolService(mindmap_pipeline=fake_pipeline)
+
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count",
+            lambda *_: 1,
+        )
 
         response = await service.invoke(
             MCPInvokeRequest(
+                tenant_id="tenant_a",
+                session_id="sess_1",
                 tool_name=MCPToolName.MEMORY_SEARCH,
                 arguments={"query": "what happened?", "session_id": "sess_1"},
                 request_id="req_1",
@@ -33,21 +43,29 @@ class TestMCPToolService:
         )
 
         assert response.success is True
-        assert response.request_id == "req_1"
-        assert response.error is None
-        assert response.token_usage is not None
-        assert response.token_usage.total_tokens >= 0
-        assert response.result is not None
-        assert response.result["query"] == "what happened?"
+        fake_pipeline.execute.assert_awaited_once_with(
+            query="what happened?",
+            session_id="sess_1",
+            tenant_id="tenant_a",
+            authorization_scope=None,
+        )
 
-    @pytest.mark.asyncio
-    async def test_memory_search_validation_error(self) -> None:
-        """memory_search requires a non-empty query."""
-        fake_pipeline = AsyncMock()
-        service = MCPToolService(mindmap_pipeline=fake_pipeline)
+    async def test_memory_search_validation_error_preserves_tenant_request(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Validation failures should still return the stable MCP contract."""
+        service = MCPToolService(mindmap_pipeline=AsyncMock())
+
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count",
+            lambda *_: 1,
+        )
 
         response = await service.invoke(
             MCPInvokeRequest(
+                tenant_id="tenant_a",
+                session_id="sess_1",
                 tool_name=MCPToolName.MEMORY_SEARCH,
                 arguments={"query": "   "},
                 request_id="req_2",
@@ -61,14 +79,16 @@ class TestMCPToolService:
         assert response.token_usage is not None
         assert response.token_usage.total_tokens >= 0
 
-    @pytest.mark.asyncio
-    async def test_memory_add_fact_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """memory_add_fact delegates to MemoryAPI and returns normalized payload."""
-        fake_pipeline = AsyncMock()
-        service = MCPToolService(mindmap_pipeline=fake_pipeline)
+    async def test_memory_add_fact_passes_tenant_to_memory_api(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Fact ingestion should forward tenant_id into the memory API layer."""
+        service = MCPToolService(mindmap_pipeline=AsyncMock())
 
         mock_add = AsyncMock(
             return_value=FactResponse(
+                tenant_id="tenant_a",
                 entity_id="ent_1",
                 entity_type="PERSON",
                 node_path="/PERSON/ent_1",
@@ -77,36 +97,53 @@ class TestMCPToolService:
             )
         )
         monkeypatch.setattr("src.mcp.service.MemoryAPI.add_semantic_fact", mock_add)
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count", lambda *_: 3
+        )
 
         response = await service.invoke(
             MCPInvokeRequest(
+                tenant_id="tenant_a",
                 tool_name=MCPToolName.MEMORY_ADD_FACT,
+                session_id="sess_1",
                 arguments={"entity_type": "PERSON", "entity_id": "ent_1"},
             )
         )
 
         assert response.success is True
-        assert response.error is None
-        assert response.result is not None
-        assert response.result["entity_id"] == "ent_1"
+        mock_add.assert_awaited_once_with(
+            tenant_id="tenant_a",
+            entity_type="PERSON",
+            entity_id="ent_1",
+            attributes={},
+            relationship=None,
+            session_id="sess_1",
+            authorization_scope=None,
+        )
 
-    @pytest.mark.asyncio
-    async def test_memory_log_trace_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """memory_log_trace writes an audit event."""
-        fake_pipeline = AsyncMock()
-        service = MCPToolService(mindmap_pipeline=fake_pipeline)
+    async def test_memory_log_trace_passes_tenant_to_memory_api(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Trace logging should write audit events under the request tenant."""
+        service = MCPToolService(mindmap_pipeline=AsyncMock())
 
         mock_record = AsyncMock(
             return_value=AuditResponse(
+                tenant_id="tenant_a",
                 event_id="evt_1",
                 event_type="AGENT_REASONING_STEP",
                 timestamp=datetime.now(UTC),
             )
         )
         monkeypatch.setattr("src.mcp.service.MemoryAPI.record_audit_event", mock_record)
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count", lambda *_: 2
+        )
 
         response = await service.invoke(
             MCPInvokeRequest(
+                tenant_id="tenant_a",
                 tool_name=MCPToolName.MEMORY_LOG_TRACE,
                 session_id="sess_1",
                 arguments={"decision_context": {"step": "mine"}},
@@ -114,17 +151,24 @@ class TestMCPToolService:
         )
 
         assert response.success is True
-        assert response.result is not None
-        assert response.result["event_id"] == "evt_1"
+        mock_record.assert_awaited_once_with(
+            tenant_id="tenant_a",
+            event_type="AGENT_REASONING_STEP",
+            source_node_id="sess_1",
+            context={"step": "mine"},
+            authorization_scope=None,
+        )
 
-    @pytest.mark.asyncio
-    async def test_memory_recall_context_success(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """memory_recall_context returns context turns."""
-        fake_pipeline = AsyncMock()
-        service = MCPToolService(mindmap_pipeline=fake_pipeline)
+    async def test_memory_recall_context_passes_tenant_to_memory_api(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Context recall should be tenant-scoped before reaching the memory API."""
+        service = MCPToolService(mindmap_pipeline=AsyncMock())
 
         mock_recall = AsyncMock(
             return_value=ContextResponse(
+                tenant_id="tenant_a",
                 session_id="sess_1",
                 turns=[],
                 total_weight_sum=0.0,
@@ -132,9 +176,13 @@ class TestMCPToolService:
             )
         )
         monkeypatch.setattr("src.mcp.service.MemoryAPI.retrieve_context_window", mock_recall)
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count", lambda *_: 2
+        )
 
         response = await service.invoke(
             MCPInvokeRequest(
+                tenant_id="tenant_a",
                 tool_name=MCPToolName.MEMORY_RECALL_CONTEXT,
                 session_id="sess_1",
                 arguments={"window_size": 5},
@@ -142,11 +190,16 @@ class TestMCPToolService:
         )
 
         assert response.success is True
-        assert response.result is not None
-        assert response.result["session_id"] == "sess_1"
+        mock_recall.assert_awaited_once_with(
+            tenant_id="tenant_a",
+            session_id="sess_1",
+            window_size=5,
+            authorization_scope=None,
+        )
 
     @staticmethod
     def _build_mindmap_response() -> MindMapResponse:
+        """Build a deterministic pipeline response for MCP tests."""
         return MindMapResponse(
             query="what happened?",
             synthesis=SynthesisResult(

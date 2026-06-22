@@ -56,7 +56,7 @@ plugins:
       default_handler: python
       handlers:
         python:
-          paths: [.]
+          paths: [src]
           options:
             docstring_style: google
             show_source: true
@@ -155,8 +155,20 @@ nav:
       - Scripts: development/scripts.md
       - Initialization Modes: development/initialization_modes.md
       - Testing Changes: development/testing_changes.md
+      - Phase 4 Local User Testing: development/phase4-local-user-testing.md
       - Documentation: development/documentation.md
       - Release Strategy: development/release_strategy.md
+  - Operations:
+      - Ops Runbook: operations/ops-runbook.md
+      - Admin Guide: operations/admin-guide.md
+      - Disaster Recovery: operations/disaster-recovery.md
+      - Support Playbook: operations/support-playbook.md
+  - Marketplace:
+      - Overview: marketplace/index.md
+      - Security Architecture: marketplace/security-architecture.md
+      - Quickstart: marketplace/quickstart.md
+      - Deployment Guide: marketplace/deployment-guide.md
+      - Pricing and Editions: marketplace/pricing-and-editions.md
   - Help:
       - Troubleshooting: help/troubleshooting.md
       - FAQ: help/faq.md

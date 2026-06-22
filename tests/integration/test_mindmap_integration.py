@@ -32,9 +32,17 @@ class InMemoryTraceRecorder:
     calls: int = 0
     last_trace: MindMapTrace | None = None
 
-    async def record(self, *, trace: MindMapTrace, query: str, session_id: str | None) -> None:
+    async def record(
+        self,
+        *,
+        trace: MindMapTrace,
+        query: str,
+        session_id: str | None,
+        tenant_id: str | None,
+        authorization_scope: object | None = None,
+    ) -> None:
         """Capture trace payload and invocation metadata."""
-        del query, session_id
+        del query, session_id, tenant_id, authorization_scope
         self.calls += 1
         self.last_trace = trace
 
@@ -48,6 +56,7 @@ class TestMindMapIntegration:
 
         async def fake_record_audit_event(**_: object) -> AuditResponse:
             return AuditResponse(
+                tenant_id="tenant_mindmap",
                 event_id="audit_test",
                 event_type="MINDMAP_EXECUTION",
                 timestamp=datetime.now(UTC),

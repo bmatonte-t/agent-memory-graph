@@ -37,6 +37,7 @@ class TestMCPApi:
         response = client.post(
             "/api/v1/mcp/invoke",
             json={
+                "tenant_id": "tenant_a",
                 "tool_name": "memory_search",
                 "arguments": {"query": "hello"},
                 "session_id": "sess_1",
@@ -55,7 +56,7 @@ class TestMCPApi:
 
         response = client.post(
             "/api/v1/mcp/invoke",
-            json={"tool_name": "unknown_tool", "arguments": {}},
+            json={"tenant_id": "tenant_a", "tool_name": "unknown_tool", "arguments": {}},
         )
 
         assert response.status_code == HTTP_UNPROCESSABLE_ENTITY
