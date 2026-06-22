@@ -93,7 +93,7 @@ Replace binary tenant-only access with ABAC rules that can scope agents to speci
 
 ### 4. MindMap-Inspired Evidence Quality
 
-Adopt the useful parts of the original MindMap implementation without adopting the research-script architecture wholesale.
+Adopt the useful parts of the original MindMap implementation without adopting the research-script architecture wholesale. Take ideas from [MindMap](https://github.com/wyl-willing/MindMap) to improve evidence provenance, neighbor-based enrichment, and deterministic retrieval.
 
 #### Deliverables
 
@@ -109,7 +109,7 @@ Adopt the useful parts of the original MindMap implementation without adopting t
 
 ### 5. Engram-Inspired Confidence Quality
 
-Adopt the useful parts of Engram’s confidence and contradiction handling without replacing the current memory model.
+Adopt the useful parts of Engram’s confidence and contradiction handling without replacing the current memory model. Take ideas from [Engram](https://github.com/Harshitk-cp/engram) to improve confidence metadata, freshness awareness, and contradiction detection.
 
 #### Deliverables
 
