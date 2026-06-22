@@ -10,14 +10,18 @@ using GQL queries against Spanner Graph. Implements MindMap patterns:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from google.cloud import spanner
     from google.cloud.spanner_gapic_v1.types import TransactionOptions
+
+from src.db.retry import async_retry_with_backoff
+from src.security.validators import validate_required_string, validate_tenant_id
 
 logger = logging.getLogger(__name__)
 
@@ -91,20 +95,118 @@ class EvidentPathFinder:
         Raises:
             PathRetrievalError: If query fails or timeout
         """
-        # TODO: Phase 4B implementation
-        # 1. Build GQL query with shortestPath() equivalent
-        # 2. Filter by TenantId WHERE clause (Phase 3 ABAC + tenant isolation)
-        # 3. Execute with retry/backoff (Phase 2 resilience)
-        # 4. Sort by path length, take top max_paths
-        # 5. Serialize each path as "node1->rel->node2->rel->node3..."
-        # 6. Validate total chars < max_chars, fail gracefully if exceeded
-        # 7. Return (serialized_paths, total_chars) tuple
-        logger.warning("find_paths() not yet implemented (Phase 4B)")
-        return [], 0
+        tenant_id = validate_tenant_id(tenant_id)
+        start_entity_id = validate_required_string(
+            start_entity_id,
+            field_name="start_entity_id",
+        )
+        end_entity_id = validate_required_string(
+            end_entity_id,
+            field_name="end_entity_id",
+        )
 
-    async def serialize_path(
-        self, path_nodes: list[dict], path_relationships: list[dict]
-    ) -> str:
+        async def _execute_query() -> tuple[list[str], int]:
+            try:
+                # Build GQL query to find shortest paths
+                # Constraint: max path length = max_path_length hops
+                query = f"""
+                    MATCH p = shortestPath(
+                        (start:Node)-[*1..{self.max_path_length}]->(end:Node)
+                    )
+                    WHERE start.Attributes.entity_id = @start_entity
+                        AND end.Attributes.entity_id = @end_entity
+                        AND EXISTS (
+                            SELECT 1
+                            FROM MEMORY_GRAPH_TENANT_SCOPE tn
+                            WHERE tn.NodeId IN (
+                                SELECT n.NodeId
+                                FROM MEMORY_GRAPH_NODE_SCOPE n
+                                WHERE n.NodeId IN (
+                                    SELECT node_id
+                                    FROM UNNEST(NODES(p)) AS nodes, NODES(p) AS node_id
+                                )
+                            )
+                            AND tn.TenantId = @tenant_id
+                        )
+                    RETURN NODES(p) as nodes, EDGES(p) as edges
+                    ORDER BY LENGTH(p) ASC, SIZE(NODES(p)) ASC
+                    LIMIT @max_paths;
+                """
+
+                from src.db.spanner_client import SpannerClient
+
+                database = SpannerClient.get_database()
+                results = []
+
+                with database.snapshot() as snapshot:
+                    params = {
+                        "start_entity": start_entity_id,
+                        "end_entity": end_entity_id,
+                        "tenant_id": tenant_id,
+                        "max_paths": self.max_paths,
+                    }
+
+                    rows = snapshot.execute_sql(query, params)
+
+                    for row in rows:
+                        nodes = row[0]  # NODES(p)
+                        edges = row[1]  # EDGES(p)
+
+                        # Serialize this path
+                        serialized = await self.serialize_path(nodes, edges)
+                        if serialized:
+                            results.append(serialized)
+
+                # Calculate total character count for token tracking
+                total_chars = sum(len(p) for p in results)
+
+                # Check if total exceeds max_chars budget
+                if total_chars > self.max_chars:
+                    logger.warning(
+                        "path_retrieval_exceeded_char_budget tenant_id=%s "
+                        "total_chars=%d max_chars=%d",
+                        tenant_id,
+                        total_chars,
+                        self.max_chars,
+                    )
+                    # Truncate paths to fit budget
+                    truncated = []
+                    running_total = 0
+                    for path in results:
+                        if running_total + len(path) <= self.max_chars:
+                            truncated.append(path)
+                            running_total += len(path)
+                        else:
+                            break
+                    results = truncated
+                    total_chars = running_total
+
+                logger.info(
+                    "path_retrieval_complete tenant_id=%s path_count=%d "
+                    "total_chars=%d",
+                    tenant_id,
+                    len(results),
+                    total_chars,
+                )
+
+                return results, total_chars
+
+            except Exception as e:
+                msg = f"path_retrieval_failed: {e}"
+                logger.exception(msg)
+                raise PathRetrievalError(msg) from e
+
+        try:
+            return await async_retry_with_backoff(
+                _execute_query,
+                tenant_id=tenant_id,
+                max_attempts=3,
+                initial_backoff_seconds=0.25,
+            )
+        except Exception as e:
+            raise PathRetrievalError(f"path_finding_failed_after_retries: {e}") from e
+
+    async def serialize_path(self, path_nodes: list[dict], path_relationships: list[dict]) -> str:
         """Serialize a path to compact format.
 
         Format: entity->rel->entity->rel->...
@@ -117,13 +219,67 @@ class EvidentPathFinder:
         Returns:
             Serialized path string, e.g. "patient->has_symptom->hoarse_voice"
         """
-        # TODO: Phase 4B implementation
-        # 1. Extract entity_id from each node (replace "_" with " ")
-        # 2. Extract rel type from each relationship (underscore -> space)
-        # 3. Interleave: entity->rel->entity->rel->...
-        # 4. Return compact string
-        logger.warning("serialize_path() not yet implemented (Phase 4B)")
-        return ""
+        try:
+            if not path_nodes:
+                return ""
+
+            # Extract entity identifiers from nodes
+            entity_ids = []
+            for node in path_nodes:
+                # Try to get entity_id from node attributes
+                if isinstance(node, dict):
+                    entity_id = (
+                        node.get("Attributes", {}).get("entity_id")
+                        or node.get("entity_id")
+                        or node.get("NodeId")
+                    )
+                else:
+                    # Node might be a RowTuple from query results
+                    entity_id = getattr(node, "NodeId", None) or str(node)
+
+                if entity_id:
+                    # Clean underscores to spaces
+                    entity_ids.append(str(entity_id).replace("_", " "))
+
+            if not entity_ids:
+                return ""
+
+            # Extract relationship types
+            rel_types = []
+            for rel in path_relationships:
+                if isinstance(rel, dict):
+                    rel_type = rel.get("RelType") or rel.get("type")
+                else:
+                    rel_type = getattr(rel, "RelType", None) or str(rel)
+
+                if rel_type:
+                    # Clean underscores to spaces
+                    rel_types.append(str(rel_type).replace("_", " "))
+
+            # Interleave: entity->rel->entity->rel->...
+            # We have N entities and N-1 relationships
+            if len(entity_ids) == len(rel_types) + 1:
+                parts = []
+                for i, entity_id in enumerate(entity_ids):
+                    parts.append(entity_id)
+                    if i < len(rel_types):
+                        parts.append(rel_types[i])
+
+                serialized = "->".join(parts)
+                logger.debug("path_serialized serialized=%s", serialized)
+                return serialized
+            else:
+                logger.warning(
+                    "path_serialization_mismatch entities=%d relationships=%d",
+                    len(entity_ids),
+                    len(rel_types),
+                )
+                # Fallback: just concatenate entities
+                return "->".join(entity_ids)
+
+        except Exception as e:
+            logger.exception("path_serialization_failed: %s", e)
+            return ""
 
 
 class NeighborEnricher:

@@ -1,8 +1,10 @@
 """Unit tests for Phase 4 evidence models and sufficiency heuristic."""
 
-import pytest
 from datetime import datetime, timezone
 
+import pytest
+
+from src.memory.evidence_service import EvidenceSufficiencyHeuristic
 from src.models.evidence import (
     EvidenceContext,
     EvidenceInsufficientReason,
@@ -10,7 +12,6 @@ from src.models.evidence import (
     EvidenceSourceType,
     EvidenceSummary,
 )
-from src.memory.evidence_service import EvidenceSufficiencyHeuristic
 
 
 class TestEvidenceSourceType:

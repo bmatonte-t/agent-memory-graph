@@ -65,9 +65,7 @@ class EvidenceItem(BaseModel):
     retrieval stages and tracked in ENGRAM_EVIDENCE.
     """
 
-    evidence_id: str = Field(
-        ..., min_length=1, description="Unique identifier (UUID format)."
-    )
+    evidence_id: str = Field(..., min_length=1, description="Unique identifier (UUID format).")
     source_type: EvidenceSourceType = Field(
         ..., description="Retrieval strategy used to obtain this evidence."
     )
@@ -82,9 +80,7 @@ class EvidenceItem(BaseModel):
     cognitive_weight: float = Field(
         default=1.0, ge=0.0, le=10.0, description="Weight for Phase 5 gating."
     )
-    audit_log_ref: str | None = Field(
-        default=None, description="Reference to AUDIT_EVENTS entry."
-    )
+    audit_log_ref: str | None = Field(default=None, description="Reference to AUDIT_EVENTS entry.")
 
 
 class EvidenceContext(BaseModel):
@@ -101,14 +97,10 @@ class EvidenceContext(BaseModel):
         default_factory=list, description="All evidence items retrieved."
     )
     total_items: int = Field(default=0, description="Count of evidence items.")
-    total_chars: int = Field(
-        default=0, description="Total character count (for token tracking)."
-    )
+    total_chars: int = Field(default=0, description="Total character count (for token tracking).")
     path_count: int = Field(default=0, description="Count of path-based items.")
     neighbor_count: int = Field(default=0, description="Count of neighbor-based items.")
-    is_empty: bool = Field(
-        default=False, description="True if no evidence retrieved."
-    )
+    is_empty: bool = Field(default=False, description="True if no evidence retrieved.")
     is_sufficient: bool = Field(
         default=False,
         description=(

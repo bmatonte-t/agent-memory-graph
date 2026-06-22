@@ -234,8 +234,7 @@ class EvidenceService:
 
         if context.total_chars <= 0 and context.total_items > 0:
             errors.append(
-                f"Invalid char count: {context.total_chars} "
-                f"but {context.total_items} items present"
+                f"Invalid char count: {context.total_chars} but {context.total_items} items present"
             )
 
         return len(errors) == 0, errors
