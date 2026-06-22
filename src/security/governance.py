@@ -73,7 +73,13 @@ class RetryPolicy(BaseModel):
 class AuthorizationPolicy(BaseModel):
     """Global authorization feature flags and safety defaults."""
 
-    enabled: bool = False
+    enabled: bool = True
+    """Enable ABAC enforcement for agent access to memory resources.
+
+    When enabled, all memory operations require an AuthorizationScope that permits
+    the requested resource (node_id, label, memory_tier, relationship_type).
+    All authorization decisions are audited.
+    """
     default_deny: bool = True
 
     def authorize(
