@@ -1,9 +1,9 @@
 # Phase 4: Security, Observability & Marketplace Hardening
 
-**Overall Status**: Phase 4C complete in develop; ready for final testing and PR merge  
-**Current Branch**: develop  
-**Active PR**: #7 - Phase 4C hardening: tenant-safe memory flows, observability, security controls, and operational docs  
-**Target**: Production-ready marketplace launch  
+**Overall Status**: Phase 4C complete in develop; ready for final testing and PR merge
+**Current Branch**: develop
+**Active PR**: #7 - Phase 4C hardening: tenant-safe memory flows, observability, security controls, and operational docs
+**Target**: Production-ready marketplace launch
 
 ---
 
@@ -12,20 +12,20 @@
 Phase 4 has been broken into sub-phases to manage scope and validation:
 
 ### Phase 4A: Penetration Testing & API Security (COMPLETE ✅)
-**Scope**: Validate API boundary protection against injection and malformed inputs  
-**Deliverables**: 15 injection security tests covering tool/tenant/argument validation  
-**Location**: `tests/unit/test_injection_security.py`  
-**Status**: All tests passing (226 total tests at completion)  
+**Scope**: Validate API boundary protection against injection and malformed inputs
+**Deliverables**: 15 injection security tests covering tool/tenant/argument validation
+**Location**: `tests/unit/test_injection_security.py`
+**Status**: All tests passing (226 total tests at completion)
 
 ### Phase 4B: Service Layer Hardening (COMPLETE ✅)
-**Scope**: Address service-layer bugs identified during penetration testing  
-**Key Fix**: Tenant ID propagation in MindMap trace recording  
-**Location**: `src/memory/mindmap_pipeline.py` line 293 - `AuditTraceRecorder.record()`  
-**Status**: Bug fixed; audit events now properly scoped to tenant  
-**Deliverable**: All service layer calls now include proper tenant context  
+**Scope**: Address service-layer bugs identified during penetration testing
+**Key Fix**: Tenant ID propagation in MindMap trace recording
+**Location**: `src/memory/mindmap_pipeline.py` line 293 - `AuditTraceRecorder.record()`
+**Status**: Bug fixed; audit events now properly scoped to tenant
+**Deliverable**: All service layer calls now include proper tenant context
 
 ### Phase 4C: Observability & Marketplace Hardening (COMPLETE ✅)
-**Scope**: Implement observability safety, tenant isolation, and marketplace-ready features  
+**Scope**: Implement observability safety, tenant isolation, and marketplace-ready features
 
 **Key Deliverables**:
 

@@ -133,8 +133,22 @@ class MindMapRequest(BaseModel):
 
 
 class MindMapResponse(BaseModel):
-    """Pipeline execution response payload."""
+    """Pipeline execution response payload.
+
+    Includes evidence metadata (Phase 4) to signal grounding quality to clients.
+    """
 
     query: str = Field(..., min_length=1)
     synthesis: SynthesisResult
     trace: MindMapTrace
+    evidence_summary: "EvidenceSummary | None" = Field(
+        default=None,
+        description=(
+            "Evidence summary for Phase 4: counts, sufficiency signal, "
+            "and insufficient reasons if applicable."
+        ),
+    )
+
+
+# Late import to avoid circular dependency with src.models.evidence
+from src.models.evidence import EvidenceSummary  # noqa: E402, F401
