@@ -8,9 +8,11 @@ and prepares evidence for synthesis stage.
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
-from typing import Any
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
+from src.db.spanner_client import SpannerClient
+from src.integrations.google_sdk_wrappers import execute_sql_rows
 from src.memory import retrieval
 from src.models.confidence import FreshnessScore
 from src.models.evidence import (
@@ -20,9 +22,11 @@ from src.models.evidence import (
     EvidenceSourceType,
     EvidenceSummary,
 )
+from src.security.validators import validate_tenant_id
 
 MIN_BOTH_SIGNAL_COUNT = 1
 MIN_ABUNDANT_SIGNAL_COUNT = 3
+ENGRAM_EVIDENCE_ROW_COLUMNS = 9
 
 logger = logging.getLogger(__name__)
 
@@ -270,15 +274,76 @@ class EvidenceService:
         Raises:
             RuntimeError: If query fails
         """
-        # TODO: Phase 4D operational query
-        # 1. Query ENGRAM_EVIDENCE WHERE TenantId = @tenant_id
-        # 2. Filter by CreatedAt > NOW() - INTERVAL limit_hours
-        # 3. Order by CreatedAt DESC
-        # 4. Convert rows to EvidenceItem objects
-        # 5. Return list
-        del tenant_id, limit_hours
-        logger.warning("get_evidence_context_for_tenant() not yet implemented")
-        return []
+        tenant_id = validate_tenant_id(tenant_id)
+
+        try:
+            database = SpannerClient.get_database()
+            cutoff_time = datetime.now(UTC) - timedelta(hours=limit_hours)
+
+            query_sql = """
+                SELECT
+                    EvidenceId, SourceType, EvidenceNumber,
+                    GraphPath, SerializedForm, AccessTimestamp,
+                    CognitiveWeight, AuditLogRef,
+                    CreatedAt
+                FROM ENGRAM_EVIDENCE
+                WHERE TenantId = @tenant_id
+                AND CreatedAt > @cutoff_time
+                ORDER BY CreatedAt DESC
+                LIMIT 1000
+            """
+
+            rows = execute_sql_rows(
+                database,
+                query_sql,
+                {"tenant_id": tenant_id, "cutoff_time": cutoff_time},
+            )
+
+            evidence_items: list[EvidenceItem] = []
+            for row in rows:
+                if len(row) < ENGRAM_EVIDENCE_ROW_COLUMNS:
+                    continue
+
+                evidence_id = cast(str, row[0])
+                source_type = cast(str, row[1])
+                evidence_number = cast(int, row[2])
+                graph_path = cast(str, row[3])
+                serialized_form = cast(str, row[4])
+                access_timestamp = cast(datetime, row[5])
+                cognitive_weight = cast(float, row[6])
+                audit_log_ref = cast(str, row[7])
+                created_at = cast(datetime, row[8])
+
+                item = EvidenceItem(
+                    evidence_id=evidence_id,
+                    source_type=EvidenceSourceType(source_type.lower()),
+                    evidence_number=evidence_number,
+                    graph_path=graph_path,
+                    serialized_form=serialized_form,
+                    access_timestamp=access_timestamp,
+                    cognitive_weight=cognitive_weight,
+                    audit_log_ref=audit_log_ref,
+                    freshness_score=FreshnessScore.compute(created_at).current_score,
+                )
+                evidence_items.append(item)
+
+            logger.info(
+                "get_evidence_context_for_tenant retrieved %d items tenant_id=%s limit_hours=%d",
+                len(evidence_items),
+                tenant_id,
+                limit_hours,
+            )
+
+        except Exception as e:
+            logger.exception(
+                "get_evidence_context_for_tenant failed tenant_id=%s limit_hours=%d",
+                tenant_id,
+                limit_hours,
+            )
+            message = f"get_evidence_context_for_tenant failed: {e}"
+            raise RuntimeError(message) from e
+        else:
+            return evidence_items
 
     def validate_evidence_context(
         self,
