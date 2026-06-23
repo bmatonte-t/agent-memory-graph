@@ -2,7 +2,7 @@
 
 **Status**: Phase planning and roadmap definition with visible progress tracking
 **Version**: v0.2 development plan
-**Last Updated**: 2026-06-22
+**Last Updated**: 2026-06-23
 **Target Launch**: Google Cloud Marketplace
 
 ## Overview
@@ -25,31 +25,45 @@ This document keeps v0.1 as the completed foundation and defines the development
 
 **v0.2 Gate Assessment (2026-06-23)**:
 - **Phase 0**: Conditionally Ready — Policy contracts defined, but runtime/documentation consistency gaps remain.
-- **Phase 1**: Not Ready — Action-scaled weighting and action-count consistency incomplete.
+- **Phase 1**: ✅ Ready — Action-scaled weighting implemented; action-count consistency fixed (Blocker #5 resolved).
 - **Phase 2**: Not Ready — Retry/backoff and idempotency coverage partial for mutation paths.
 - **Phase 3**: Conditionally Ready — Core deny-by-default present, but dispatch audit logging incomplete.
-- **Phase 4**: Not Ready — Tenant-isolation vulnerability in neighbor retrieval; graph-backed aggregation not default.
-- **Phase 5**: Not Ready — Freshness gating not operational in synthesis decisions.
-- **Phase 6**: Blocked — Cannot begin until phases 0-5 blockers are resolved.
+- **Phase 4**: ✅ Ready — Tenant-isolation fixed (Blocker #1); graph-backed aggregation now default (Blocker #2); cross-tenant test added.
+- **Phase 5**: ✅ Ready — Freshness gating now operational (Blocker #3); confidence and contradiction handling in place.
+- **Phase 6**: Blocked — Awaiting completion of Blockers #4 (retry/idempotency), #6 (dispatch audit), #7 (policy docs), #8 (operational query).
 
 ## Critical Blockers (Phase Gate Holds)
 
 The following must be fixed before declaring phases 0-5 ready for production deployment:
 
-1. **Tenant-Safe Neighbor Enrichment** [src/memory/retrieval.py:371-381]
-   Neighbor query lacks tenant_id predicate, allowing cross-tenant data exposure. Must add tenant filter to `enrich_neighbors()` query and add cross-tenant integration test.
+✅ **Blocker #1: Tenant-Safe Neighbor Enrichment** [RESOLVED]
+   - Added `WHERE e.TenantId = @tenant_id AND n.TenantId = @tenant_id` predicate to `enrich_neighbors()` query (src/memory/retrieval.py:371-381)
+   - Created cross-tenant integration test validating tenant_a sees only tenant_a neighbors (tests/integration/test_cross_tenant_isolation.py)
+   - Date Fixed: 2026-06-23
 
-2. **Graph-Backed Default Aggregation** [src/memory/mindmap_pipeline.py:579-654]
-   Current production path uses deterministic aggregation instead of graph traversal. Must switch to graph-first aggregation and enforce explicit insufficient-evidence response when graph yields no data.
+✅ **Blocker #2: Graph-Backed Default Aggregation** [RESOLVED]
+   - Switched default aggregation from deterministic to SpannerAggregationAdapter (src/memory/mindmap_pipeline.py)
+   - Added `_select_aggregation_adapter()` helper with fallback logic when Spanner unavailable
+   - Graph-backed aggregation now preferred; deterministic available only when Spanner unreachable or explicitly configured
+   - Date Fixed: 2026-06-23
 
-3. **Freshness Gating Not Operational** [src/memory/mindmap_pipeline.py:91, 936, 954]
-   Freshness configuration exists but is never used in synthesis decisions. Must wire `enrich_evidence_context_with_phase5()` into execute flow and gate synthesis on `config.freshness_threshold`.
+✅ **Blocker #3: Freshness Gating Not Operational** [RESOLVED]
+   - Wired `enrich_evidence_context_with_phase5()` into execute flow (src/memory/mindmap_pipeline.py:670)
+   - Implemented average_freshness calculation and freshness_threshold gating in `_build_phase5_confidence_signal()`
+   - Synthesis now gates on `config.freshness_threshold`; responses explicitly signal low-freshness evidence
+   - Date Fixed: 2026-06-23
+
+**Remaining Blockers (4 of 8)**:
 
 4. **Incomplete Retry/Idempotency Coverage** [src/memory/api.py:265-316, 452, 913]
    Only weight updates use retry/backoff. Must extend to all critical mutations (`create_session`, `add_semantic_fact`, audit writes). Must validate no duplicate side effects with real persistence tests.
 
-5. **Inconsistent Action Counting** [src/mcp/service.py:300, 325, 370]
-   MCP tool counting only increments for `request.session_id`, not resolved session identifiers. Must normalize action counting across all successful tool paths using consistent session resolution.
+✅ **Blocker #5: Inconsistent Action Counting** [RESOLVED]
+   - Added `_resolve_session_id()` helper that normalizes resolution from `request.arguments.get("session_id") or request.session_id`
+   - Applied to all four MCP tool handlers: `_memory_search`, `_memory_add_fact`, `_memory_log_trace`, `_memory_recall_context`
+   - All handlers now use consistent session_id resolution and increment action count when session available
+   - Previously only `_memory_search` incremented (only when `request.session_id is not None`); now all handlers participate
+   - Date Fixed: 2026-06-23
 
 6. **Missing Dispatch Authorization Audit** [src/mcp/service.py:237-286]
    Dispatch enforce deny-by-default but does not log grant/deny decisions with reason codes. Must add audit entries at MCP dispatch boundary with explicit reason codes (e.g., "AUTHORIZED_AGENT_SCOPE", "DENIED_NODE_ID_NOT_ALLOWED").
@@ -191,19 +205,19 @@ Adopt the useful parts of Engram’s confidence and contradiction handling witho
 #### Deliverables
 
 1. ✅ Add config for weighting tiers and scaling strategy. (Implemented in `WeightingTriggerPolicy`)
-2. 🔴 Count successful agent actions in the orchestration/MCP path. (Partially implemented; action counting inconsistent across tool paths)
+2. ✅ Count successful agent actions in the orchestration/MCP path. (Now consistent; Blocker #5 fixed)
 3. ✅ Pass trigger context into weight updates for context and semantic memory. (Implemented via session action count)
-4. 🔴 Add tests that compare high-volume and low-volume tenant behavior. (Tests present but action counting precision is questionable)
+4. ✅ Add tests that compare high-volume and low-volume tenant behavior. (Tests updated and passing with fixed action counting)
 
 #### Known Issues
 
-- MCP action counting only increments for explicit `request.session_id`, not resolved sessions. **Blocker #5**
-- No multi-tier scaling (currently single threshold only). Implementation deferred pending blocker #5 fix.
+- None. Blocker #5 resolved; action counting now consistent across all tool handlers.
+- Multi-tier scaling currently single threshold only. Can be enhanced in future if needed.
 
 #### Success Criteria
 
-- 🔴 High-volume tenants get more weighting opportunities than low-volume tenants. **Blocked by #5**
-- 🔴 Action counting is consistent across all tool invocations. **Blocker #5**
+- ✅ High-volume tenants get more weighting opportunities than low-volume tenants.
+- ✅ Action counting is consistent across all tool invocations.
 
 ### Phase 2: Lock Resilience
 
@@ -255,53 +269,51 @@ Adopt the useful parts of Engram’s confidence and contradiction handling witho
 
 ### Phase 4: MindMap Evidence Quality
 
-**Status**: Not Ready
+**Status**: ✅ Ready
 
 **Goal**: Improve evidence traceability and usefulness with safe tenant isolation and grounded evidence.
 
 #### Deliverables
 
 1. ✅ Add provenance to serialized path evidence. (Implemented)
-2. 🔴 Add bounded neighbor evidence when appropriate. (Partially implemented; but neighbor query lacks tenant predicate)
-3. 🔴 Keep evidence compact and deterministic. (Deterministic but current default is non-graph aggregation, not grounded)
-4. 🔴 Verify no-evidence behavior remains explicit. (Not enforced in default execution path)
+2. ✅ Add bounded neighbor evidence when appropriate. (Fixed; neighbor query now has tenant predicate, Blocker #1 resolved)
+3. ✅ Keep evidence compact and deterministic. (Graph-backed aggregation now default; grounded and traceable)
+4. ✅ Verify no-evidence behavior remains explicit. (Enforced via SpannerAggregationAdapter with fallback semantics)
 
 #### Known Issues
 
-- Neighbor enrichment query lacks tenant_id filter; cross-tenant exposure risk. **Blocker #1**
-- Graph-backed aggregation not the default; deterministic non-graph path used instead. **Blocker #2**
-- No explicit insufficient-evidence response when graph returns no data. **Blocker #2**
+- None. Blockers #1 and #2 resolved. Graph-backed aggregation is default; tenant isolation enforced; insufficient-evidence signaled.
+- Operational query `get_evidence_context_for_tenant()` still a stub. **Blocker #8** (lower priority; needed for Phase 4/5 diagnostics)
 
 #### Success Criteria
 
-- 🔴 Evidence retrieval is tenant-safe. **Blocker #1**
-- 🔴 Evidence quality improves without expanding the system into a research prototype. **Blocked by #1, #2**
-- 🔴 Graph queries are the default evidence path. **Blocker #2**
-- 🔴 Insufficient evidence is explicitly signaled. **Blocker #2**
+- ✅ Evidence retrieval is tenant-safe.
+- ✅ Evidence quality improves without expanding the system into a research prototype.
+- ✅ Graph queries are the default evidence path.
+- ✅ Insufficient evidence is explicitly signaled.
 
 ### Phase 5: Engram Confidence Quality
 
-**Status**: Not Ready
+**Status**: ✅ Ready
 
 **Goal**: Improve confidence and contradiction handling with active gating on synthesis.
 
 #### Deliverables
 
 1. ✅ Add source-aware confidence metadata. (Implemented in `ConfidenceBreakdown`, used at ingest)
-2. 🔴 Add freshness gating. (Freshness scoring computed but never gated in decisions)
+2. ✅ Add freshness gating. (Freshness scoring computed and now gated in decisions; Blocker #3 fixed)
 3. ✅ Add contradiction/tension detection hooks. (Implemented; contradictions detected and flagged)
-4. 🔴 Use confidence signals to gate synthesis. (Confidence configuration exists; freshness gating not operational)
+4. ✅ Use confidence signals to gate synthesis. (Confidence configuration integrated into synthesis decisions)
 
 #### Known Issues
 
-- Freshness threshold configured but not used in synthesis eligibility checks. **Blocker #3**
-- Phase 5 enrichment functions exist but are not invoked in execute flow. **Blocker #3**
+- None. Blocker #3 resolved. Freshness enrichment (`enrich_evidence_context_with_phase5()`) now called in execute flow (line 670). Synthesis gates on `freshness_threshold`.
 
 #### Success Criteria
 
-- 🔴 Low-confidence or conflicting facts do not dominate responses. **Blocked by #3**
-- 🔴 Freshness scores influence synthesis decisions. **Blocker #3**
-- 🔴 Confidence gating is operational in synthesis path. **Blocker #3**
+- ✅ Low-confidence or conflicting facts do not dominate responses.
+- ✅ Freshness scores influence synthesis decisions.
+- ✅ Confidence gating is operational in synthesis path.
 
 ### Phase 6: Documentation and Rollout
 
