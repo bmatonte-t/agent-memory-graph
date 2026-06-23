@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import cast
+from typing import Any, cast
 
 
 def validate_tenant_id(tenant_id: str | None) -> str:
@@ -153,7 +153,7 @@ def validate_entity_type(entity_type: str, *, allowed_entity_types: set[str]) ->
     return normalized_type
 
 
-def validate_relationship(relationship: dict[str, object] | None) -> dict[str, str] | None:
+def validate_relationship(relationship: dict[str, Any] | None) -> dict[str, str] | None:
     """Validate relationship object used for edge creation.
 
     Args:
@@ -168,25 +168,27 @@ def validate_relationship(relationship: dict[str, object] | None) -> dict[str, s
     if relationship is None:
         return None
 
-    normalized_relationship = validate_mapping(relationship, field_name="relationship")
+    normalized_relationship: dict[str, str] = validate_mapping(
+        relationship, field_name="relationship"
+    )  # type: ignore[assignment]
 
     source_id = normalized_relationship.get("source_id")
     rel_type = normalized_relationship.get("type")
 
-    if source_id is not None and not isinstance(source_id, str):
+    if source_id is not None and not isinstance(source_id, str):  # type: ignore[unreachable]
         msg = "relationship.source_id must be a string when provided"
         raise ValueError(msg)
-    if rel_type is not None and not isinstance(rel_type, str):
+    if rel_type is not None and not isinstance(rel_type, str):  # type: ignore[unreachable]
         msg = "relationship.type must be a string when provided"
         raise ValueError(msg)
 
     result: dict[str, str] = {}
-    if isinstance(source_id, str):
+    if source_id is not None:
         result["source_id"] = validate_required_string(
             source_id,
             field_name="relationship.source_id",
         )
-    if isinstance(rel_type, str):
+    if rel_type is not None:
         result["type"] = validate_required_string(rel_type, field_name="relationship.type")
 
     return result

@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Self
+from typing import Any, Self, cast
 
-from google.cloud import spanner
-
+from src.integrations.google_sdk_wrappers import (
+    SpannerDatabaseProtocol,
+    as_spanner_database,
+    execute_sql_rows,
+)
 from src.security.validators import validate_tenant_id
 
 logger = logging.getLogger(__name__)
@@ -41,15 +44,15 @@ class SpannerClient:
     """Singleton Spanner client for managing database connections."""
 
     _instance: SpannerClient | None = None
-    _client: spanner.Client | None = None
-    _instance_ref: spanner.Instance | None = None
-    _database: spanner.Database | None = None
+    _client: object | None = None
+    _instance_ref: object | None = None
+    _database: object | None = None
 
     def __new__(cls) -> Self:
         """Ensure only one instance exists."""
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-        return cls._instance
+        return cast("Self", cls._instance)
 
     @classmethod
     def initialize(
@@ -70,13 +73,18 @@ class SpannerClient:
         """
         instance = cls()
         if cls._client is None:
-            cls._client = spanner.Client(project=project_id)
-            cls._instance_ref = cls._client.instance(instance_id)
-            cls._database = cls._instance_ref.database(database_id)
+            from google.cloud import spanner  # type: ignore[import-untyped]  # noqa: PLC0415
+
+            raw_client: Any = spanner.Client(project=project_id)
+            raw_instance: Any = raw_client.instance(instance_id)
+            raw_database: Any = raw_instance.database(database_id)
+            cls._client = raw_client
+            cls._instance_ref = raw_instance
+            cls._database = raw_database
         return instance
 
     @classmethod
-    def get_client(cls) -> spanner.Client:
+    def get_client(cls) -> object:
         """Get the Spanner client. Raises error if not initialized."""
         if cls._client is None:
             msg = "SpannerClient not initialized. Call initialize() first."
@@ -84,15 +92,17 @@ class SpannerClient:
         return cls._client
 
     @classmethod
-    def get_database(cls) -> spanner.Database:
+    def get_database(cls) -> SpannerDatabaseProtocol:
         """Get the Spanner database. Raises error if not initialized."""
         if cls._database is None:
             msg = "SpannerClient not initialized. Call initialize() first."
             raise RuntimeError(msg)
-        return cls._database
+        return as_spanner_database(cls._database)
 
     @classmethod
-    def execute_sql(cls, sql: str, params: dict | None = None) -> list:
+    def execute_sql(
+        cls, sql: str, params: dict[str, object] | None = None
+    ) -> list[tuple[object, ...]]:
         """Execute a SQL query and return results.
 
         Args:
@@ -103,12 +113,10 @@ class SpannerClient:
             List of result rows
         """
         database = cls.get_database()
-        with database.snapshot() as snapshot:
-            results = snapshot.execute_sql(sql, params or {})
-            return list(results)
+        return execute_sql_rows(database, sql, params or {})
 
     @classmethod
-    def execute_update(cls, sql: str, params: dict | None = None) -> int:
+    def execute_update(cls, sql: str, params: dict[str, object] | None = None) -> int:
         """Execute a DML update and return rows affected.
 
         Args:
@@ -197,7 +205,9 @@ class SpannerClient:
     def close(cls) -> None:
         """Close the Spanner client."""
         if cls._client is not None:
-            cls._client.close()
+            close_method = getattr(cls._client, "close", None)
+            if callable(close_method):
+                close_method()
             cls._client = None
             cls._instance_ref = None
             cls._database = None

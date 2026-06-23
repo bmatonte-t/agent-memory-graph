@@ -4,15 +4,19 @@ import json
 import logging
 import math
 import uuid
-from datetime import UTC, datetime
-from typing import Any, Protocol
-
-from google.cloud.spanner_v1.transaction import Transaction  # noqa: TC002
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
 from src.db.idempotency import IdempotencyContext
 from src.db.retry import async_retry_with_backoff, get_retry_policy
 from src.db.schema import SchemaConfig
 from src.db.spanner_client import SpannerClient
+from src.integrations.google_sdk_wrappers import (
+    SpannerBatchProtocol,
+    SpannerTransactionProtocol,
+    execute_sql_rows,
+    execute_sql_rows_in_transaction,
+)
 from src.memory.exceptions import WeightUpdateFailedError
 from src.models.schemas import (
     AuditResponse,
@@ -34,11 +38,10 @@ from src.security.validators import (
 
 logger = logging.getLogger(__name__)
 
-
-class _SpannerBatch(Protocol):
-    """Protocol for the subset of batch API used by MemoryAPI."""
-
-    def execute_update(self, sql: str, params: dict[str, Any]) -> int: ...
+DEFAULT_SOURCE_CONFIDENCE_SCORE = 1.0
+API_DERIVED_SOURCE_CONFIDENCE_SCORE = 0.7
+RECENT_ACCESS_WINDOW_DAYS = 7
+ACTIVE_STATUS_VALUES = {"active", "open", "enabled"}
 
 
 class MemoryAPI:
@@ -135,7 +138,7 @@ class MemoryAPI:
         Raises:
             PermissionError: If the requested operation violates immutability.
         """
-        SpannerClient._validate_audit_mutation_forbidden("AUDIT_EVENTS", operation)  # noqa: SLF001
+        SpannerClient._validate_audit_mutation_forbidden("AUDIT_EVENTS", operation)  # noqa: SLF001  # type: ignore[private-unimported]
 
     @staticmethod
     def _serialize_json_attributes(attributes: dict[str, Any]) -> str:
@@ -152,7 +155,7 @@ class MemoryAPI:
     @staticmethod
     def _insert_audit_event_in_batch(
         *,
-        batch: _SpannerBatch,
+        batch: SpannerBatchProtocol,
         tenant_id: str,
         event_type: str,
         source_node_id: str,
@@ -243,13 +246,11 @@ class MemoryAPI:
 
         try:
             database = SpannerClient.get_database()
-            with database.snapshot() as snapshot:
-                rows = list(
-                    snapshot.execute_sql(
-                        query,
-                        {"tenant_id": tenant_id, "node_id": node_id},
-                    )
-                )
+            rows = execute_sql_rows(
+                database,
+                query,
+                {"tenant_id": tenant_id, "node_id": node_id},
+            )
         except Exception as error:
             msg = f"Failed to lookup node tier: {error}"
             raise RuntimeError(msg) from error
@@ -257,7 +258,8 @@ class MemoryAPI:
         if not rows:
             return None
 
-        return rows[0][0]
+        tier_value = rows[0][0]
+        return str(tier_value) if tier_value is not None else None
 
     @staticmethod
     async def create_session(
@@ -281,7 +283,7 @@ class MemoryAPI:
 
         Raises:
             ValueError: If tenant_id, session_id, or user_id is empty or invalid
-            RuntimeError: If database write fails
+            RuntimeError: If database write fails after max retries
         """
         tenant_id = validate_tenant_id(tenant_id)
         session_id = validate_required_string(session_id, field_name="session_id")
@@ -298,54 +300,96 @@ class MemoryAPI:
         )
 
         created_at = datetime.now(UTC)
-
-        # Create Session node in MemoryNode with tenant isolation
         attributes = {"user_id": user_id, **(metadata or {})}
-        node_sql = """
-            INSERT INTO MemoryNode (
-                NodeId, TenantId, MemoryTier, Label, LogOddsWeight, SessionActionCount,
-                LastAccessed, Attributes, CreatedAt, UpdatedAt
-            ) VALUES (
-                @node_id, @tenant_id, @tier, @label, @weight, @action_count,
-                @now, JSON(@attributes), @now, @now
-            )
-        """
 
+        retry_policy = get_retry_policy()
         try:
-            database = SpannerClient.get_database()
-            with database.batch() as batch:
-                batch.execute_update(
-                    node_sql,
-                    {
-                        "node_id": session_id,
-                        "tenant_id": tenant_id,
-                        "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
-                        "label": "Session",
-                        "weight": SchemaConfig.INITIAL_WEIGHT,
-                        "action_count": 0,
-                        "now": created_at,
-                        "attributes": MemoryAPI._serialize_json_attributes(attributes),
-                    },
-                )
-
-                MemoryAPI._insert_audit_event_in_batch(
-                    batch=batch,
-                    tenant_id=tenant_id,
-                    event_type="CREATE_SESSION",
-                    source_node_id=session_id,
-                    context={"user_id": user_id},
-                    timestamp=created_at,
-                )
-
-            return SessionResponse(
-                tenant_id=tenant_id,
-                session_id=session_id,
-                created_at=created_at,
-                status="active",
+            await async_retry_with_backoff(
+                MemoryAPI._do_create_session_batch,
+                tenant_id,
+                session_id,
+                user_id,
+                attributes,
+                created_at,
+                max_attempts=retry_policy.max_attempts,
+                initial_backoff_seconds=retry_policy.initial_backoff_seconds,
+                max_backoff_seconds=retry_policy.max_backoff_seconds,
+            )
+            logger.info(
+                "create_session_completed tenant_id=%s session_id=%s",
+                tenant_id,
+                session_id,
             )
         except Exception as e:
-            msg = f"Failed to create session: {e}"
+            logger.exception(
+                "create_session_exhausted tenant_id=%s session_id=%s attempts=%d",
+                tenant_id,
+                session_id,
+                retry_policy.max_attempts,
+            )
+            msg = f"Failed to create session after {retry_policy.max_attempts} attempts: {e}"
             raise RuntimeError(msg) from e
+
+        return SessionResponse(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            created_at=created_at,
+            status="active",
+        )
+
+    @staticmethod
+    async def _do_create_session_batch(
+        tenant_id: str,
+        session_id: str,
+        user_id: str,
+        attributes: dict[str, Any],
+        created_at: datetime,
+    ) -> None:
+        """Execute idempotent session creation with batch write.
+
+        Args:
+            tenant_id: Tenant identifier.
+            session_id: Session identifier.
+            user_id: User identifier.
+            attributes: Session attributes including user_id.
+            created_at: Creation timestamp.
+
+        Raises:
+            Exception: If database write fails (may be retried by caller).
+        """
+        database = SpannerClient.get_database()
+        with IdempotencyContext(), database.batch() as batch:
+            node_sql = """
+                INSERT INTO MemoryNode (
+                    NodeId, TenantId, MemoryTier, Label, LogOddsWeight,
+                    SessionActionCount, LastAccessed, Attributes, CreatedAt, UpdatedAt
+                ) VALUES (
+                    @node_id, @tenant_id, @tier, @label, @weight,
+                    @action_count, @now, JSON(@attributes), @now, @now
+                )
+            """
+            batch.execute_update(
+                node_sql,
+                {
+                    "node_id": session_id,
+                    "tenant_id": tenant_id,
+                    "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
+                    "label": "Session",
+                    "weight": SchemaConfig.INITIAL_WEIGHT,
+                    "action_count": 0,
+                    "now": created_at,
+                    "attributes": MemoryAPI._serialize_json_attributes(attributes),
+                },
+            )
+
+            MemoryAPI._insert_audit_event_in_batch(
+                batch=batch,
+                tenant_id=tenant_id,
+                event_type="CREATE_SESSION",
+                source_node_id=session_id,
+                context={"user_id": user_id},
+                timestamp=created_at,
+            )
 
     @staticmethod
     async def add_semantic_fact(
@@ -356,6 +400,8 @@ class MemoryAPI:
         relationship: dict[str, str] | None = None,
         session_id: str | None = None,
         session_action_count: int | None = None,
+        source_agent_id: str | None = None,
+        source_query_id: str | None = None,
         authorization_scope: AuthorizationScope | None = None,
     ) -> FactResponse:
         """Ingest an entity into Semantic Graph with baseline cognitive weight.
@@ -368,6 +414,8 @@ class MemoryAPI:
             relationship: Optional relationship to existing node (type, source_id)
             session_id: Session identifier used for durable action counting.
             session_action_count: Cumulative per-session action count.
+            source_agent_id: Optional agent identifier for source attribution.
+            source_query_id: Optional query identifier for source attribution.
             authorization_scope: Authorization scope for the request.
 
         Returns:
@@ -385,6 +433,18 @@ class MemoryAPI:
         entity_id = validate_required_string(entity_id, field_name="entity_id")
         attributes = validate_optional_mapping(attributes, field_name="attributes") or None
         relationship = validate_relationship(relationship)
+
+        detected_contradictions = MemoryAPI._detect_contradictions(
+            tenant_id=tenant_id,
+            entity_id=entity_id,
+            entity_type=entity_type,
+            attributes=attributes,
+        )
+        source_confidence_score = (
+            API_DERIVED_SOURCE_CONFIDENCE_SCORE
+            if source_agent_id is not None or source_query_id is not None
+            else DEFAULT_SOURCE_CONFIDENCE_SCORE
+        )
 
         MemoryAPI._authorize_operation(
             operation="add_semantic_fact",
@@ -420,94 +480,234 @@ class MemoryAPI:
             **(attributes or {}),
         }
 
-        # Insert entity node with tenant isolation
-        node_sql = """
-            INSERT INTO MemoryNode (
-                NodeId, TenantId, MemoryTier, Label, LogOddsWeight,
-                LastAccessed, Attributes, CreatedAt, UpdatedAt
-            ) VALUES (
-                @node_id, @tenant_id, @tier, @label, @weight,
-                @now, JSON(@attributes), @now, @now
-            )
-        """
-
+        retry_policy = get_retry_policy()
         try:
-            database = SpannerClient.get_database()
-            with IdempotencyContext(), database.batch() as batch:
-                batch.execute_update(
-                    node_sql,
-                    {
-                        "node_id": entity_id,
-                        "tenant_id": tenant_id,
-                        "tier": SchemaConfig.MEMORY_TIER_SEMANTIC,
-                        "label": entity_type,
-                        "weight": SchemaConfig.INITIAL_WEIGHT,
-                        "now": created_at,
-                        "attributes": MemoryAPI._serialize_json_attributes(node_attributes),
-                    },
-                )
-
-                # Create relationship if provided
-                if relationship:
-                    source_id = relationship.get("source_id")
-                    rel_type = relationship.get("type", "REFERENCES")
-                    if source_id:
-                        edge_id = str(uuid.uuid4())
-                        edge_sql = """
-                                INSERT INTO MemoryEdge (
-                                    SourceNodeId, TenantId, EdgeId, DestNodeId, RelType,
-                                    LogOddsWeight, LastAccessed, CreatedAt, UpdatedAt
-                                ) VALUES (
-                                    @source_id, @tenant_id, @edge_id, @dest_id, @rel_type,
-                                    @weight, @now, @now, @now
-                                )
-                            """
-                        batch.execute_update(
-                            edge_sql,
-                            {
-                                "source_id": source_id,
-                                "tenant_id": tenant_id,
-                                "edge_id": edge_id,
-                                "dest_id": entity_id,
-                                "rel_type": rel_type,
-                                "weight": SchemaConfig.INITIAL_WEIGHT,
-                                "now": created_at,
-                            },
-                        )
-
-                MemoryAPI._insert_audit_event_in_batch(
-                    batch=batch,
-                    tenant_id=tenant_id,
-                    event_type="ADD_SEMANTIC_FACT",
-                    source_node_id=entity_id,
-                    context={"entity_type": entity_type, "relationship": relationship},
-                    timestamp=created_at,
-                )
-
-            if session_action_count is None and session_id is not None:
-                session_action_count = MemoryAPI._increment_session_action_count(
-                    tenant_id,
-                    session_id,
-                )
-
-            # Update weight on successful creation
-            await MemoryAPI._update_weight_on_successful_use(
+            await async_retry_with_backoff(
+                MemoryAPI._do_add_semantic_fact_batch,
                 tenant_id,
-                [entity_id],
-                session_action_count=session_action_count,
+                entity_id,
+                entity_type,
+                node_attributes,
+                relationship,
+                created_at,
+                max_attempts=retry_policy.max_attempts,
+                initial_backoff_seconds=retry_policy.initial_backoff_seconds,
+                max_backoff_seconds=retry_policy.max_backoff_seconds,
             )
-
-            return FactResponse(
-                tenant_id=tenant_id,
-                entity_id=entity_id,
-                entity_type=entity_type,
-                node_path=f"/{entity_type}/{entity_id}",
-                weight=SchemaConfig.INITIAL_WEIGHT,
-                created_at=created_at,
+            logger.info(
+                "add_semantic_fact_completed tenant_id=%s entity_id=%s entity_type=%s",
+                tenant_id,
+                entity_id,
+                entity_type,
             )
         except Exception as e:
-            msg = f"Failed to add semantic fact: {e}"
+            logger.exception(
+                "add_semantic_fact_exhausted tenant_id=%s entity_id=%s attempts=%d",
+                tenant_id,
+                entity_id,
+                retry_policy.max_attempts,
+            )
+            msg = f"Failed to add semantic fact after {retry_policy.max_attempts} attempts: {e}"
             raise RuntimeError(msg) from e
+
+        if session_action_count is None and session_id is not None:
+            session_action_count = MemoryAPI._increment_session_action_count(
+                tenant_id,
+                session_id,
+            )
+
+        # Update weight on successful creation
+        await MemoryAPI._update_weight_on_successful_use(
+            tenant_id,
+            [entity_id],
+            session_action_count=session_action_count,
+        )
+
+        return FactResponse(
+            tenant_id=tenant_id,
+            entity_id=entity_id,
+            entity_type=entity_type,
+            node_path=f"/{entity_type}/{entity_id}",
+            weight=SchemaConfig.INITIAL_WEIGHT,
+            created_at=created_at,
+            source_confidence_score=source_confidence_score,
+            detected_contradictions=detected_contradictions,
+            source_agent_id=source_agent_id,
+            source_query_id=source_query_id,
+        )
+
+    @staticmethod
+    async def _do_add_semantic_fact_batch(
+        tenant_id: str,
+        entity_id: str,
+        entity_type: str,
+        node_attributes: dict[str, Any],
+        relationship: dict[str, str] | None,
+        created_at: datetime,
+    ) -> None:
+        """Execute idempotent semantic fact addition with batch write.
+
+        Args:
+            tenant_id: Tenant identifier.
+            entity_id: Entity identifier.
+            entity_type: Entity type.
+            node_attributes: Node attributes.
+            relationship: Optional relationship definition.
+            created_at: Creation timestamp.
+
+        Raises:
+            Exception: If database write fails (may be retried by caller).
+        """
+        database = SpannerClient.get_database()
+        with IdempotencyContext(), database.batch() as batch:
+            node_sql = """
+                INSERT INTO MemoryNode (
+                    NodeId, TenantId, MemoryTier, Label, LogOddsWeight,
+                    LastAccessed, Attributes, CreatedAt, UpdatedAt
+                ) VALUES (
+                    @node_id, @tenant_id, @tier, @label, @weight,
+                    @now, JSON(@attributes), @now, @now
+                )
+            """
+            batch.execute_update(
+                node_sql,
+                {
+                    "node_id": entity_id,
+                    "tenant_id": tenant_id,
+                    "tier": SchemaConfig.MEMORY_TIER_SEMANTIC,
+                    "label": entity_type,
+                    "weight": SchemaConfig.INITIAL_WEIGHT,
+                    "now": created_at,
+                    "attributes": MemoryAPI._serialize_json_attributes(node_attributes),
+                },
+            )
+
+            # Create relationship if provided
+            if relationship:
+                source_id = relationship.get("source_id")
+                rel_type = relationship.get("type", "REFERENCES")
+                if source_id:
+                    edge_id = str(uuid.uuid4())
+                    edge_sql = """
+                        INSERT INTO MemoryEdge (
+                            SourceNodeId, TenantId, EdgeId, DestNodeId, RelType,
+                            LogOddsWeight, LastAccessed, CreatedAt, UpdatedAt
+                        ) VALUES (
+                            @source_id, @tenant_id, @edge_id, @dest_id, @rel_type,
+                            @weight, @now, @now, @now
+                        )
+                    """
+                    batch.execute_update(
+                        edge_sql,
+                        {
+                            "source_id": source_id,
+                            "tenant_id": tenant_id,
+                            "edge_id": edge_id,
+                            "dest_id": entity_id,
+                            "rel_type": rel_type,
+                            "weight": SchemaConfig.INITIAL_WEIGHT,
+                            "now": created_at,
+                        },
+                    )
+
+            MemoryAPI._insert_audit_event_in_batch(
+                batch=batch,
+                tenant_id=tenant_id,
+                event_type="ADD_SEMANTIC_FACT",
+                source_node_id=entity_id,
+                context={"entity_type": entity_type, "relationship": relationship},
+                timestamp=created_at,
+            )
+
+    @staticmethod
+    def _detect_contradictions(
+        tenant_id: str,
+        entity_id: str,
+        entity_type: str,
+        attributes: dict[str, Any] | None,
+    ) -> list[dict[str, Any]]:
+        """Detect lightweight contradiction signals from entity attributes.
+
+        Args:
+            tenant_id: Tenant identifier for the ingest operation.
+            entity_id: Entity identifier being evaluated.
+            entity_type: Entity type being evaluated.
+            attributes: Attributes supplied at ingest time.
+
+        Returns:
+            A list of contradiction dictionaries suitable for FactResponse.
+        """
+        if not attributes:
+            return []
+
+        contradictions: list[dict[str, Any]] = []
+
+        conflicting_node_ids = attributes.get("conflicts_with")
+        if isinstance(conflicting_node_ids, str):
+            conflicting_node_ids = [conflicting_node_ids]
+        if isinstance(conflicting_node_ids, (list, tuple, set)):
+            normalized_conflicts: list[str] = []
+            for raw_node_id in cast("list[object]", list(conflicting_node_ids)):  # type: ignore[arg-type]
+                normalized_node_id = str(raw_node_id).strip()
+                if normalized_node_id:
+                    normalized_conflicts.append(normalized_node_id)
+            if normalized_conflicts:
+                contradictions.append(
+                    {
+                        "severity": "high",
+                        "detected_by": "explicit_conflicts_with_marker",
+                        "reason": (
+                            "Attribute conflicts_with explicitly lists conflicting "
+                            f"node ids for {entity_type} {entity_id} in tenant {tenant_id}."
+                        ),
+                        "conflicting_node_ids": normalized_conflicts,
+                    }
+                )
+
+        is_deprecated = bool(attributes.get("is_deprecated"))
+        last_access = attributes.get("last_access")
+        if is_deprecated and isinstance(last_access, str):
+            try:
+                normalized_last_access = last_access.replace("Z", "+00:00")
+                last_accessed_at = datetime.fromisoformat(normalized_last_access)
+            except ValueError:
+                last_accessed_at = None
+
+            if last_accessed_at is not None and (
+                datetime.now(tz=UTC) - last_accessed_at <= timedelta(days=RECENT_ACCESS_WINDOW_DAYS)
+            ):
+                contradictions.append(
+                    {
+                        "severity": "medium",
+                        "detected_by": "value_incompatibility",
+                        "reason": (
+                            f"Deprecated {entity_type} {entity_id} was recently "
+                            f"accessed within {RECENT_ACCESS_WINDOW_DAYS} days."
+                        ),
+                        "conflicting_node_ids": [entity_id],
+                    }
+                )
+
+        is_active = attributes.get("is_active")
+        status = attributes.get("status")
+        if (
+            is_active is False
+            and isinstance(status, str)
+            and status.strip().lower() in ACTIVE_STATUS_VALUES
+        ):
+            contradictions.append(
+                {
+                    "severity": "high",
+                    "detected_by": "value_incompatibility",
+                    "reason": (
+                        f"is_active=False conflicts with status='{status}' for "
+                        f"{entity_type} {entity_id}."
+                    ),
+                    "conflicting_node_ids": [entity_id],
+                }
+            )
+
+        return contradictions
 
     @staticmethod
     async def record_audit_event(
@@ -531,7 +731,7 @@ class MemoryAPI:
 
         Raises:
             ValueError: If tenant_id, event_type, or source_node_id is empty or invalid
-            RuntimeError: If database write fails
+            RuntimeError: If database write fails after max retries
         """
         tenant_id = validate_tenant_id(tenant_id)
         event_type = validate_required_string(event_type, field_name="event_type")
@@ -548,21 +748,73 @@ class MemoryAPI:
         )
 
         timestamp = datetime.now(UTC)
-        try:
-            database = SpannerClient.get_database()
-            with database.batch() as batch:
-                return MemoryAPI._insert_audit_event_in_batch(
-                    batch=batch,
-                    tenant_id=tenant_id,
-                    event_type=event_type,
-                    source_node_id=source_node_id,
-                    context=context,
-                    timestamp=timestamp,
-                )
+        retry_policy = get_retry_policy()
 
+        try:
+            audit_response = await async_retry_with_backoff(
+                MemoryAPI._do_record_audit_event_batch,
+                tenant_id,
+                event_type,
+                source_node_id,
+                context,
+                timestamp,
+                max_attempts=retry_policy.max_attempts,
+                initial_backoff_seconds=retry_policy.initial_backoff_seconds,
+                max_backoff_seconds=retry_policy.max_backoff_seconds,
+            )
+            logger.info(
+                "record_audit_event_completed tenant_id=%s event_type=%s source_node_id=%s",
+                tenant_id,
+                event_type,
+                source_node_id,
+            )
         except Exception as e:
-            msg = f"Failed to record audit event: {e}"
+            logger.exception(
+                "record_audit_event_exhausted tenant_id=%s "
+                "event_type=%s source_node_id=%s attempts=%d",
+                tenant_id,
+                event_type,
+                source_node_id,
+                retry_policy.max_attempts,
+            )
+            msg = f"Failed to record audit event after {retry_policy.max_attempts} attempts: {e}"
             raise RuntimeError(msg) from e
+        else:
+            return audit_response
+
+    @staticmethod
+    async def _do_record_audit_event_batch(
+        tenant_id: str,
+        event_type: str,
+        source_node_id: str,
+        context: dict[str, Any] | None,
+        timestamp: datetime,
+    ) -> AuditResponse:
+        """Execute idempotent audit event recording with batch write.
+
+        Args:
+            tenant_id: Tenant identifier.
+            event_type: Event type.
+            source_node_id: Source node identifier.
+            context: Event context.
+            timestamp: Event timestamp.
+
+        Returns:
+            AuditResponse with event details.
+
+        Raises:
+            Exception: If database write fails (may be retried by caller).
+        """
+        database = SpannerClient.get_database()
+        with IdempotencyContext(), database.batch() as batch:
+            return MemoryAPI._insert_audit_event_in_batch(
+                batch=batch,
+                tenant_id=tenant_id,
+                event_type=event_type,
+                source_node_id=source_node_id,
+                context=context,
+                timestamp=timestamp,
+            )
 
     @staticmethod
     async def retrieve_context_window(
@@ -619,32 +871,41 @@ class MemoryAPI:
 
         try:
             database = SpannerClient.get_database()
-            turns = []
+            turns: list[ContextTurn] = []
             total_weight_sum = 0.0
 
-            with database.snapshot() as snapshot:
-                results = snapshot.execute_sql(
-                    gql_query,
-                    {
-                        "tenant_id": tenant_id,
-                        "session_id": session_id,
-                        "window_size": window_size,
-                    },
-                )
+            results = execute_sql_rows(
+                database,
+                gql_query,
+                {
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "window_size": window_size,
+                },
+            )
 
-                for row in results:
-                    turn_id, label, attributes, weight, created_at, _rel_type = row
-                    turn = ContextTurn(
-                        tenant_id=tenant_id,
-                        turn_id=turn_id,
-                        node_id=turn_id,
-                        role=label,
-                        content=str(attributes),
-                        weight=weight or SchemaConfig.INITIAL_WEIGHT,
-                        created_at=created_at,
-                    )
-                    turns.append(turn)
-                    total_weight_sum += turn.weight
+            for row in results:
+                turn_id, label, attributes, weight, created_at, _rel_type = row
+                turn_id_str = str(turn_id)
+                role = str(label)
+                normalized_created_at = (
+                    created_at if isinstance(created_at, datetime) else retrieved_at
+                )
+                turn = ContextTurn(
+                    tenant_id=tenant_id,
+                    turn_id=turn_id_str,
+                    node_id=turn_id_str,
+                    role=role,
+                    content=str(attributes),
+                    weight=(
+                        float(weight)
+                        if isinstance(weight, (int, float))
+                        else SchemaConfig.INITIAL_WEIGHT
+                    ),
+                    created_at=normalized_created_at,
+                )
+                turns.append(turn)
+                total_weight_sum += turn.weight
 
             # Log retrieval to audit
             await MemoryAPI.record_audit_event(
@@ -845,22 +1106,35 @@ class MemoryAPI:
 
         database = SpannerClient.get_database()
 
-        def _transaction(transaction: Transaction) -> int:
-            rows = list(
-                transaction.execute_sql(
-                    select_sql,
-                    {
-                        "tenant_id": tenant_id,
-                        "session_id": session_id,
-                        "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
-                    },
-                )
+        def _transaction(transaction: SpannerTransactionProtocol) -> int:
+            """Execute atomic read-modify-write for action counter.
+
+            Args:
+                transaction: Active Spanner transaction.
+
+            Returns:
+                Updated action count (incremented by 1).
+
+            Raises:
+                ValueError: If session not found.
+            """
+            rows = execute_sql_rows_in_transaction(
+                transaction,
+                select_sql,
+                {
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
+                },
             )
             if not rows:
                 msg = f"session {session_id} not found in tenant"
                 raise ValueError(msg)
 
-            current_count = rows[0][0] or 0
+            current_count_raw = rows[0][0] or 0
+            current_count = (
+                int(current_count_raw) if isinstance(current_count_raw, (int, float)) else 0
+            )
             transaction.execute_update(
                 update_sql,
                 {
@@ -869,7 +1143,7 @@ class MemoryAPI:
                     "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
                 },
             )
-            return int(current_count) + 1
+            return current_count + 1
 
         try:
             return database.run_in_transaction(_transaction)

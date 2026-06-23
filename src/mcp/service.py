@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 
 from src.memory.api import MemoryAPI
 from src.memory.mindmap_pipeline import MindMapPipeline, MindMapPipelineError
@@ -23,7 +23,7 @@ from src.observability.tracing import trace_span
 from src.security.validators import (
     validate_mapping,
     validate_optional_string,
-    validate_relationship,
+    validate_relationship,  # type: ignore[import-untyped]
     validate_required_string,
     validate_tenant_id,
     validate_window_size,
@@ -42,10 +42,40 @@ class MCPToolServiceError(RuntimeError):
 
 
 @dataclass(slots=True)
+class AuthorizationDecision:
+    """Authorization decision with explicit reason code for audit trail."""
+
+    allowed: bool
+    reason_code: str  # e.g., AUTHORIZED_AGENT_SCOPE, DENIED_NODE_ID_NOT_ALLOWED
+    details: str | None = None  # Optional details for logging
+
+
+@dataclass(slots=True)
 class MCPToolService:
     """Service that exposes memory capabilities as MCP tools."""
 
     mindmap_pipeline: MindMapPipeline
+
+    def _resolve_session_id(
+        self,
+        request: MCPInvokeRequest,
+    ) -> str | None:
+        """Resolve session identifier consistently across all handlers.
+
+        Normalizes session_id resolution to support both:
+        - request.session_id (direct header)
+        - request.arguments.get("session_id") (argument payload)
+
+        Args:
+            request: Tool invocation request.
+
+        Returns:
+            str | None: Resolved session identifier, or None if not provided.
+        """
+        return validate_optional_string(
+            request.arguments.get("session_id") or request.session_id,
+            field_name="session_id",
+        )
 
     async def invoke(self, request: MCPInvokeRequest) -> MCPInvokeResponse:
         """Invoke a supported tool and return a typed response.
@@ -78,7 +108,30 @@ class MCPToolService:
                 },
             )
             try:
-                self._authorize_request(request)
+                auth_decision = self._authorize_request(request)
+                if not auth_decision.allowed:
+                    error_msg = f"authorization denied: {auth_decision.reason_code}"
+                    raise PermissionError(error_msg)  # noqa: TRY301
+
+                # Audit log: authorization granted
+                try:
+                    await MemoryAPI.record_audit_event(
+                        tenant_id=request.tenant_id,
+                        event_type="MCP_AUTHORIZATION_GRANTED",
+                        source_node_id=request.authorization_scope.agent_id
+                        if request.authorization_scope
+                        else "unknown",
+                        context={
+                            "tool_name": str(request.tool_name),
+                            "reason_code": auth_decision.reason_code,
+                            "details": auth_decision.details or "",
+                            "session_id": request.session_id or "",
+                            "request_id": request.request_id or "",
+                        },
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Failed to audit MCP_AUTHORIZATION_GRANTED: %s", e)
+
                 if request.tool_name == MCPToolName.MEMORY_SEARCH:
                     result = await self._memory_search(request)
                 elif request.tool_name == MCPToolName.MEMORY_ADD_FACT:
@@ -136,6 +189,28 @@ class MCPToolService:
                 )
                 return response
             except PermissionError as error:
+                # Audit log: authorization denied
+                try:
+                    auth_context = request.arguments.copy() if request.arguments else {}
+                    auth_context.update(
+                        {
+                            "tool_name": str(request.tool_name),
+                            "reason_code": str(error).split(": ")[-1]
+                            if ": " in str(error)
+                            else "DENIED_UNKNOWN",
+                        }
+                    )
+                    await MemoryAPI.record_audit_event(
+                        tenant_id=request.tenant_id,
+                        event_type="MCP_AUTHORIZATION_DENIED",
+                        source_node_id=request.authorization_scope.agent_id
+                        if request.authorization_scope
+                        else "unknown",
+                        context=auth_context,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Failed to audit MCP_AUTHORIZATION_DENIED: %s", e)
+
                 token_usage = self._estimate_token_usage(
                     arguments=request.arguments,
                     result=None,
@@ -234,52 +309,101 @@ class MCPToolService:
         )
 
     @staticmethod
-    def _authorize_request(request: MCPInvokeRequest) -> None:
-        """Enforce deny-by-default authorization before tool dispatch."""
+    def _authorize_request(
+        request: MCPInvokeRequest,
+    ) -> AuthorizationDecision:
+        """Evaluate authorization decision with explicit reason code.
+
+        Args:
+            request: Tool invocation request.
+
+        Returns:
+            AuthorizationDecision with allowed status and reason code.
+        """
         from src.project_base.settings import settings  # noqa: PLC0415
 
-        scope_required_message = "authorization scope is required"
-        denied_request_message = "authorization denied for request"
-
         if not settings.governance.authorization.enabled:
-            return
+            return AuthorizationDecision(
+                allowed=True,
+                reason_code="AUTHORIZATION_DISABLED",
+                details="Authorization enforcement not enabled",
+            )
 
         scope = request.authorization_scope
         if scope is None:
-            raise PermissionError(scope_required_message)
+            return AuthorizationDecision(
+                allowed=False,
+                reason_code="MISSING_AUTHORIZATION_SCOPE",
+                details="No authorization scope provided in request",
+            )
+
+        node_id: str | None = None
+        allowed = False
+        reason = "DENIED_UNKNOWN"
+        details = ""
 
         if request.tool_name == MCPToolName.MEMORY_SEARCH:
+            node_id = request.session_id or request.arguments.get("session_id")
             allowed = scope.allows_resource(
-                node_id=request.session_id or request.arguments.get("session_id"),
+                node_id=node_id,
                 label="Session",
                 memory_tier="CONTEXT",
             )
-        elif request.tool_name == MCPToolName.MEMORY_ADD_FACT:
-            relationship = request.arguments.get("relationship")
-            rel_type = relationship.get("type") if isinstance(relationship, dict) else None
+            reason = "AUTHORIZED_AGENT_SCOPE" if allowed else "DENIED_SESSION_NOT_ALLOWED"
+            details = f"session_id={node_id}"
+        if request.tool_name == MCPToolName.MEMORY_ADD_FACT:
+            entity_id = request.arguments.get("entity_id")
+            entity_type = request.arguments.get("entity_type")
+            relationship = request.arguments.get("relationship")  # type: ignore[arg-type]
+            rel_type: str | None = None
+            if isinstance(relationship, dict):
+                validated_relationship = validate_relationship(cast("dict[str, Any]", relationship))
+                if validated_relationship is not None:
+                    rel_type = validated_relationship.get("type")
             allowed = scope.allows_resource(
-                node_id=request.arguments.get("entity_id"),
-                label=request.arguments.get("entity_type"),
+                node_id=entity_id,
+                label=entity_type,
                 memory_tier="SEMANTIC",
                 relationship_type=rel_type,
             )
-        elif request.tool_name == MCPToolName.MEMORY_LOG_TRACE:
+            reason = "AUTHORIZED_AGENT_SCOPE" if allowed else "DENIED_NODE_ID_NOT_ALLOWED"
+            details = f"entity_id={entity_id} entity_type={entity_type}"
+        if request.tool_name == MCPToolName.MEMORY_LOG_TRACE:
+            node_id = request.session_id or request.arguments.get("source_node_id")
             allowed = scope.allows_resource(
-                node_id=request.session_id or request.arguments.get("source_node_id"),
+                node_id=node_id,
                 label="AUDIT_EVENT",
                 memory_tier="AUDIT",
             )
-        elif request.tool_name == MCPToolName.MEMORY_RECALL_CONTEXT:
+            reason = "AUTHORIZED_AGENT_SCOPE" if allowed else "DENIED_AUDIT_ACCESS_NOT_ALLOWED"
+            details = f"source_node_id={node_id}"
+        if request.tool_name == MCPToolName.MEMORY_RECALL_CONTEXT:
+            node_id = request.session_id or request.arguments.get("session_id")
             allowed = scope.allows_resource(
-                node_id=request.session_id or request.arguments.get("session_id"),
+                node_id=node_id,
                 label="Session",
                 memory_tier="CONTEXT",
             )
-        else:
-            allowed = False
+            reason = "AUTHORIZED_AGENT_SCOPE" if allowed else "DENIED_SESSION_NOT_ALLOWED"
+            details = f"session_id={node_id}"
 
-        if not allowed:
-            raise PermissionError(denied_request_message)
+        if request.tool_name not in (
+            MCPToolName.MEMORY_SEARCH,
+            MCPToolName.MEMORY_ADD_FACT,
+            MCPToolName.MEMORY_LOG_TRACE,
+            MCPToolName.MEMORY_RECALL_CONTEXT,
+        ):
+            return AuthorizationDecision(
+                allowed=False,
+                reason_code="DENIED_UNSUPPORTED_TOOL",
+                details=f"tool_name={request.tool_name}",
+            )
+
+        return AuthorizationDecision(
+            allowed=allowed,
+            reason_code=reason,
+            details=details,
+        )
 
     async def _memory_search(self, request: MCPInvokeRequest) -> dict[str, Any]:
         """Invoke the MindMap query pipeline.
@@ -293,10 +417,7 @@ class MCPToolService:
         try:
             tenant_id = validate_tenant_id(request.tenant_id)
             query = validate_required_string(request.arguments.get("query"), field_name="query")
-            session_id = validate_optional_string(
-                request.arguments.get("session_id") or request.session_id,
-                field_name="session_id",
-            )
+            session_id = self._resolve_session_id(request)
         except ValueError as error:
             raise MCPToolServiceError(
                 code="validation_error",
@@ -318,10 +439,11 @@ class MCPToolService:
                 retryable=False,
             ) from error
 
-        if request.session_id is not None:
-            MemoryAPI._increment_session_action_count(  # noqa: SLF001
+        # Increment action count using resolved session_id
+        if session_id is not None:
+            MemoryAPI._increment_session_action_count(  # noqa: SLF001  # type: ignore[attr-defined]
                 request.tenant_id,
-                request.session_id,
+                session_id,
             )
 
         return response.model_dump(mode="json")
@@ -350,6 +472,7 @@ class MCPToolService:
                 field_name="attributes",
             )
             relationship = validate_relationship(request.arguments.get("relationship"))
+            session_id = self._resolve_session_id(request)
         except ValueError as error:
             raise MCPToolServiceError(
                 code="validation_error",
@@ -363,8 +486,10 @@ class MCPToolService:
                 entity_id=entity_id,
                 attributes=attributes,
                 relationship=relationship,
-                session_id=request.session_id,
+                session_id=session_id,
                 authorization_scope=request.authorization_scope,
+                source_agent_id=request.agent_id if hasattr(request, "agent_id") else None,
+                source_query_id=request.request_id or None,
             )
         except ValueError as error:
             raise MCPToolServiceError(
@@ -377,6 +502,13 @@ class MCPToolService:
                 message=str(error),
                 retryable=True,
             ) from error
+
+        # Increment action count using resolved session_id
+        if session_id is not None:
+            MemoryAPI._increment_session_action_count(  # noqa: SLF001  # type: ignore[attr-defined]
+                request.tenant_id,
+                session_id,
+            )
 
         return response.model_dump(mode="json")
 
@@ -403,6 +535,7 @@ class MCPToolService:
                 request.arguments.get("source_node_id") or request.session_id,
                 field_name="source_node_id",
             )
+            session_id = self._resolve_session_id(request)
         except ValueError as error:
             raise MCPToolServiceError(
                 code="validation_error",
@@ -429,6 +562,13 @@ class MCPToolService:
                 retryable=True,
             ) from error
 
+        # Increment action count using resolved session_id if available
+        if session_id is not None:
+            MemoryAPI._increment_session_action_count(  # noqa: SLF001  # type: ignore[attr-defined]
+                request.tenant_id,
+                session_id,
+            )
+
         return response.model_dump(mode="json")
 
     async def _memory_recall_context(self, request: MCPInvokeRequest) -> dict[str, Any]:
@@ -443,7 +583,7 @@ class MCPToolService:
         try:
             tenant_id = validate_tenant_id(request.tenant_id)
             session_id = validate_required_string(
-                request.arguments.get("session_id") or request.session_id,
+                self._resolve_session_id(request),
                 field_name="session_id",
             )
             window_size = validate_window_size(request.arguments.get("window_size", 10))
@@ -471,5 +611,13 @@ class MCPToolService:
                 message=str(error),
                 retryable=True,
             ) from error
+
+        # Increment action count using resolved session_id
+        MemoryAPI._increment_session_action_count(  # noqa: SLF001  # type: ignore[attr-defined]
+            request.tenant_id,
+            session_id,
+        )
+
+        return response.model_dump(mode="json")
 
         return response.model_dump(mode="json")

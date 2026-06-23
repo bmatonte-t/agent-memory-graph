@@ -4,8 +4,13 @@ from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003
 from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from src.models.confidence import SynthesisConfidenceSignal
+    from src.models.evidence import EvidenceSummary
 
 
 class PipelineStage(StrEnum):
@@ -80,7 +85,10 @@ class AggregationResult(BaseModel):
 
 
 class SerializedFact(BaseModel):
-    """Canonical fact generated from graph evidence."""
+    """Canonical fact generated from graph evidence.
+
+    Phase 5: Extends with source confidence, freshness, and contradiction signals.
+    """
 
     fact_id: str = Field(..., min_length=1)
     statement: str = Field(..., min_length=1)
@@ -88,6 +96,22 @@ class SerializedFact(BaseModel):
     edge_ids: list[str] = Field(default_factory=list)
     rel_type: str = Field(..., min_length=1)
     weight: float = Field(...)
+    # Phase 5: Confidence metadata
+    source_confidence: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Source confidence score for this fact (Phase 5).",
+    )
+    freshness_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Freshness score (0.0-1.0) indicating fact recency (Phase 5).",
+    )
+    contradiction_flags: list[str] = Field(
+        default_factory=list, description="Contradictions detected with other facts (Phase 5)."
+    )
 
 
 class SerializationResult(BaseModel):
@@ -99,12 +123,31 @@ class SerializationResult(BaseModel):
 
 
 class SynthesisResult(BaseModel):
-    """Final response constrained to serialized evidence."""
+    """Final response constrained to serialized evidence.
+
+    Phase 5: Extends with confidence signals and contradiction warnings.
+    """
 
     response_text: str = Field(..., min_length=1)
     claim_fact_ids: list[str] = Field(default_factory=list)
     grounded: bool = Field(...)
     latency_ms: float = Field(..., ge=0.0)
+    # Phase 5: Confidence signals
+    confidence_score: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Overall confidence of synthesis response (Phase 5).",
+    )
+    contradiction_warnings: list[dict[str, object]] = Field(
+        default_factory=list,
+        description="Contradictions detected in evidence (Phase 5); "
+        "format: [{'severity': str, 'count': int, 'node_ids': [str]}]",
+    )
+    confidence_signal: SynthesisConfidenceSignal | None = Field(
+        default=None,
+        description="Detailed Phase 5 confidence and contradiction signal bundle.",
+    )
 
 
 class StageTiming(BaseModel):
@@ -141,7 +184,7 @@ class MindMapResponse(BaseModel):
     query: str = Field(..., min_length=1)
     synthesis: SynthesisResult
     trace: MindMapTrace
-    evidence_summary: "EvidenceSummary | None" = Field(
+    evidence_summary: EvidenceSummary | None = Field(
         default=None,
         description=(
             "Evidence summary for Phase 4: counts, sufficiency signal, "
@@ -150,5 +193,17 @@ class MindMapResponse(BaseModel):
     )
 
 
-# Late import to avoid circular dependency with src.models.evidence
-from src.models.evidence import EvidenceSummary  # noqa: E402, F401
+def _rebuild_models() -> None:
+    """Rebuild Pydantic models with explicit forward reference namespace."""
+    from src.models.confidence import SynthesisConfidenceSignal  # noqa: PLC0415
+    from src.models.evidence import EvidenceSummary  # noqa: PLC0415
+
+    forward_ref_types = {
+        "SynthesisConfidenceSignal": SynthesisConfidenceSignal,
+        "EvidenceSummary": EvidenceSummary,
+    }
+    SynthesisResult.model_rebuild(_types_namespace=forward_ref_types)
+    MindMapResponse.model_rebuild(_types_namespace=forward_ref_types)
+
+
+_rebuild_models()

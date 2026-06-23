@@ -6,12 +6,19 @@ and synthesis linkage for NeighborEnricher and EvidenceTracker.
 
 from __future__ import annotations
 
-import pytest
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import MagicMock
 
-from src.memory.retrieval import NeighborEnricher, EvidenceTracker, NeighborRetrievalError
-from src.models.evidence import EvidenceSourceType
+import pytest
+
+from src.memory.retrieval import EvidenceTracker, NeighborEnricher
+
+MAX_DIRECT_NEIGHBORS = 10
+MAX_NEIGHBORS_PER_ENTITY = 5
+MAX_CHARS_DEFAULT = 500
+PRIORITIZE_LABELS_COUNT = 2
+MAX_CHARS_LARGE = 10000
+MAX_CHARS_SMALL = 100
+SOURCE_TYPE_VARIANT_COUNT = 4
 
 
 class TestNeighborEnricher:
@@ -27,9 +34,9 @@ class TestNeighborEnricher:
         """Create a neighbor enricher with mock client."""
         return NeighborEnricher(
             client=mock_spanner_client,
-            max_direct_neighbors=10,
-            max_neighbors_per_entity=5,
-            max_chars=500,
+            max_direct_neighbors=MAX_DIRECT_NEIGHBORS,
+            max_neighbors_per_entity=MAX_NEIGHBORS_PER_ENTITY,
+            max_chars=MAX_CHARS_DEFAULT,
         )
 
     @pytest.mark.asyncio
@@ -38,9 +45,9 @@ class TestNeighborEnricher:
         neighbor_enricher: NeighborEnricher,
     ) -> None:
         """Verify NeighborEnricher is properly initialized."""
-        assert neighbor_enricher.max_direct_neighbors == 10
-        assert neighbor_enricher.max_neighbors_per_entity == 5
-        assert neighbor_enricher.max_chars == 500
+        assert neighbor_enricher.max_direct_neighbors == MAX_DIRECT_NEIGHBORS
+        assert neighbor_enricher.max_neighbors_per_entity == MAX_NEIGHBORS_PER_ENTITY
+        assert neighbor_enricher.max_chars == MAX_CHARS_DEFAULT
         assert hasattr(neighbor_enricher, "enrich_neighbors")
         assert callable(neighbor_enricher.enrich_neighbors)
 
@@ -50,7 +57,7 @@ class TestNeighborEnricher:
         neighbor_enricher: NeighborEnricher,
     ) -> None:
         """enrich_neighbors validates tenant_id parameter."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cannot be blank"):
             # Empty tenant_id should raise ValueError
             await neighbor_enricher.enrich_neighbors(
                 tenant_id="",
@@ -63,7 +70,7 @@ class TestNeighborEnricher:
         neighbor_enricher: NeighborEnricher,
     ) -> None:
         """enrich_neighbors validates entity_id parameter."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cannot be blank"):
             # Empty entity_id should raise ValueError
             await neighbor_enricher.enrich_neighbors(
                 tenant_id="tenant-123",
@@ -76,7 +83,7 @@ class TestNeighborEnricher:
         neighbor_enricher: NeighborEnricher,
     ) -> None:
         """enrich_neighbors respects max_neighbors_per_entity limit."""
-        assert neighbor_enricher.max_neighbors_per_entity == 5
+        assert neighbor_enricher.max_neighbors_per_entity == MAX_NEIGHBORS_PER_ENTITY
 
     @pytest.mark.asyncio
     async def test_enrich_neighbors_respects_char_budget(
@@ -84,7 +91,7 @@ class TestNeighborEnricher:
         neighbor_enricher: NeighborEnricher,
     ) -> None:
         """enrich_neighbors respects max_chars budget."""
-        assert neighbor_enricher.max_chars == 500
+        assert neighbor_enricher.max_chars == MAX_CHARS_DEFAULT
 
     @pytest.mark.asyncio
     async def test_enrich_neighbors_with_context_flags(
@@ -100,7 +107,7 @@ class TestNeighborEnricher:
 
         assert isinstance(context_flags, dict)
         assert context_flags.get("skip_redundant_paths") is True
-        assert len(context_flags.get("prioritize_labels", [])) == 2
+        assert len(context_flags.get("prioritize_labels", [])) == PRIORITIZE_LABELS_COUNT
 
     @pytest.mark.asyncio
     async def test_enrich_neighbors_default_context_flags(
@@ -131,7 +138,7 @@ class TestEvidenceTracker:
         evidence_tracker: EvidenceTracker,
     ) -> None:
         """record_evidence_retrieved validates tenant_id."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cannot be blank"):
             await evidence_tracker.record_evidence_retrieved(
                 tenant_id="",
                 source_type="path_based",
@@ -145,7 +152,7 @@ class TestEvidenceTracker:
         evidence_tracker: EvidenceTracker,
     ) -> None:
         """record_evidence_retrieved validates source_type."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cannot be blank"):
             await evidence_tracker.record_evidence_retrieved(
                 tenant_id="tenant-123",
                 source_type="",
@@ -159,7 +166,7 @@ class TestEvidenceTracker:
         evidence_tracker: EvidenceTracker,
     ) -> None:
         """record_evidence_retrieved validates graph_path."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cannot be blank"):
             await evidence_tracker.record_evidence_retrieved(
                 tenant_id="tenant-123",
                 source_type="path_based",
@@ -183,7 +190,7 @@ class TestEvidenceTracker:
         evidence_tracker: EvidenceTracker,
     ) -> None:
         """link_evidence_to_synthesis validates tenant_id."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cannot be blank"):
             await evidence_tracker.link_evidence_to_synthesis(
                 tenant_id="",
                 evidence_id="ev-123",
@@ -196,7 +203,7 @@ class TestEvidenceTracker:
         evidence_tracker: EvidenceTracker,
     ) -> None:
         """link_evidence_to_synthesis validates evidence_id."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cannot be blank"):
             await evidence_tracker.link_evidence_to_synthesis(
                 tenant_id="tenant-123",
                 evidence_id="",
@@ -209,7 +216,7 @@ class TestEvidenceTracker:
         evidence_tracker: EvidenceTracker,
     ) -> None:
         """link_evidence_to_synthesis validates synthesis_id."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cannot be blank"):
             await evidence_tracker.link_evidence_to_synthesis(
                 tenant_id="tenant-123",
                 evidence_id="ev-123",
@@ -242,7 +249,7 @@ class TestNeighborEnrichmentEdgeCases:
         """Neighbor enrichment respects max_neighbors_per_entity."""
         # When entity has > max_neighbors_per_entity neighbors
         # Should be truncated
-        assert neighbor_enricher.max_neighbors_per_entity == 5
+        assert neighbor_enricher.max_neighbors_per_entity == MAX_NEIGHBORS_PER_ENTITY
 
     @pytest.mark.asyncio
     async def test_neighbor_enrichment_large_char_budget(
@@ -251,8 +258,8 @@ class TestNeighborEnrichmentEdgeCases:
     ) -> None:
         """Neighbor enrichment with large char budget."""
         # Create enricher with large budget
-        enricher = NeighborEnricher(client=MagicMock(), max_chars=10000)
-        assert enricher.max_chars == 10000
+        enricher = NeighborEnricher(client=MagicMock(), max_chars=MAX_CHARS_LARGE)
+        assert enricher.max_chars == MAX_CHARS_LARGE
 
     @pytest.mark.asyncio
     async def test_neighbor_enrichment_small_char_budget(
@@ -261,8 +268,8 @@ class TestNeighborEnrichmentEdgeCases:
     ) -> None:
         """Neighbor enrichment with constrained char budget."""
         # Create enricher with very small budget
-        enricher = NeighborEnricher(client=MagicMock(), max_chars=100)
-        assert enricher.max_chars == 100
+        enricher = NeighborEnricher(client=MagicMock(), max_chars=MAX_CHARS_SMALL)
+        assert enricher.max_chars == MAX_CHARS_SMALL
 
     @pytest.mark.asyncio
     async def test_neighbor_enrichment_skip_redundant_flag(
@@ -280,7 +287,7 @@ class TestNeighborEnrichmentEdgeCases:
     ) -> None:
         """Neighbor enrichment with prioritize_labels flag."""
         context_flags = {"prioritize_labels": ["PrimaryDiagnosis", "KeySymptom"]}
-        assert len(context_flags.get("prioritize_labels", [])) == 2
+        assert len(context_flags.get("prioritize_labels", [])) == PRIORITIZE_LABELS_COUNT
 
 
 class TestEvidenceTrackingEdgeCases:
@@ -335,7 +342,7 @@ class TestEvidenceTrackingEdgeCases:
     ) -> None:
         """Evidence tracker handles different source types."""
         source_types = ["path_based", "neighbor_based", "hybrid", "unknown"]
-        assert len(source_types) == 4
+        assert len(source_types) == SOURCE_TYPE_VARIANT_COUNT
 
     @pytest.mark.asyncio
     async def test_evidence_tracking_with_audit_ref(

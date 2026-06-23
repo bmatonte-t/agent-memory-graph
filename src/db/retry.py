@@ -5,7 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from google.api_core import exceptions as gcp_exceptions
 
@@ -78,7 +81,7 @@ def calculate_backoff(
 
 
 async def async_retry_with_backoff(
-    func: Any,
+    func: Callable[..., Any],
     *args: Any,
     max_attempts: int = 3,
     initial_backoff_seconds: float = 0.25,

@@ -94,10 +94,13 @@ class TestAuditImmutability:
 
     async def test_update_weight_rejects_audit_tier(self) -> None:
         """Updating audit tier weights should keep append-only behavior immutable."""
-        with patch.object(
-            MemoryAPI,
-            "_enforce_audit_append_only",
-        ) as mock_guard, pytest.raises(ValueError, match="append-only"):
+        with (
+            patch.object(
+                MemoryAPI,
+                "_enforce_audit_append_only",
+            ) as mock_guard,
+            pytest.raises(ValueError, match="append-only"),
+        ):
             await MemoryAPI._update_weight_on_successful_use(
                 tenant_id="tenant_a",
                 node_ids=["audit_node_1"],

@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from unittest.mock import MagicMock
+from typing import TYPE_CHECKING
+from unittest.mock import MagicMock, patch
+
+import pytest
 
 from src.memory.evidence_service import EvidenceService
 from src.models.evidence import (
@@ -12,6 +16,9 @@ from src.models.evidence import (
     EvidenceItem,
     EvidenceSourceType,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 # Test constants
 TEST_TENANT_ID = "tenant_a"
@@ -407,3 +414,139 @@ class TestPhase5CEnrichmentAndSummary:
         assert summary.min_confidence_in_set == 1.0
         assert summary.average_freshness is None
         assert summary.contradiction_warnings == []
+
+
+class TestOperationalEvidenceQueries:
+    """Test suite for operational evidence queries (Phase 4D diagnostics)."""
+
+    async def test_get_evidence_context_for_tenant_returns_recent_items(
+        self,
+    ) -> None:
+        """Should retrieve recent evidence items for a tenant."""
+
+        @contextmanager
+        def mock_snapshot_context() -> Iterator[MagicMock]:
+            """Mock snapshot context manager."""
+            yield mock_snapshot
+
+        client = MagicMock()
+        service = EvidenceService(client)
+
+        now = datetime.now(UTC)
+        recent_time = now - timedelta(hours=2)
+
+        # Mock database rows
+        mock_rows = [
+            (
+                "evid_1",
+                "path_based",
+                1,
+                "entity1->rel1->entity2",
+                "Evidence 1",
+                recent_time,
+                1.0,
+                "audit_1",
+                recent_time,
+            ),
+        ]
+
+        mock_snapshot = MagicMock()
+        mock_snapshot.execute_sql.return_value = mock_rows
+
+        mock_db = MagicMock()
+        mock_db.snapshot = mock_snapshot_context
+
+        with patch(
+            "src.memory.evidence_service.SpannerClient.get_database",
+            return_value=mock_db,
+        ):
+            items = await service.get_evidence_context_for_tenant("tenant_a", limit_hours=24)
+
+        assert len(items) == 1
+        assert items[0].evidence_id == "evid_1"
+        assert items[0].source_type == EvidenceSourceType.PATH_BASED
+        assert items[0].evidence_number == 1
+        mock_snapshot.execute_sql.assert_called_once()
+
+    async def test_get_evidence_context_for_tenant_filters_by_time(
+        self,
+    ) -> None:
+        """Should filter evidence by cutoff time."""
+
+        @contextmanager
+        def mock_snapshot_context() -> Iterator[MagicMock]:
+            """Mock snapshot context manager."""
+            yield mock_snapshot
+
+        client = MagicMock()
+        service = EvidenceService(client)
+
+        mock_snapshot = MagicMock()
+        mock_snapshot.execute_sql.return_value = []
+
+        mock_db = MagicMock()
+        mock_db.snapshot = mock_snapshot_context
+
+        with patch(
+            "src.memory.evidence_service.SpannerClient.get_database",
+            return_value=mock_db,
+        ):
+            await service.get_evidence_context_for_tenant("tenant_a", limit_hours=12)
+
+        # Verify the query was called with cutoff time calculation
+        call_args = mock_snapshot.execute_sql.call_args
+        assert call_args is not None
+        assert "CreatedAt > @cutoff_time" in call_args[0][0]
+
+    async def test_get_evidence_context_for_tenant_empty_result(self) -> None:
+        """Should return empty list when no recent evidence found."""
+
+        @contextmanager
+        def mock_snapshot_context() -> Iterator[MagicMock]:
+            """Mock snapshot context manager."""
+            yield mock_snapshot
+
+        client = MagicMock()
+        service = EvidenceService(client)
+
+        mock_snapshot = MagicMock()
+        mock_snapshot.execute_sql.return_value = []
+
+        mock_db = MagicMock()
+        mock_db.snapshot = mock_snapshot_context
+
+        with patch(
+            "src.memory.evidence_service.SpannerClient.get_database",
+            return_value=mock_db,
+        ):
+            items = await service.get_evidence_context_for_tenant("tenant_a")
+
+        assert len(items) == 0
+
+    async def test_get_evidence_context_for_tenant_raises_on_query_error(
+        self,
+    ) -> None:
+        """Should raise RuntimeError if database query fails."""
+
+        @contextmanager
+        def mock_snapshot_context() -> Iterator[MagicMock]:
+            """Mock snapshot context manager."""
+            yield mock_snapshot
+
+        client = MagicMock()
+        service = EvidenceService(client)
+
+        mock_snapshot = MagicMock()
+        mock_snapshot.execute_sql.side_effect = RuntimeError("Connection failed")
+
+        mock_db = MagicMock()
+        mock_db.snapshot = mock_snapshot_context
+
+        with (
+            patch(
+                "src.memory.evidence_service.SpannerClient.get_database",
+                return_value=mock_db,
+            ),
+            pytest.raises(RuntimeError, match="get_evidence_context_for_tenant failed"),
+        ):
+            await service.get_evidence_context_for_tenant("tenant_a")

@@ -22,6 +22,7 @@ from src.models.mindmap import MindMapRequest, MindMapResponse
 from src.models.schemas import ErrorResponse, HealthCheckResponse
 from src.observability.tracing import configure_tracer
 from src.project_base.logging import LoggingConfiguration
+from src.project_base.settings import settings
 
 # Configure logging
 logging.basicConfig(
@@ -48,10 +49,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan handler for startup and shutdown events."""
     logger.info("Starting up Agent Memory Graph API")
     try:
-        from src.project_base.settings.config import Settings  # noqa: PLC0415
-
-        settings = Settings()
-        LoggingConfiguration().configure_logging(
+        LoggingConfiguration().configure_logging(  # type: ignore[call-arg]
             configuration=settings.logging,
             cloud_logging=settings.cloud_logging if settings.cloud_logging.enabled else None,
         )

@@ -8,18 +8,25 @@ and prepares evidence for synthesis stage.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from datetime import UTC, datetime, timedelta
+from typing import Any, cast
 
+from src.db.spanner_client import SpannerClient
+from src.integrations.google_sdk_wrappers import execute_sql_rows
+from src.memory import retrieval
+from src.models.confidence import FreshnessScore
 from src.models.evidence import (
     EvidenceContext,
     EvidenceInsufficientReason,
     EvidenceItem,
     EvidenceSourceType,
+    EvidenceSummary,
 )
+from src.security.validators import validate_tenant_id
 
-if TYPE_CHECKING:
-    from google.cloud import spanner
+MIN_BOTH_SIGNAL_COUNT = 1
+MIN_ABUNDANT_SIGNAL_COUNT = 3
+ENGRAM_EVIDENCE_ROW_COLUMNS = 9
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +57,17 @@ class EvidenceSufficiencyHeuristic:
         Returns:
             True if evidence sufficient, False otherwise
         """
-        # Heuristic: (paths >= 1 AND neighbors >= 1) OR (either >= 3)
-        if path_count >= 1 and neighbor_count >= 1:
-            return True
-        if path_count >= 3 or neighbor_count >= 3:
-            return True
-        return False
+        return bool(
+            (path_count >= MIN_BOTH_SIGNAL_COUNT and neighbor_count >= MIN_BOTH_SIGNAL_COUNT)
+            or path_count >= MIN_ABUNDANT_SIGNAL_COUNT
+            or neighbor_count >= MIN_ABUNDANT_SIGNAL_COUNT
+        )
 
     @staticmethod
     def insufficient_reasons(
         path_count: int,
         neighbor_count: int,
+        *,
         had_path_timeout: bool = False,
         had_neighbor_timeout: bool = False,
         had_auth_denied: bool = False,
@@ -87,11 +94,7 @@ class EvidenceSufficiencyHeuristic:
 
         if path_count == 0 and neighbor_count == 0:
             # Determine which retrieval actually failed
-            if had_path_timeout and had_neighbor_timeout:
-                reasons.append(EvidenceInsufficientReason.TIMEOUT)
-            elif had_path_timeout:
-                reasons.append(EvidenceInsufficientReason.TIMEOUT)
-            elif had_neighbor_timeout:
+            if had_path_timeout or had_neighbor_timeout:
                 reasons.append(EvidenceInsufficientReason.TIMEOUT)
             elif had_auth_denied:
                 reasons.append(EvidenceInsufficientReason.AUTHORIZATION_DENIED)
@@ -112,7 +115,7 @@ class EvidenceService:
     builds EvidenceContext, tracks insufficiency, links to audit trail.
     """
 
-    def __init__(self, client: spanner.Client) -> None:
+    def __init__(self, client: object) -> None:
         """Initialize evidence service.
 
         Args:
@@ -124,7 +127,7 @@ class EvidenceService:
     async def build_evidence_context(
         self,
         tenant_id: str,
-        mined_entities: list[dict],
+        mined_entities: list[str] | list[dict[str, Any]],
         session_id: str | None = None,
     ) -> EvidenceContext:
         """Build complete evidence context for synthesis stage.
@@ -146,19 +149,109 @@ class EvidenceService:
         Raises:
             ValueError: If inputs invalid
         """
-        # TODO: Phase 4D implementation
-        # 1. Call PathFinder.find_paths() for each entity pair
-        # 2. Call NeighborEnricher.enrich_neighbors() for retrieved entities
-        # 3. Build EvidenceItem list with proper numbering
-        # 4. Calculate totals (item count, char count)
-        # 5. Determine sufficiency via heuristic
-        # 6. If insufficient, populate insufficient_reasons
-        # 7. Link to audit trail via MemoryAPI.record_audit_event()
-        # 8. Return EvidenceContext
-        logger.warning("build_evidence_context() not yet implemented (Phase 4D)")
+        if not tenant_id or not tenant_id.strip():
+            message = "tenant_id cannot be empty"
+            raise ValueError(message)
+        if not mined_entities:
+            return EvidenceContext(
+                is_empty=True,
+                insufficient_reasons=[EvidenceInsufficientReason.EMPTY_GRAPH],
+            )
+
+        del session_id
+
+        started = datetime.now(UTC)
+        evidence_items: list[EvidenceItem] = []
+        total_chars = 0
+        path_count = 0
+        neighbor_count = 0
+        insufficient_reasons: list[EvidenceInsufficientReason] = []
+
+        try:
+            path_finder = retrieval.EvidentPathFinder(self.client)
+            enricher = retrieval.NeighborEnricher(self.client)
+
+            # Extract entity IDs from mined entities (dict format)
+            entity_ids: list[str] = []
+            for mined_entity in mined_entities:
+                if isinstance(mined_entity, str):
+                    entity_ids.append(mined_entity)
+                else:
+                    entity_value = mined_entity.get("entity_id", str(mined_entity))
+                    entity_ids.append(str(entity_value))
+
+            # Phase 4B: Retrieve paths between entities (pairwise)
+            evidence_number = 1
+            for i, start_entity in enumerate(entity_ids):
+                for end_entity in entity_ids[i + 1 :]:
+                    paths, _path_chars = await path_finder.find_paths(
+                        tenant_id=tenant_id,
+                        start_entity_id=start_entity,
+                        end_entity_id=end_entity,
+                    )
+                    for path in paths:
+                        evidence_items.append(
+                            EvidenceItem(
+                                evidence_id=f"evid_{evidence_number}",
+                                source_type=EvidenceSourceType.PATH_BASED,
+                                evidence_number=evidence_number,
+                                graph_path=path,
+                                serialized_form=path,
+                                access_timestamp=started,
+                                cognitive_weight=1.0,
+                            )
+                        )
+                        total_chars += len(path)
+                        path_count += 1
+                        evidence_number += 1
+
+            # Phase 4C: Enrich neighbors for each mined entity
+            for entity_id in entity_ids:
+                neighbors, _neighbor_chars = await enricher.enrich_neighbors(
+                    tenant_id=tenant_id,
+                    entity_id=entity_id,
+                    context_flags={"skip_redundant_paths": True},
+                )
+                for neighbor in neighbors:
+                    evidence_items.append(
+                        EvidenceItem(
+                            evidence_id=f"evid_{evidence_number}",
+                            source_type=EvidenceSourceType.NEIGHBOR_BASED,
+                            evidence_number=evidence_number,
+                            graph_path=neighbor,
+                            serialized_form=neighbor,
+                            access_timestamp=started,
+                            cognitive_weight=1.0,
+                        )
+                    )
+                    total_chars += len(neighbor)
+                    neighbor_count += 1
+                    evidence_number += 1
+
+        except Exception as error:
+            logger.exception(
+                "evidence_context.build_error",
+                extra={"tenant_id": tenant_id, "error": str(error)},
+            )
+            insufficient_reasons.append(EvidenceInsufficientReason.UNKNOWN)
+
+        # Phase 4D: Determine sufficiency
+        is_sufficient = self._heuristic.is_sufficient(path_count, neighbor_count)
+        if not is_sufficient and not insufficient_reasons:
+            insufficient_reasons = self._heuristic.insufficient_reasons(path_count, neighbor_count)
+
+        retrieval_latency_ms = (datetime.now(UTC) - started).total_seconds() * 1000
+
         return EvidenceContext(
-            is_empty=True,
-            insufficient_reasons=[EvidenceInsufficientReason.UNKNOWN],
+            items=evidence_items,
+            total_items=len(evidence_items),
+            total_chars=total_chars,
+            path_count=path_count,
+            neighbor_count=neighbor_count,
+            is_empty=len(evidence_items) == 0,
+            is_sufficient=is_sufficient,
+            insufficient_reasons=insufficient_reasons,
+            retrieval_latency_ms=retrieval_latency_ms,
         )
 
     async def get_evidence_context_for_tenant(
@@ -181,14 +274,76 @@ class EvidenceService:
         Raises:
             RuntimeError: If query fails
         """
-        # TODO: Phase 4D operational query
-        # 1. Query ENGRAM_EVIDENCE WHERE TenantId = @tenant_id
-        # 2. Filter by CreatedAt > NOW() - INTERVAL limit_hours
-        # 3. Order by CreatedAt DESC
-        # 4. Convert rows to EvidenceItem objects
-        # 5. Return list
-        logger.warning("get_evidence_context_for_tenant() not yet implemented")
-        return []
+        tenant_id = validate_tenant_id(tenant_id)
+
+        try:
+            database = SpannerClient.get_database()
+            cutoff_time = datetime.now(UTC) - timedelta(hours=limit_hours)
+
+            query_sql = """
+                SELECT
+                    EvidenceId, SourceType, EvidenceNumber,
+                    GraphPath, SerializedForm, AccessTimestamp,
+                    CognitiveWeight, AuditLogRef,
+                    CreatedAt
+                FROM ENGRAM_EVIDENCE
+                WHERE TenantId = @tenant_id
+                AND CreatedAt > @cutoff_time
+                ORDER BY CreatedAt DESC
+                LIMIT 1000
+            """
+
+            rows = execute_sql_rows(
+                database,
+                query_sql,
+                {"tenant_id": tenant_id, "cutoff_time": cutoff_time},
+            )
+
+            evidence_items: list[EvidenceItem] = []
+            for row in rows:
+                if len(row) < ENGRAM_EVIDENCE_ROW_COLUMNS:
+                    continue
+
+                evidence_id = cast(str, row[0])
+                source_type = cast(str, row[1])
+                evidence_number = cast(int, row[2])
+                graph_path = cast(str, row[3])
+                serialized_form = cast(str, row[4])
+                access_timestamp = cast(datetime, row[5])
+                cognitive_weight = cast(float, row[6])
+                audit_log_ref = cast(str, row[7])
+                created_at = cast(datetime, row[8])
+
+                item = EvidenceItem(
+                    evidence_id=evidence_id,
+                    source_type=EvidenceSourceType(source_type.lower()),
+                    evidence_number=evidence_number,
+                    graph_path=graph_path,
+                    serialized_form=serialized_form,
+                    access_timestamp=access_timestamp,
+                    cognitive_weight=cognitive_weight,
+                    audit_log_ref=audit_log_ref,
+                    freshness_score=FreshnessScore.compute(created_at).current_score,
+                )
+                evidence_items.append(item)
+
+            logger.info(
+                "get_evidence_context_for_tenant retrieved %d items tenant_id=%s limit_hours=%d",
+                len(evidence_items),
+                tenant_id,
+                limit_hours,
+            )
+
+        except Exception as e:
+            logger.exception(
+                "get_evidence_context_for_tenant failed tenant_id=%s limit_hours=%d",
+                tenant_id,
+                limit_hours,
+            )
+            message = f"get_evidence_context_for_tenant failed: {e}"
+            raise RuntimeError(message) from e
+        else:
+            return evidence_items
 
     def validate_evidence_context(
         self,
@@ -226,7 +381,7 @@ class EvidenceService:
                 f"but is_sufficient={context.is_sufficient}"
             )
 
-        seen_ids = set()
+        seen_ids: set[str] = set()
         for item in context.items:
             if item.evidence_id in seen_ids:
                 errors.append(f"Duplicate evidence_id: {item.evidence_id}")
@@ -238,3 +393,175 @@ class EvidenceService:
             )
 
         return len(errors) == 0, errors
+
+    def _compute_freshness_scores(
+        self,
+        items: list[EvidenceItem],
+        freshness_decay_lambda: float = 0.1,
+    ) -> None:
+        """Compute freshness decay scores for evidence items.
+
+        Applies exponential decay formula: freshness = exp(-λ * hours_elapsed)
+        where λ is the decay rate (default 0.1 per hour).
+
+        Modifies items in-place, setting freshness_score field.
+
+        Args:
+            items: List of EvidenceItem objects
+            freshness_decay_lambda: Decay rate parameter (0.01-1.0)
+        """
+        for item in items:
+            # Use FreshnessScore.compute() for consistent decay logic
+            freshness = FreshnessScore.compute(
+                access_timestamp=item.access_timestamp,
+                decay_lambda=freshness_decay_lambda,
+            )
+            # Cap to [0.0, 1.0] range
+            item.freshness_score = max(0.0, min(1.0, freshness.current_score))
+
+    def _aggregate_confidence_scores(
+        self,
+        items: list[EvidenceItem],
+    ) -> tuple[float, float]:
+        """Aggregate confidence scores across evidence items.
+
+        Computes:
+        - Minimum confidence (bottleneck signal for hard gating)
+        - Average confidence (overall quality signal)
+
+        Args:
+            items: List of EvidenceItem objects
+
+        Returns:
+            (min_confidence, average_confidence) tuple, both 0.0-1.0
+        """
+        if not items:
+            return 1.0, 1.0
+
+        scores = [item.source_confidence_score for item in items]
+        min_confidence = min(scores)
+        average_confidence = sum(scores) / len(scores)
+
+        return min_confidence, average_confidence
+
+    def _aggregate_contradiction_warnings(
+        self,
+        items: list[EvidenceItem],
+    ) -> list[dict[str, Any]]:
+        """Aggregate contradiction flags across evidence items.
+
+        Groups contradictions by:
+        - severity level
+        - conflicting node sets
+        - count of contradictions per node
+
+        Args:
+            items: List of EvidenceItem objects
+
+        Returns:
+            List of aggregated contradiction warnings
+        """
+        if not items:
+            return []
+
+        # Track contradictions by severity
+        contradictions_by_severity: dict[str, set[str]] = {
+            "high": set(),
+            "medium": set(),
+            "low": set(),
+        }
+
+        for item in items:
+            for flag_str in item.contradiction_flags:
+                # Parse contradiction flags (format: "severity:node_id" or just flag)
+                if ":" in flag_str:
+                    severity, node_id = flag_str.split(":", 1)
+                    if severity in contradictions_by_severity:
+                        contradictions_by_severity[severity].add(node_id)
+                else:
+                    # Unstructured flag, treat as medium severity
+                    contradictions_by_severity["medium"].add(flag_str)
+
+        # Build aggregated warnings
+        warnings: list[dict[str, Any]] = []
+        for severity in ["high", "medium", "low"]:
+            nodes = contradictions_by_severity[severity]
+            if nodes:
+                warnings.append(
+                    {
+                        "severity": severity,
+                        "conflicting_count": len(nodes),
+                        "nodes": sorted(nodes),
+                    }
+                )
+
+        return warnings
+
+    def enrich_evidence_context_with_phase5(
+        self,
+        context: EvidenceContext,
+        freshness_decay_lambda: float = 0.1,
+    ) -> None:
+        """Enrich EvidenceContext items with Phase 5 confidence and freshness data.
+
+        Modifies context in-place:
+        - Computes freshness_score for each item using exponential decay
+        - Items already have source_confidence_score from add_semantic_fact
+
+        Args:
+            context: EvidenceContext to enrich
+            freshness_decay_lambda: Exponential decay rate (default 0.1)
+        """
+        if not context.items:
+            return
+
+        # Compute freshness scores
+        self._compute_freshness_scores(
+            context.items,
+            freshness_decay_lambda=freshness_decay_lambda,
+        )
+
+    def build_evidence_summary(
+        self,
+        context: EvidenceContext,
+    ) -> EvidenceSummary:
+        """Build EvidenceSummary from EvidenceContext with Phase 5 signals.
+
+        Aggregates:
+        - Confidence scores (min, average)
+        - Freshness scores (average)
+        - Contradiction warnings
+
+        Args:
+            context: Complete EvidenceContext
+
+        Returns:
+            EvidenceSummary with Phase 5 metadata
+        """
+        # Compute confidence aggregates
+        min_confidence, _ = self._aggregate_confidence_scores(context.items)
+
+        # Compute average freshness
+        average_freshness = None
+        if context.items and any(item.freshness_score for item in context.items):
+            freshness_scores = [
+                item.freshness_score for item in context.items if item.freshness_score is not None
+            ]
+            if freshness_scores:
+                average_freshness = sum(freshness_scores) / len(freshness_scores)
+
+        # Aggregate contradiction warnings
+        contradiction_warnings = self._aggregate_contradiction_warnings(context.items)
+
+        return EvidenceSummary(
+            total_items=context.total_items,
+            path_count=context.path_count,
+            neighbor_count=context.neighbor_count,
+            is_sufficient=context.is_sufficient,
+            is_empty=context.is_empty,
+            insufficient_reasons=context.insufficient_reasons,
+            retrieval_latency_ms=context.retrieval_latency_ms,
+            min_confidence_in_set=min_confidence,
+            average_freshness=average_freshness,
+            contradiction_warnings=contradiction_warnings,
+        )

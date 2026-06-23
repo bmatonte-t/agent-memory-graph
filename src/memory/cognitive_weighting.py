@@ -4,6 +4,7 @@ import logging
 
 from src.db.schema import SchemaConfig
 from src.db.spanner_client import SpannerClient
+from src.integrations.google_sdk_wrappers import create_cloud_scheduler_http_job, execute_sql_rows
 
 logger = logging.getLogger(__name__)
 
@@ -43,9 +44,9 @@ class CognitiveWeighting:
         """
 
         try:
-            database = SpannerClient.get_database()
-            with database.batch() as batch:
-                batch.execute_update(
+            database = SpannerClient.get_database()  # type: ignore[return-value]
+            with database.batch() as batch:  # type: ignore[union-attr]
+                batch.execute_update(  # type: ignore[union-attr]
                     sql,
                     {
                         "decay_rate": decay_rate,
@@ -94,9 +95,9 @@ class CognitiveWeighting:
         """
 
         try:
-            database = SpannerClient.get_database()
-            with database.batch() as batch:
-                batch.execute_update(
+            database = SpannerClient.get_database()  # type: ignore[return-value]
+            with database.batch() as batch:  # type: ignore[union-attr]
+                batch.execute_update(  # type: ignore[union-attr]
                     sql,
                     {
                         "threshold": threshold,
@@ -112,7 +113,7 @@ class CognitiveWeighting:
             return 0
 
     @staticmethod
-    async def get_weight_statistics() -> dict:
+    async def get_weight_statistics() -> dict[str, dict[str, float]]:
         """Retrieve aggregate weight statistics for monitoring.
 
         Returns:
@@ -136,27 +137,27 @@ class CognitiveWeighting:
 
         try:
             database = SpannerClient.get_database()
-            stats = {}
+            stats: dict[str, dict[str, float]] = {}
+            results = execute_sql_rows(
+                database,
+                sql,
+                {
+                    "tier_context": SchemaConfig.MEMORY_TIER_CONTEXT,
+                    "tier_semantic": SchemaConfig.MEMORY_TIER_SEMANTIC,
+                    "tier_audit": SchemaConfig.MEMORY_TIER_AUDIT,
+                },
+            )
 
-            with database.snapshot() as snapshot:
-                results = snapshot.execute_sql(
-                    sql,
-                    {
-                        "tier_context": SchemaConfig.MEMORY_TIER_CONTEXT,
-                        "tier_semantic": SchemaConfig.MEMORY_TIER_SEMANTIC,
-                        "tier_audit": SchemaConfig.MEMORY_TIER_AUDIT,
-                    },
-                )
-
-                for row in results:
-                    tier, count, mean, min_w, max_w, median = row
-                    stats[tier] = {
-                        "count": count,
-                        "mean_weight": mean or 0.0,
-                        "min_weight": min_w or 0.0,
-                        "max_weight": max_w or 0.0,
-                        "median_weight": median or 0.0,
-                    }
+            for row in results:
+                tier, count, mean, min_w, max_w, median = row
+                tier_key = str(tier)
+                stats[tier_key] = {
+                    "count": float(count) if isinstance(count, (int, float)) else 0.0,
+                    "mean_weight": float(mean) if isinstance(mean, (int, float)) else 0.0,
+                    "min_weight": float(min_w) if isinstance(min_w, (int, float)) else 0.0,
+                    "max_weight": float(max_w) if isinstance(max_w, (int, float)) else 0.0,
+                    "median_weight": float(median) if isinstance(median, (int, float)) else 0.0,
+                }
 
         except Exception as e:
             msg = f"Failed to get weight statistics: {e}"
@@ -200,7 +201,7 @@ class CloudSchedulerJob:
         project_id: str,
         location: str = "us-central1",
         cloud_run_url: str = "",
-    ) -> dict:
+    ) -> dict[str, object]:
         """Create a Cloud Scheduler job for nightly weight decay.
 
         Args:
@@ -215,42 +216,19 @@ class CloudSchedulerJob:
             RuntimeError: If job creation fails
         """
         try:
-            from google.cloud import scheduler_v1  # noqa: PLC0415
-            from google.cloud.scheduler_v1.types import HttpTarget, Job  # noqa: PLC0415
-
-            client = scheduler_v1.CloudSchedulerClient()
-            parent = client.common_location_path(project_id, location)
-
             decay_uri = CloudSchedulerJob._build_target_uri(
                 cloud_run_url=cloud_run_url,
                 path="/internal/decay-weights",
             )
-
-            job = Job(
-                name=f"{parent}/jobs/amg-decay-weights-daily",
+            response = create_cloud_scheduler_http_job(
+                project_id=project_id,
+                location=location,
+                job_name="amg-decay-weights-daily",
                 description="Daily cognitive weight decay for agent memory graph",
                 schedule=CloudSchedulerJob.DECAY_SCHEDULE_CRON,
-                time_zone="UTC",
-                http_target=HttpTarget(
-                    uri=decay_uri,
-                    http_method="POST",
-                    headers={"Content-Type": "application/json"},
-                    body=b'{"decay_rate": 0.05}',
-                ),
-                attempt_config={
-                    "max_retries": 2,
-                    "max_backoff_duration": {"seconds": 3600},
-                    "min_backoff_duration": {"seconds": 60},
-                },
+                target_uri=decay_uri,
+                body_json=b'{"decay_rate": 0.05}',
             )
-
-            response = client.create_job(request={"parent": parent, "job": job})
-        except ImportError:
-            msg = (
-                "google-cloud-scheduler not installed. Install with: "
-                "pip install google-cloud-scheduler"
-            )
-            raise RuntimeError(msg) from None
         except Exception as e:
             msg = f"Failed to create Cloud Scheduler job: {e}"
             raise RuntimeError(msg) from e
@@ -267,7 +245,7 @@ class CloudSchedulerJob:
         project_id: str,
         location: str = "us-central1",
         cloud_run_url: str = "",
-    ) -> dict:
+    ) -> dict[str, object]:
         """Create a Cloud Scheduler job for weight-based pruning.
 
         Args:
@@ -282,42 +260,19 @@ class CloudSchedulerJob:
             RuntimeError: If job creation fails
         """
         try:
-            from google.cloud import scheduler_v1  # noqa: PLC0415
-            from google.cloud.scheduler_v1.types import HttpTarget, Job  # noqa: PLC0415
-
-            client = scheduler_v1.CloudSchedulerClient()
-            parent = client.common_location_path(project_id, location)
-
             pruning_uri = CloudSchedulerJob._build_target_uri(
                 cloud_run_url=cloud_run_url,
                 path="/internal/prune-weights",
             )
-
-            job = Job(
-                name=f"{parent}/jobs/amg-prune-weights-daily",
+            response = create_cloud_scheduler_http_job(
+                project_id=project_id,
+                location=location,
+                job_name="amg-prune-weights-daily",
                 description="Daily cognitive weight pruning for agent memory graph",
                 schedule=CloudSchedulerJob.PRUNING_SCHEDULE_CRON,
-                time_zone="UTC",
-                http_target=HttpTarget(
-                    uri=pruning_uri,
-                    http_method="POST",
-                    headers={"Content-Type": "application/json"},
-                    body=b'{"threshold": 0.30}',
-                ),
-                attempt_config={
-                    "max_retries": 2,
-                    "max_backoff_duration": {"seconds": 3600},
-                    "min_backoff_duration": {"seconds": 60},
-                },
+                target_uri=pruning_uri,
+                body_json=b'{"threshold": 0.30}',
             )
-
-            response = client.create_job(request={"parent": parent, "job": job})
-        except ImportError:
-            msg = (
-                "google-cloud-scheduler not installed. Install with: "
-                "pip install google-cloud-scheduler"
-            )
-            raise RuntimeError(msg) from None
         except Exception as e:
             msg = f"Failed to create pruning job: {e}"
             raise RuntimeError(msg) from e
@@ -330,7 +285,7 @@ class CloudSchedulerJob:
             }
 
     @staticmethod
-    def get_job_config(cloud_run_url: str) -> dict:
+    def get_job_config(cloud_run_url: str) -> dict[str, object]:
         """Return Cloud Scheduler job configuration for Terraform/deployment.
 
         Args:

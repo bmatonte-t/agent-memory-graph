@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime  # noqa: TC003
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -41,7 +42,7 @@ class EvidenceInsufficientReason(StrEnum):
     NO_NEIGHBORS_FOUND = "no_neighbors_found"
     """Entity has no outgoing relationships."""
 
-    TOKEN_BUDGET_EXCEEDED = "token_budget_exceeded"
+    TOKEN_BUDGET_EXCEEDED = "token_budget_exceeded"  # noqa: S105
     """Evidence exceeded maximum token allocation."""
 
     AUTHORIZATION_DENIED = "authorization_denied"
@@ -63,6 +64,8 @@ class EvidenceItem(BaseModel):
     This represents evidence in its serialized, compact form (not raw
     graph nodes/edges). The EvidenceItem is created by Phase 4B/4C
     retrieval stages and tracked in ENGRAM_EVIDENCE.
+
+    Phase 5: Extends with source-aware confidence, freshness, and contradiction metadata.
     """
 
     evidence_id: str = Field(..., min_length=1, description="Unique identifier (UUID format).")
@@ -81,6 +84,22 @@ class EvidenceItem(BaseModel):
         default=1.0, ge=0.0, le=10.0, description="Weight for Phase 5 gating."
     )
     audit_log_ref: str | None = Field(default=None, description="Reference to AUDIT_EVENTS entry.")
+    # Phase 5: Confidence metadata
+    source_agent_id: str | None = Field(
+        default=None, description="Agent that created this evidence (Phase 5)."
+    )
+    source_confidence_score: float = Field(
+        default=1.0, ge=0.0, le=1.0, description="Source-aware confidence (0.0-1.0, Phase 5)."
+    )
+    freshness_score: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Computed freshness decay score (0.0-1.0, Phase 5).",
+    )
+    contradiction_flags: list[str] = Field(
+        default_factory=list, description="Detected contradictions with other nodes (Phase 5)."
+    )
 
 
 class EvidenceContext(BaseModel):
@@ -121,6 +140,8 @@ class EvidenceSummary(BaseModel):
 
     This is returned in MindMapResponse to signal to clients what
     evidence grounded the synthesis.
+
+    Phase 5: Extends with confidence breakdown and contradiction signals.
     """
 
     total_items: int = Field(default=0, description="Count of evidence items.")
@@ -135,4 +156,22 @@ class EvidenceSummary(BaseModel):
     )
     retrieval_latency_ms: float = Field(
         default=0.0, ge=0.0, description="Evidence retrieval latency."
+    )
+    # Phase 5: Confidence and contradiction metadata
+    min_confidence_in_set: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum source confidence across all items (Phase 5).",
+    )
+    average_freshness: float | None = Field(
+        default=None,
+        ge=0.0,
+        le=1.0,
+        description="Average freshness score across all items (Phase 5).",
+    )
+    contradiction_warnings: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Aggregated contradictions detected (Phase 5); format: "
+        "[{'conflicting_count': int, 'severity': str, 'nodes': [str]}]",
     )
