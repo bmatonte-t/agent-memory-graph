@@ -17,7 +17,7 @@ jobs:
     if: ${{ vars.GCP_TRYOLABS_DOCUMENTATION_DEPLOYMENT_WORKLOAD_IDENTITY_PROVIDER != '' && vars.GCP_TRYOLABS_DOCUMENTATION_DEPLOYMENT_SERVICE_ACCOUNT != '' }}
     steps:
       - name: Checkout repo
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Preflight checks
         id: preflight
