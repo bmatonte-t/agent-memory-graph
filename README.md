@@ -1,61 +1,75 @@
 # Agent Memory Graph
 
-Agent Memory Graph is a GCP-native memory system for AI agents built around a tripartite graph model, grounded responses, and auditable orchestration.
+Agent Memory Graph is a GCP-native shared memory platform for AI agents.
 
-It combines:
-- Durable long-term knowledge in Google Cloud Spanner Graph
-- Session-aware recall for multi-turn agents
-- Immutable operational traceability for trust, compliance, and debugging
+It is designed for multi-agent environments where trust, grounding, and auditability matter as much as answer quality. The system combines a strict tripartite memory model with deterministic retrieval and synthesis stages so responses are tied to graph evidence instead of model guesswork.
 
-## Why This Project Exists
+## What Problem It Solves
 
-Most agent systems fail in one of three ways: they forget context, invent unsupported answers, or cannot explain how a response was produced.
+Most agent systems degrade in production because they:
 
-This repository addresses those gaps with:
-- A structured memory topology (Context, Semantic, Audit)
-- A grounding-first retrieval and synthesis pipeline (MindMap)
-- MCP tool contracts for stable integration with orchestrators and agent runtimes
-- End-to-end request correlation and telemetry
+- lose short-term context,
+- hallucinate unsupported claims, or
+- cannot explain how an answer was produced.
 
-## Memory Topology
+Agent Memory Graph addresses this with:
 
-The system models memory as three isolated but connected graph tiers:
+- memory tier isolation (Context, Semantic, Audit),
+- a grounding-first MindMap pipeline,
+- typed MCP tools for stable orchestration,
+- immutable audit traces for reproducibility.
+
+## Core Architecture
+
+### Tripartite Memory Topology
 
 - CONTEXT
-  - Session-scoped conversation and turn history.
-  - Optimized for short-horizon retrieval in active interactions.
+  - Session-scoped turn history and short-horizon recall.
 
 - SEMANTIC
-  - Durable entities, facts, and relationships with cognitive weighting.
-  - Supports relevance through weighting and temporal maintenance strategies.
+  - Durable entities and facts with cognitive weighting and temporal decay.
 
 - AUDIT
-  - Immutable reasoning and operation traces.
-  - Enables reproducibility, observability, and compliance-oriented inspection.
+  - Immutable operation and reasoning traces for compliance and debugging.
 
-## Core Runtime Capabilities
+### MindMap Reasoning Pipeline
 
-- MindMap pipeline execution for retrieval-grounded answers
-- MCP tool service with typed contracts and stable error model
-- Agent orchestration loop with execution modes:
-  - single
-  - supervisor_worker
-  - vertex (env-gated adapter seam)
-- Request id propagation across orchestration and tool invocation chain
-- Structured operational logging and token/latency telemetry
+1. Mine
+   - Extract intent and entities from user query.
 
-## API Surface
+2. Aggregate
+   - Retrieve graph evidence with bounded traversal and cognitive horizon filters.
 
-Main FastAPI entrypoint:
-- src/api/main.py
+3. Serialize
+   - Convert graph evidence into traceable fact payloads.
+
+4. Synthesize
+   - Generate response only from serialized evidence.
+   - If evidence is insufficient, return explicit insufficiency.
+
+## Runtime Capabilities
+
+- FastAPI API surface for memory and orchestration operations.
+- MCP tool service for memory search, fact ingestion, audit logging, and context recall.
+- Agent orchestration modes: single, supervisor_worker, vertex.
+- Structured logging, tracing hooks, and metrics instrumentation.
+- Tenant-aware memory access patterns and hardened error envelopes.
+
+## API Endpoints
 
 Primary endpoints:
+
 - GET /health
 - POST /api/v1/mindmap/execute
 - POST /api/v1/mcp/invoke
 - POST /api/v1/agent/respond
 
-## Quick Start
+Internal maintenance endpoints:
+
+- POST /internal/decay-weights
+- POST /internal/prune-weights
+
+## Quickstart
 
 ### Prerequisites
 
@@ -63,98 +77,112 @@ Primary endpoints:
 - uv
 - just
 
-### Install
+### Install Dependencies
 
-1. Sync dependencies (all groups):
-   uv sync --all-groups
+```bash
+uv sync --all-groups
+```
 
-2. Optional: install pre-commit hooks:
-   just setup-hooks
+Optional hook setup:
+
+```bash
+just setup-hooks
+```
 
 ### Run Locally
 
-1. Start API server:
-   uv run uvicorn src.api.main:app --reload
+```bash
+uv run uvicorn src.api.main:app --reload
+```
 
-2. Health check:
-   curl http://127.0.0.1:8000/health
+Health check:
 
-## Developer Workflow
+```bash
+curl http://127.0.0.1:8000/health
+```
 
-Common commands are defined in justfile:
+## Developer Commands
 
-- Run full tests:
-  just test
+Common commands from justfile:
 
-- Run lint:
-  just lint
+```bash
+just test
+just lint
+just check-types
+just check-format
+just format
+just test-coverage
+just check-all
+```
 
-- Run type checking:
-  just check-types
+Documentation tasks:
 
-- Run all quality gates:
-  just check-all
-
-- Build documentation:
-  just build-docs
+```bash
+just serve-docs
+just build-docs
+```
 
 ## Testing and Quality
 
-Current repository test status is green in local validation for this branch, including unit and integration coverage for:
+The project uses:
 
-- Agent orchestration behavior and mode handling
-- MCP API and service contracts
-- MindMap API/pipeline behavior
-- Memory API and audit trail flows
-- Concurrency and multi-turn integration scenarios
+- pytest for unit and integration testing,
+- ruff for linting and formatting,
+- basedpyright for type checking,
+- docstr-coverage for docstring coverage checks.
 
-## Phase Status Snapshot
+Recommended pre-PR gate:
 
-- Phase 1: Foundation and core memory layer implemented
-- Phase 2: MindMap query pipeline implemented behind API contract
-- Phase 3: MCP tools, orchestration loop, and deployment scaffolding implemented
-- Phase 4+: Hardening, marketplace readiness, pilot testing, and launch planning in progress
-
-Reference roadmap:
-- DEVELOPMENT_PLAN.md
+```bash
+just check-all
+```
 
 ## Deployment (Phase 3 Scaffold)
 
-Cloud Run deployment helpers are available via just tasks:
+Cloud Run helper tasks are available:
 
-1. Render manifest:
-   just phase3-render-cloudrun <project_id>
+```bash
+just phase3-render-cloudrun <project_id>
+just phase3-build-image <project_id>
+just phase3-deploy-cloudrun <project_id>
+```
 
-2. Build image:
-   just phase3-build-image <project_id>
+Deployment templates and scripts:
 
-3. Deploy service:
-   just phase3-deploy-cloudrun <project_id>
-
-Template artifacts:
 - infrastructure/phase3/cloudrun-service.yaml
 - scripts/render_phase3_cloudrun_manifest.py
+
+## Project Status
+
+- Phase 1: Foundation and core memory layer complete.
+- Phase 2: MindMap retrieval and grounding pipeline complete.
+- Phase 3: MCP tooling and orchestration integration complete.
+- Phase 4: Security, observability, and marketplace hardening in progress.
+- Phase 4C: Observability safety baseline complete.
+- Phase 5-6: Comparative pilot and launch preparation planned.
+
+Roadmap reference:
+
+- DEVELOPMENT_PLAN.md
 
 ## Documentation Index
 
 - docs/api-reference.md
 - docs/data-model-spec.md
-- docs/phase1-validation-report.md
+- docs/objectives.md
+- docs/marketplace-readiness-checklist.md
 - docs/architecture/adr/
 - docs/development/phase3-agent-integration-guide.md
 - docs/development/phase3-mcp-tool-reference.md
-- docs/marketplace-readiness-checklist.md
-- docs/objectives.md
+- docs/development/phase4-local-user-testing.md
 
 ## Contributing
 
-If you want to contribute:
-
-1. Read docs/development/CONTRIBUTING.md
-2. Run quality checks before opening a pull request
-3. Include tests for behavior changes
-4. Keep architecture and operational docs updated with implementation changes
+1. Read docs/development/CONTRIBUTING.md.
+2. Make focused changes and include tests.
+3. Run quality gates before opening a PR.
+4. Update docs when behavior or architecture changes.
 
 ## License
 
-Add project license information here when licensing is finalized.
+License details will be published when project licensing is finalized.

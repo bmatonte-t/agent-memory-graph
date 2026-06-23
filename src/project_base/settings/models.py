@@ -9,6 +9,35 @@ from pydantic import BaseModel
 from .enums import LogLevel
 
 
+class CloudTrace(BaseModel):
+    """Cloud Trace configuration for distributed tracing."""
+
+    enabled: bool = False
+    """`True` enables span export to Google Cloud Trace."""
+
+    project_id: str | None = None
+    """GCP project identifier for Cloud Trace export.
+
+    When None and enabled is True, uses the project derived from Application Default Credentials.
+    """
+
+
+class CloudLogging(BaseModel):
+    """Cloud Logging configuration for structured log export."""
+
+    enabled: bool = False
+    """`True` enables structured log export to Google Cloud Logging."""
+
+    project_id: str | None = None
+    """GCP project identifier for Cloud Logging export.
+
+    When None and enabled is True, uses the project derived from Application Default Credentials.
+    """
+
+    labels: dict[str, str] = {}
+    """Optional resource labels attached to every log entry."""
+
+
 class Logging(BaseModel):
     """Logging configuration settings."""
 

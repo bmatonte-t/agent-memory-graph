@@ -23,6 +23,7 @@ class TestMindMapApi:
 
         async def fake_record_audit_event(**_: object) -> AuditResponse:
             return AuditResponse(
+                tenant_id="tenant_test",
                 event_id="audit_test",
                 event_type="MINDMAP_EXECUTION",
                 timestamp=datetime.now(UTC),

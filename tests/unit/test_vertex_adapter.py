@@ -53,7 +53,7 @@ class TestVertexAdapterConfig:
 
     async def test_local_stub_responds_with_vertex_mode(self) -> None:
         """Stub adapter response should always report Vertex execution mode."""
-        request = AgentOrchestrationRequest(prompt="hello", session_id="s1")
+        request = AgentOrchestrationRequest(tenant_id="tenant_a", prompt="hello", session_id="s1")
         adapter = LocalStubVertexAdapter(response_text="ok", grounded=True)
 
         response = await adapter.respond(request)

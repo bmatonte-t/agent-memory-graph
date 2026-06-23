@@ -1,14 +1,16 @@
 # Phase 1 Validation Report - Foundation and Core Memory Layer
 
-**Status**: ✅ COMPLETE  
-**Date**: 2026-06-16  
-**Version**: 0.1.0  
+**Status**: ✅ COMPLETE
+**Date**: 2026-06-16
+**Version**: 0.1.0
 
 ---
 
 ## Executive Summary
 
 Phase 1 successfully delivers a production-ready tripartite memory model on Google Cloud Spanner with comprehensive test coverage and performance validation. All 60 tests pass with 71% code coverage, and latency benchmarks confirm sub-50ms performance for core memory operations.
+
+Terminology note: this report references phase-one storage fields `LogOddsWeight` and `LastAccessed`; these correspond to canonical architecture concepts `cognitive_weight` and `last_accessed`.
 
 ---
 
@@ -294,6 +296,6 @@ Large graph (100):   2.70ms ✅
 - [x] Architecture validated (tripartite model, graph optimization, audit trail)
 - [x] Ready for Phase 2 implementation
 
-**Reviewed by**: Claude Haiku (AI Assistant)  
-**Date**: 2026-06-16  
+**Reviewed by**: Claude Haiku (AI Assistant)
+**Date**: 2026-06-16
 **Version**: 0.1.0-final

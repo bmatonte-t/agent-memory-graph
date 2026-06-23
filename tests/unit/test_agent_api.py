@@ -51,7 +51,12 @@ class TestAgentApi:
         client = TestClient(app)
         response = client.post(
             "/api/v1/agent/respond",
-            json={"prompt": "hello", "session_id": "sess_1", "request_id": "req_1"},
+            json={
+                "tenant_id": "tenant_a",
+                "prompt": "hello",
+                "session_id": "sess_1",
+                "request_id": "req_1",
+            },
         )
 
         assert response.status_code == HTTP_OK
@@ -66,7 +71,7 @@ class TestAgentApi:
         client = TestClient(app)
         response = client.post(
             "/api/v1/agent/respond",
-            json={"prompt": "", "session_id": "sess_1"},
+            json={"tenant_id": "tenant_a", "prompt": "", "session_id": "sess_1"},
         )
 
         assert response.status_code == HTTP_UNPROCESSABLE_ENTITY

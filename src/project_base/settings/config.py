@@ -5,8 +5,10 @@ See https://documentation.tryolabs.com/repo-template/batteries/configuration/.
 Note: you may store secrets in `.local` or `.env` files.
 """
 
+from src.security.governance import GovernanceSettings
+
 from ._core import PreconfiguredSettings
-from .models import Logging
+from .models import CloudLogging, CloudTrace, Logging
 
 
 class Settings(PreconfiguredSettings):
@@ -25,3 +27,6 @@ class Settings(PreconfiguredSettings):
     """
 
     logging: Logging
+    cloud_trace: CloudTrace = CloudTrace()
+    cloud_logging: CloudLogging = CloudLogging()
+    governance: GovernanceSettings = GovernanceSettings()

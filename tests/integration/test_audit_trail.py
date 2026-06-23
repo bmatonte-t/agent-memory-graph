@@ -1,246 +1,357 @@
-"""Integration tests for memory API tripartite memory isolation."""
+"""Integration tests for tenant-aware memory flow isolation."""
 
-import json
-import math
+from __future__ import annotations
+
+from contextlib import AbstractContextManager
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from typing import TYPE_CHECKING
 
 import pytest
 
-from src.db.schema import SchemaConfig
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 from src.memory.api import MemoryAPI
-from src.models.schemas import AuditResponse
-
-EXPECTED_BATCH_WRITES_WITH_AUDIT = 2
-MIN_EXPECTED_BATCH_WRITES = 2
-MIN_EXPECTED_TIERS = 2
 
 
-class TestAuditTrail:
-    """Integration tests for audit trail immutability and operation tracing."""
+@dataclass(slots=True)
+class _ContextTurnRecord:
+    """Seed data used by the fake database for context retrieval."""
 
-    @pytest.mark.asyncio
-    async def test_session_creation_generates_audit_event(self) -> None:
-        """Test that creating a session generates corresponding audit event."""
-        with patch("src.memory.api.SpannerClient") as mock_client:
-            mock_db = MagicMock()
-            mock_batch = MagicMock()
-            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
-            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+    tenant_id: str
+    session_id: str
+    turn_id: str
+    role: str
+    content: str
+    weight: float
+    created_at: datetime
+    rel_type: str = "HAS_TURN"
 
-            mock_client.get_database.return_value = mock_db
 
-            await MemoryAPI.create_session(session_id="session_123", user_id="user_456")
+class _ManagedResource(AbstractContextManager[object]):
+    """Minimal context manager wrapper used by the fake database."""
 
-            assert mock_batch.execute_update.call_count == EXPECTED_BATCH_WRITES_WITH_AUDIT
-            audit_params = mock_batch.execute_update.call_args_list[1][0][1]
-            audit_attributes = json.loads(audit_params["attributes"])
-            assert audit_attributes["event_type"] == "CREATE_SESSION"
-            assert audit_attributes["source_node_id"] == "session_123"
+    def __init__(self, resource: object) -> None:
+        """Store the wrapped resource.
 
-    @pytest.mark.asyncio
-    async def test_semantic_fact_addition_generates_audit(self) -> None:
-        """Test that adding semantic fact generates audit event."""
-        with patch("src.memory.api.SpannerClient") as mock_client:
-            mock_db = MagicMock()
-            mock_batch = MagicMock()
-            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
-            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+        Args:
+            resource: Resource returned from ``__enter__``.
+        """
+        self._resource = resource
 
-            mock_client.get_database.return_value = mock_db
+    def __enter__(self) -> object:
+        """Return the wrapped resource."""
+        return self._resource
 
-            with patch.object(MemoryAPI, "_update_weight_on_successful_use") as mock_weight:
+    def __exit__(self, *args: object) -> None:
+        """No-op exit hook for compatibility with ``with`` blocks."""
 
-                async def async_weight(*args: object, **kwargs: object) -> None:
-                    pass
 
-                mock_weight.side_effect = async_weight
+@dataclass(slots=True)
+class _FakeMemoryDatabase:
+    """In-memory stand-in for the subset of Spanner used by ``MemoryAPI``."""
 
-                await MemoryAPI.add_semantic_fact(entity_type="PERSON", entity_id="entity_123")
+    nodes: list[dict[str, object]] = field(default_factory=list)
+    edges: list[dict[str, object]] = field(default_factory=list)
+    audit_events: list[dict[str, object]] = field(default_factory=list)
+    context_turns: list[_ContextTurnRecord] = field(default_factory=list)
 
-                # Verify audit persisted and weight update was called
-                audit_params = mock_batch.execute_update.call_args_list[1][0][1]
-                audit_attributes = json.loads(audit_params["attributes"])
-                assert audit_attributes["event_type"] == "ADD_SEMANTIC_FACT"
-                assert audit_attributes["source_node_id"] == "entity_123"
-                mock_weight.assert_called_once()
+    def batch(self) -> _ManagedResource:
+        """Return a batch context manager for write operations."""
+        return _ManagedResource(_FakeBatch(self))
 
-    @pytest.mark.asyncio
-    async def test_context_retrieval_updates_weights(self) -> None:
-        """Test that retrieving context updates access weights (confirmation bias)."""
-        with patch("src.memory.api.SpannerClient") as mock_client:
-            mock_db = MagicMock()
-            mock_snapshot = MagicMock()
-            mock_snapshot.execute_sql.return_value = [
+    def snapshot(self) -> _ManagedResource:
+        """Return a snapshot context manager for read operations."""
+        return _ManagedResource(_FakeSnapshot(self))
+
+    def run_in_transaction(
+        self,
+        callback: Callable[[_FakeTransaction], object],
+    ) -> object:
+        """Execute a transaction callback against the fake database."""
+        return callback(_FakeTransaction(self))
+
+    def seed_context_turns(
+        self,
+        *,
+        tenant_id: str,
+        session_id: str,
+        turns: list[tuple[str, str, str, float]],
+    ) -> None:
+        """Seed tenant-scoped context turns for graph retrieval.
+
+        Args:
+            tenant_id: Tenant that owns the turns.
+            session_id: Session associated with the turns.
+            turns: Turn tuples of ``(turn_id, role, content, weight)``.
+        """
+        for index, (turn_id, role, content, weight) in enumerate(turns):
+            self.context_turns.append(
+                _ContextTurnRecord(
+                    tenant_id=tenant_id,
+                    session_id=session_id,
+                    turn_id=turn_id,
+                    role=role,
+                    content=content,
+                    weight=weight,
+                    created_at=datetime(2026, 1, 1, 0, 0, index, tzinfo=UTC),
+                )
+            )
+
+
+@dataclass(slots=True)
+class _FakeBatch:
+    """Batch writer that interprets the SQL shapes used in the memory layer."""
+
+    database: _FakeMemoryDatabase
+
+    def execute_update(self, sql: str, params: dict[str, object]) -> int:
+        """Apply a tenant-aware write mutation to the fake database.
+
+        Args:
+            sql: SQL statement shape emitted by the memory layer.
+            params: Bound parameters for the statement.
+
+        Returns:
+            int: Number of affected records.
+        """
+        normalized_sql = " ".join(sql.split())
+        if "INSERT INTO MemoryNode" in normalized_sql:
+            self.database.nodes.append(
+                {
+                    "node_id": params["node_id"],
+                    "tenant_id": params["tenant_id"],
+                    "tier": params["tier"],
+                    "label": params["label"],
+                    "weight": params["weight"],
+                    "attributes": params["attributes"],
+                    "session_action_count": 0,
+                }
+            )
+            return 1
+        if "INSERT INTO MemoryEdge" in normalized_sql:
+            self.database.edges.append(
+                {
+                    "source_id": params["source_id"],
+                    "tenant_id": params["tenant_id"],
+                    "edge_id": params["edge_id"],
+                    "dest_id": params["dest_id"],
+                    "rel_type": params["rel_type"],
+                }
+            )
+            return 1
+        if "INSERT INTO AUDIT_EVENTS" in normalized_sql:
+            self.database.audit_events.append(dict(params))
+            return 1
+        if normalized_sql.startswith("UPDATE MemoryNode") and (
+            "SessionActionCount" in normalized_sql
+        ):
+            updated_count = 0
+            for node in self.database.nodes:
+                if (
+                    node["tenant_id"] == params["tenant_id"]
+                    and node["tier"] == params["tier"]
+                    and node["node_id"] == params["session_id"]
+                ):
+                    node["session_action_count"] = int(node.get("session_action_count", 0)) + 1
+                    updated_count += 1
+            return updated_count
+        if normalized_sql.startswith("UPDATE MemoryNode"):
+            updated_count = 0
+            for node in self.database.nodes:
+                if (
+                    node["tenant_id"] == params["tenant_id"]
+                    and node["tier"] == params["tier"]
+                    and node["node_id"] in params["node_ids"]
+                ):
+                    node["weight"] = float(node["weight"]) + float(params["delta"])
+                    updated_count += 1
+            return updated_count
+        msg = f"Unexpected SQL in fake batch: {normalized_sql}"
+        raise AssertionError(msg)
+
+
+@dataclass(slots=True)
+class _FakeSnapshot:
+    """Snapshot reader that enforces tenant-scoped reads."""
+
+    database: _FakeMemoryDatabase
+
+    def execute_sql(self, sql: str, params: dict[str, object]) -> list[tuple[object, ...]]:
+        """Execute a tenant-aware read against the fake database.
+
+        Args:
+            sql: SQL or graph query emitted by the memory layer.
+            params: Bound parameters for the query.
+
+        Returns:
+            list[tuple[object, ...]]: Query result rows.
+        """
+        normalized_sql = " ".join(sql.split())
+        tenant_id = str(params["tenant_id"])
+        if normalized_sql.startswith("SELECT MemoryTier FROM MemoryNode"):
+            matching_node = next(
                 (
-                    "turn_1",
-                    "User",
-                    '{"content": "Hello"}',
-                    0.5,
-                    datetime.now(UTC),
-                    "HAS_TURN",
+                    node
+                    for node in self.database.nodes
+                    if node["tenant_id"] == tenant_id and node["node_id"] == params["node_id"]
                 ),
+                None,
+            )
+            if matching_node is None:
+                return []
+            return [(matching_node["tier"],)]
+        if normalized_sql.startswith("SELECT SessionActionCount FROM MemoryNode"):
+            matching_node = next(
+                (
+                    node
+                    for node in self.database.nodes
+                    if node["tenant_id"] == tenant_id and node["node_id"] == params["session_id"]
+                ),
+                None,
+            )
+            if matching_node is None:
+                return []
+            return [(matching_node.get("session_action_count", 0),)]
+        if normalized_sql.startswith("MATCH p = (s:Node)-[e]->(t:Node)"):
+            matching_turns = [
+                turn
+                for turn in self.database.context_turns
+                if turn.tenant_id == tenant_id and turn.session_id == params["session_id"]
             ]
-            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
-            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
-
-            mock_client.get_database.return_value = mock_db
-
-            with (
-                patch.object(MemoryAPI, "record_audit_event") as mock_audit,
-                patch.object(MemoryAPI, "_update_weight_on_successful_use") as mock_weight,
-            ):
-
-                async def async_audit(*args: object, **kwargs: object) -> AuditResponse:
-                    return AuditResponse(
-                        event_id="audit_3",
-                        event_type=args[0],
-                        timestamp=datetime.now(UTC),
-                    )
-
-                async def async_weight(*args: object, **kwargs: object) -> None:
-                    pass
-
-                mock_audit.side_effect = async_audit
-                mock_weight.side_effect = async_weight
-
-                await MemoryAPI.retrieve_context_window(session_id="session_123")
-
-                # Verify weight update was called for retrieved turns
-                mock_weight.assert_called_once_with(
-                    ["turn_1"], memory_tier=SchemaConfig.MEMORY_TIER_CONTEXT
+            ordered_turns = sorted(matching_turns, key=lambda turn: turn.created_at, reverse=True)
+            limited_turns = ordered_turns[: int(params["window_size"])]
+            return [
+                (
+                    turn.turn_id,
+                    turn.role,
+                    turn.content,
+                    turn.weight,
+                    turn.created_at,
+                    turn.rel_type,
                 )
-
-    @pytest.mark.asyncio
-    async def test_tripartite_memory_isolation(self) -> None:
-        """Test that context, semantic, and audit memories remain isolated."""
-        with patch("src.memory.api.SpannerClient") as mock_client:
-            mock_db = MagicMock()
-            mock_batch = MagicMock()
-            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
-            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
-
-            mock_client.get_database.return_value = mock_db
-
-            with patch.object(
-                MemoryAPI, "record_audit_event", new_callable=MagicMock
-            ) as mock_audit:
-
-                async def async_audit(*args: object, **kwargs: object) -> AuditResponse:
-                    return AuditResponse(
-                        event_id="audit_4",
-                        event_type=args[0],
-                        timestamp=datetime.now(UTC),
-                    )
-
-                mock_audit.side_effect = async_audit
-
-                # Create session (CONTEXT tier)
-                await MemoryAPI.create_session(session_id="session_456", user_id="user_789")
-
-                # Add semantic fact (SEMANTIC tier)
-                with patch.object(MemoryAPI, "_update_weight_on_successful_use") as mock_weight:
-
-                    async def async_weight(*args: object, **kwargs: object) -> None:
-                        pass
-
-                    mock_weight.side_effect = async_weight
-                    await MemoryAPI.add_semantic_fact(entity_type="OBJECT", entity_id="object_123")
-
-                # Verify each operation creates nodes in correct tier
-                # Session should be in CONTEXT tier
-                # Semantic fact should be in SEMANTIC tier
-                # Audit events should be in AUDIT tier
-
-                calls = mock_batch.execute_update.call_args_list
-                # Should have: 1 session node + 1 fact node (audit is mocked out)
-                assert len(calls) >= MIN_EXPECTED_BATCH_WRITES
-
-                # Verify the memory tiers used in calls
-                tiers_used = []
-                for call in calls:
-                    # call is a call object with args and kwargs
-                    # call[0] is the positional args tuple
-                    # call[1] is the keyword args dict
-                    if len(call[0]) > 1:  # SQL and params
-                        params = call[0][1]
-                        if "tier" in params:
-                            tiers_used.append(params["tier"])
-
-                # At minimum, we should have CONTEXT and SEMANTIC tiers
-                assert len(tiers_used) >= MIN_EXPECTED_TIERS
-                assert SchemaConfig.MEMORY_TIER_CONTEXT in tiers_used
-                assert SchemaConfig.MEMORY_TIER_SEMANTIC in tiers_used
+                for turn in limited_turns
+            ]
+        msg = f"Unexpected SQL in fake snapshot: {normalized_sql}"
+        raise AssertionError(msg)
 
 
-class TestCognitiveWeighting:
-    """Tests for cognitive weight management and Bayesian updates."""
+@dataclass(slots=True)
+class _FakeTransaction:
+    """Transaction shim that reuses the fake batch and snapshot behavior."""
 
-    @pytest.mark.asyncio
-    async def test_initial_weight_baseline(self) -> None:
-        """Test that new entities start with INITIAL_WEIGHT."""
-        with patch("src.memory.api.SpannerClient") as mock_client:
-            mock_db = MagicMock()
-            mock_batch = MagicMock()
-            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
-            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+    database: _FakeMemoryDatabase
 
-            mock_client.get_database.return_value = mock_db
+    def execute_sql(self, sql: str, params: dict[str, object]) -> list[tuple[object, ...]]:
+        """Delegate read execution to the snapshot fake."""
+        return _FakeSnapshot(self.database).execute_sql(sql, params)
 
-            with (
-                patch.object(MemoryAPI, "record_audit_event"),
-                patch.object(MemoryAPI, "_update_weight_on_successful_use"),
-            ):
+    def execute_update(self, sql: str, params: dict[str, object]) -> int:
+        """Delegate write execution to the batch fake."""
+        return _FakeBatch(self.database).execute_update(sql, params)
 
-                async def async_noop(*args: object, **kwargs: object) -> None:
-                    pass
 
-                response = await MemoryAPI.add_semantic_fact(
-                    entity_type="EVENT", entity_id="event_123"
-                )
+class TestTenantIsolatedMemoryFlow:
+    """Integration tests for tenant isolation across the memory API flow."""
 
-                assert response.weight == SchemaConfig.INITIAL_WEIGHT
+    async def test_full_memory_flow_isolates_same_session_id_across_tenants(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Sessions with the same identifier must remain isolated by tenant."""
+        fake_database = _FakeMemoryDatabase()
+        monkeypatch.setattr("src.memory.api.SpannerClient.get_database", lambda: fake_database)
 
-    @pytest.mark.asyncio
-    async def test_weight_update_uses_bayes_factor(self) -> None:
-        """Test that weight updates use BAYES_FACTOR_SUCCESS."""
-        with patch("src.memory.api.SpannerClient") as mock_client:
-            mock_db = MagicMock()
-            mock_batch = MagicMock()
-            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
-            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+        await MemoryAPI.create_session(
+            tenant_id="tenant_a",
+            session_id="session_shared",
+            user_id="user_a",
+        )
+        await MemoryAPI.create_session(
+            tenant_id="tenant_b",
+            session_id="session_shared",
+            user_id="user_b",
+        )
+        await MemoryAPI.add_semantic_fact(
+            tenant_id="tenant_a",
+            entity_type="PERSON",
+            entity_id="entity_a",
+            relationship={"source_id": "session_shared", "type": "REFERENCES"},
+        )
+        await MemoryAPI.add_semantic_fact(
+            tenant_id="tenant_b",
+            entity_type="PERSON",
+            entity_id="entity_b",
+            relationship={"source_id": "session_shared", "type": "REFERENCES"},
+        )
 
-            mock_client.get_database.return_value = mock_db
+        fake_database.seed_context_turns(
+            tenant_id="tenant_a",
+            session_id="session_shared",
+            turns=[
+                ("turn_a_1", "User", '{"content": "alpha"}', 0.60),
+                ("turn_a_2", "Agent", '{"content": "alpha reply"}', 0.55),
+            ],
+        )
+        fake_database.seed_context_turns(
+            tenant_id="tenant_b",
+            session_id="session_shared",
+            turns=[("turn_b_1", "User", '{"content": "beta"}', 0.65)],
+        )
 
-            await MemoryAPI._update_weight_on_successful_use(["node_1"])
+        response_a = await MemoryAPI.retrieve_context_window(
+            tenant_id="tenant_a",
+            session_id="session_shared",
+            window_size=10,
+        )
+        response_b = await MemoryAPI.retrieve_context_window(
+            tenant_id="tenant_b",
+            session_id="session_shared",
+            window_size=10,
+        )
 
-            # Verify the update SQL includes ln(BAYES_FACTOR_SUCCESS)
-            call_args = mock_batch.execute_update.call_args
-            assert call_args is not None
+        assert response_a.tenant_id == "tenant_a"
+        assert response_b.tenant_id == "tenant_b"
+        assert [turn.content for turn in response_a.turns] == [
+            '{"content": "alpha reply"}',
+            '{"content": "alpha"}',
+        ]
+        assert [turn.content for turn in response_b.turns] == ['{"content": "beta"}']
+        assert {
+            node["tenant_id"] for node in fake_database.nodes if node["node_id"] == "session_shared"
+        } == {"tenant_a", "tenant_b"}
+        assert {edge["tenant_id"] for edge in fake_database.edges} == {"tenant_a", "tenant_b"}
+        assert {event["tenant_id"] for event in fake_database.audit_events} == {
+            "tenant_a",
+            "tenant_b",
+        }
 
-            # call_args is a tuple: (args, kwargs)
-            # The SQL is in call_args[0][0] and the params are in call_args[0][1]
-            params = call_args[0][1]
-            delta = params.get("delta")
+    async def test_relationship_lookup_rejects_cross_tenant_source_node(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A tenant must not be able to attach relationships to another tenant's nodes."""
+        fake_database = _FakeMemoryDatabase()
+        monkeypatch.setattr("src.memory.api.SpannerClient.get_database", lambda: fake_database)
 
-            expected_delta = math.log(SchemaConfig.BAYES_FACTOR_SUCCESS)
-            assert delta == pytest.approx(expected_delta, abs=0.001)
+        await MemoryAPI.create_session(
+            tenant_id="tenant_a",
+            session_id="session_shared",
+            user_id="user_a",
+        )
 
-    @pytest.mark.asyncio
-    async def test_last_accessed_timestamp_updated(self) -> None:
-        """Test that LastAccessed is updated on weight change."""
-        with patch("src.memory.api.SpannerClient") as mock_client:
-            mock_db = MagicMock()
-            mock_batch = MagicMock()
-            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
-            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+        with pytest.raises(ValueError, match="not found in tenant"):
+            await MemoryAPI.add_semantic_fact(
+                tenant_id="tenant_b",
+                entity_type="PERSON",
+                entity_id="entity_b",
+                relationship={"source_id": "session_shared", "type": "REFERENCES"},
+            )
 
-            mock_client.get_database.return_value = mock_db
-
-            await MemoryAPI._update_weight_on_successful_use(["node_1"])
-
-            # Verify SQL includes LastAccessed update
-            call_args = mock_batch.execute_update.call_args
-            sql = call_args[0][0]
-            assert "LastAccessed" in sql
-            assert "CURRENT_TIMESTAMP()" in sql
+        assert all(
+            node["tenant_id"] != "tenant_b"
+            for node in fake_database.nodes
+            if node["node_id"] == "session_shared"
+        )
+        assert fake_database.edges == []

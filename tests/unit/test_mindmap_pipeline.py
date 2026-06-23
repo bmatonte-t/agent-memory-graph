@@ -16,11 +16,14 @@ from src.memory.mindmap_pipeline import (
     SpannerAggregationAdapter,
     VertexMiningAdapter,
 )
+from src.models.evidence import EvidenceContext, EvidenceItem, EvidenceSourceType
 from src.models.mindmap import (
     AggregationResult,
     EvidenceEdge,
     EvidencePath,
     MindMapTrace,
+    MinedEntity,
+    MiningResult,
     PipelineErrorCode,
     PipelineStage,
     SerializationResult,
@@ -41,6 +44,7 @@ class TestMindMapPipeline:
 
         async def fake_record_audit_event(**_: object) -> AuditResponse:
             return AuditResponse(
+                tenant_id="tenant_mindmap",
                 event_id="audit_test",
                 event_type="MINDMAP_EXECUTION",
                 timestamp=datetime.now(UTC),
@@ -107,11 +111,13 @@ class TestMindMapPipeline:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Spanner adapter should issue graph-style traversal query with bounded hops."""
-        captured: dict[str, object] = {}
+        captured_sql: str | None = None
+        captured_params: dict[str, object] | None = None
 
         def fake_execute_sql(sql: str, params: dict[str, object]) -> list[tuple[str, ...]]:
-            captured["sql"] = sql
-            captured["params"] = params
+            nonlocal captured_sql, captured_params
+            captured_sql = sql
+            captured_params = params
             return []
 
         monkeypatch.setattr(
@@ -122,8 +128,10 @@ class TestMindMapPipeline:
 
         await pipeline.execute(query="Explain alpha dependency")
 
-        sql = str(captured["sql"])
-        params = dict(captured["params"])
+        assert captured_sql is not None
+        assert captured_params is not None
+        sql = captured_sql
+        params = captured_params
         assert "GRAPH MemoryGraph" in sql
         assert "MemoryEdge*1..4" in sql
         assert "m.MemoryTier IN ('SEMANTIC', 'CONTEXT')" in sql
@@ -157,6 +165,8 @@ class TestMindMapPipeline:
                 trace: MindMapTrace,
                 query: str,
                 session_id: str | None,
+                tenant_id: str | None,
+                authorization_scope: object | None = None,
             ) -> None:
                 """Capture trace metadata in memory.
 
@@ -164,8 +174,10 @@ class TestMindMapPipeline:
                     trace: Trace payload from pipeline.
                     query (str): Original query.
                     session_id (str | None): Session identifier.
+                    tenant_id (str | None): Tenant identifier.
+                    authorization_scope (object | None): Optional auth scope.
                 """
-                del query, session_id
+                del query, session_id, tenant_id, authorization_scope
                 self.calls += 1
                 self.latest_trace_id = trace.trace_id
 
@@ -187,16 +199,22 @@ class TestMindMapPipeline:
                 self,
                 *,
                 serialization_result: SerializationResult,
+                mining_result: object,
+                tenant_id: str | None = None,
+                evidence_context: object | None = None,
             ) -> SynthesisResult:
                 """Emit invalid claim IDs to verify fail-closed grounding behavior.
 
                 Args:
                     serialization_result: Serialized evidence output.
+                    mining_result: Mined entities (unused).
+                    tenant_id: Tenant ID (unused).
+                    evidence_context: Evidence context (unused).
 
                 Returns:
                     SynthesisResult: Invalid synthesized result.
                 """
-                del serialization_result
+                del serialization_result, mining_result, tenant_id, evidence_context
                 return SynthesisResult(
                     response_text="Invalid grounded response",
                     claim_fact_ids=["fact_does_not_exist"],
@@ -262,6 +280,12 @@ class TestMindMapPipeline:
             latency_ms=0.0,
         )
 
+        mining_result = MiningResult(
+            intent="information_lookup",
+            entities=[],
+            latency_ms=0.0,
+        )
+
         with (
             patch("builtins.__import__", side_effect=ImportError("No module")),
             pytest.raises(
@@ -269,7 +293,10 @@ class TestMindMapPipeline:
                 match="google-generativeai is required for vertex synthesis",
             ) as error,
         ):
-            pipeline._synthesize_with_vertex(serialization_result=serialization_result)
+            pipeline._synthesize_with_vertex(
+                serialization_result=serialization_result,
+                mining_result=mining_result,
+            )
 
         assert error.value.stage == PipelineStage.SYNTHESIZE
         assert error.value.code == PipelineErrorCode.MODEL_ERROR
@@ -279,8 +306,203 @@ class TestMindMapPipeline:
         pipeline = MindMapPipeline(config=MindMapConfig(use_vertex_synthesis=True))
         serialization_result = SerializationResult(facts=[], markdown="", latency_ms=0.0)
 
-        result = pipeline._synthesize_with_vertex(serialization_result=serialization_result)
+        mining_result = MiningResult(
+            intent="information_lookup",
+            entities=[],
+            latency_ms=0.0,
+        )
+
+        result = pipeline._synthesize_with_vertex(
+            serialization_result=serialization_result,
+            mining_result=mining_result,
+        )
 
         assert result.response_text == MindMapPipeline.INSUFFICIENT_EVIDENCE_RESPONSE
         assert result.claim_fact_ids == []
         assert result.grounded is True
+
+    async def test_synthesize_soft_signals_low_confidence_and_contradictions(self) -> None:
+        """Soft gating should keep the response but annotate low-confidence evidence."""
+        pipeline = MindMapPipeline(
+            config=MindMapConfig(
+                confidence_threshold=0.3,
+                synthesis_gating_mode="soft_signal",
+                enable_contradiction_detection=True,
+            )
+        )
+        serialization_result = SerializationResult(
+            facts=[
+                SerializedFact(
+                    fact_id="fact_1",
+                    statement="FACT 1: (patient) -[has_symptom:0.80]-> (fever)",
+                    path_id="path_1",
+                    edge_ids=["edge_1"],
+                    rel_type="has_symptom",
+                    weight=0.80,
+                )
+            ],
+            markdown="FACT 1: (patient) -[has_symptom:0.80]-> (fever)",
+            latency_ms=0.0,
+        )
+        mining_result = MiningResult(
+            intent="information_lookup",
+            entities=[MinedEntity(entity_id="patient", entity_type="OBJECT", confidence=0.90)],
+            latency_ms=0.0,
+        )
+        evidence_context = EvidenceContext(
+            items=[
+                EvidenceItem(
+                    evidence_id="evid_1",
+                    source_type=EvidenceSourceType.PATH_BASED,
+                    evidence_number=1,
+                    graph_path="patient->has_symptom->fever",
+                    serialized_form="patient->has_symptom->fever",
+                    access_timestamp=datetime.now(UTC),
+                    source_confidence_score=0.1,
+                    contradiction_flags=["high:node_1"],
+                )
+            ],
+            total_items=1,
+            path_count=1,
+            neighbor_count=0,
+            is_empty=False,
+            is_sufficient=True,
+            retrieval_latency_ms=1.0,
+        )
+
+        result = pipeline._synthesize(
+            serialization_result=serialization_result,
+            mining_result=mining_result,
+            tenant_id="tenant-123",
+            evidence_context=evidence_context,
+        )
+
+        assert result.response_text.startswith("Grounded summary:")
+        assert "Phase 5 confidence signal" in result.response_text
+        assert result.confidence_signal is not None
+        assert result.confidence_signal.gating_applied == "soft_signal"
+        assert result.confidence_score == result.confidence_signal.response_confidence_score
+        assert result.contradiction_warnings
+
+    async def test_synthesize_hard_rejects_low_confidence_evidence(self) -> None:
+        """Hard gating should return explicit insufficiency for low-confidence evidence."""
+        pipeline = MindMapPipeline(
+            config=MindMapConfig(
+                confidence_threshold=0.3,
+                synthesis_gating_mode="hard_reject",
+                enable_contradiction_detection=True,
+            )
+        )
+        serialization_result = SerializationResult(
+            facts=[
+                SerializedFact(
+                    fact_id="fact_1",
+                    statement="FACT 1: (patient) -[has_symptom:0.80]-> (fever)",
+                    path_id="path_1",
+                    edge_ids=["edge_1"],
+                    rel_type="has_symptom",
+                    weight=0.80,
+                )
+            ],
+            markdown="FACT 1: (patient) -[has_symptom:0.80]-> (fever)",
+            latency_ms=0.0,
+        )
+        mining_result = MiningResult(
+            intent="information_lookup",
+            entities=[MinedEntity(entity_id="patient", entity_type="OBJECT", confidence=0.90)],
+            latency_ms=0.0,
+        )
+        evidence_context = EvidenceContext(
+            items=[
+                EvidenceItem(
+                    evidence_id="evid_1",
+                    source_type=EvidenceSourceType.PATH_BASED,
+                    evidence_number=1,
+                    graph_path="patient->has_symptom->fever",
+                    serialized_form="patient->has_symptom->fever",
+                    access_timestamp=datetime.now(UTC),
+                    source_confidence_score=0.1,
+                    contradiction_flags=["high:node_1"],
+                )
+            ],
+            total_items=1,
+            path_count=1,
+            neighbor_count=0,
+            is_empty=False,
+            is_sufficient=True,
+            retrieval_latency_ms=1.0,
+        )
+
+        result = pipeline._synthesize(
+            serialization_result=serialization_result,
+            mining_result=mining_result,
+            tenant_id="tenant-123",
+            evidence_context=evidence_context,
+        )
+
+        assert result.response_text == MindMapPipeline.INSUFFICIENT_EVIDENCE_RESPONSE
+        assert result.claim_fact_ids == []
+        assert result.confidence_signal is not None
+        assert result.confidence_signal.gating_applied == "hard_reject"
+
+    async def test_vertex_synthesis_hard_rejects_low_confidence_evidence(self) -> None:
+        """Vertex synthesis should short-circuit before model invocation when hard gated."""
+        pipeline = MindMapPipeline(
+            config=MindMapConfig(
+                use_vertex_synthesis=True,
+                confidence_threshold=0.3,
+                synthesis_gating_mode="hard_reject",
+                enable_contradiction_detection=True,
+            )
+        )
+        serialization_result = SerializationResult(
+            facts=[
+                SerializedFact(
+                    fact_id="fact_1",
+                    statement="FACT 1: (patient) -[has_symptom:0.80]-> (fever)",
+                    path_id="path_1",
+                    edge_ids=["edge_1"],
+                    rel_type="has_symptom",
+                    weight=0.80,
+                )
+            ],
+            markdown="FACT 1: (patient) -[has_symptom:0.80]-> (fever)",
+            latency_ms=0.0,
+        )
+        mining_result = MiningResult(
+            intent="information_lookup",
+            entities=[MinedEntity(entity_id="patient", entity_type="OBJECT", confidence=0.90)],
+            latency_ms=0.0,
+        )
+        evidence_context = EvidenceContext(
+            items=[
+                EvidenceItem(
+                    evidence_id="evid_1",
+                    source_type=EvidenceSourceType.PATH_BASED,
+                    evidence_number=1,
+                    graph_path="patient->has_symptom->fever",
+                    serialized_form="patient->has_symptom->fever",
+                    access_timestamp=datetime.now(UTC),
+                    source_confidence_score=0.1,
+                    contradiction_flags=["high:node_1"],
+                )
+            ],
+            total_items=1,
+            path_count=1,
+            neighbor_count=0,
+            is_empty=False,
+            is_sufficient=True,
+            retrieval_latency_ms=1.0,
+        )
+
+        result = pipeline._synthesize_with_vertex(
+            serialization_result=serialization_result,
+            mining_result=mining_result,
+            tenant_id="tenant-123",
+            evidence_context=evidence_context,
+        )
+
+        assert result.response_text == MindMapPipeline.INSUFFICIENT_EVIDENCE_RESPONSE
+        assert result.claim_fact_ids == []
+        assert result.confidence_signal is not None
+        assert result.confidence_signal.gating_applied == "hard_reject"

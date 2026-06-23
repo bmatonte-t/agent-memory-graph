@@ -57,6 +57,7 @@ class TestAgentConcurrency:
             started = time.perf_counter()
             response = await orchestrator.respond(
                 AgentOrchestrationRequest(
+                    tenant_id="tenant_perf",
                     prompt=f"prompt_{index}",
                     session_id=f"session_{index}",
                     request_id=f"request_{index}",

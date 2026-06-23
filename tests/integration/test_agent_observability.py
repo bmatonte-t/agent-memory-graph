@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 from unittest.mock import AsyncMock
 
 from src.agent.orchestrator import AgentOrchestrator
-from src.mcp import service as mcp_module
 from src.mcp.service import MCPToolService
 from src.models.agent import AgentOrchestrationRequest
 
@@ -27,7 +26,13 @@ class TestAgentObservability:
         """Request IDs should appear in orchestrator and MCP log records."""
 
         class FakePipeline:
-            async def execute(self, query: str, session_id: str | None) -> object:
+            async def execute(
+                self,
+                query: str,
+                session_id: str | None,
+                tenant_id: str | None = None,
+                authorization_scope: object | None = None,
+            ) -> object:
                 return type(
                     "MindMapResponseStub",
                     (),
@@ -44,10 +49,12 @@ class TestAgentObservability:
         async def fake_add_fact(*args: object, **kwargs: object) -> object:
             return {"fact_id": "not_used"}
 
-        monkeypatch.setattr(mcp_module.MemoryAPI, "add_semantic_fact", fake_add_fact)
         monkeypatch.setattr(
-            mcp_module.MemoryAPI,
-            "record_audit_event",
+            "src.memory.api.MemoryAPI.add_semantic_fact",
+            fake_add_fact,
+        )
+        monkeypatch.setattr(
+            "src.memory.api.MemoryAPI.record_audit_event",
             AsyncMock(
                 return_value=type(
                     "AuditResponseStub", (), {"model_dump": lambda self, mode: {"event_id": "e1"}}
@@ -55,13 +62,16 @@ class TestAgentObservability:
             ),
         )
         monkeypatch.setattr(
-            mcp_module.MemoryAPI,
-            "retrieve_context_window",
+            "src.memory.api.MemoryAPI.retrieve_context_window",
             AsyncMock(
                 return_value=type(
                     "ContextResponseStub", (), {"model_dump": lambda self, mode: {"turns": []}}
                 )()
             ),
+        )
+        monkeypatch.setattr(
+            "src.memory.api.MemoryAPI._increment_session_action_count",
+            lambda *_: None,
         )
 
         orchestrator = AgentOrchestrator(mcp_tool_service=mcp_service)
@@ -70,6 +80,7 @@ class TestAgentObservability:
         request_id = "request_obs_1"
         response = await orchestrator.respond(
             AgentOrchestrationRequest(
+                tenant_id="tenant_obs",
                 prompt="hello",
                 session_id="session_obs",
                 request_id=request_id,

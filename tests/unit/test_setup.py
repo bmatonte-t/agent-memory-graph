@@ -51,10 +51,13 @@ class TestProjectSetup:
     def test_pydantic_models_import(self) -> None:
         """Test that Pydantic models can be imported."""
         # Verify all models can be instantiated
-        session = SessionResponse(session_id="test", created_at=datetime.now(UTC))
+        session = SessionResponse(
+            tenant_id="tenant_test", session_id="test", created_at=datetime.now(UTC)
+        )
         assert session.session_id == "test"
 
         fact = FactResponse(
+            tenant_id="tenant_test",
             entity_id="test",
             entity_type="PERSON",
             node_path="/test",
@@ -62,9 +65,13 @@ class TestProjectSetup:
         )
         assert fact.entity_type == "PERSON"
 
-        audit = AuditResponse(event_id="test", event_type="TEST", timestamp=datetime.now(UTC))
+        audit = AuditResponse(
+            tenant_id="tenant_test", event_id="test", event_type="TEST", timestamp=datetime.now(UTC)
+        )
         assert audit.event_type == "TEST"
 
-        context = ContextResponse(session_id="test", turns=[], retrieved_at=datetime.now(UTC))
+        context = ContextResponse(
+            tenant_id="tenant_test", session_id="test", turns=[], retrieved_at=datetime.now(UTC)
+        )
         assert context.session_id == "test"
         assert len(context.turns) == 0

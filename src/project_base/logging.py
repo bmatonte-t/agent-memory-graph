@@ -9,9 +9,11 @@ from copy import copy
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from asgi_correlation_id import CorrelationIdFilter
+
+from src.integrations.google_sdk_wrappers import install_cloud_logging_handler
 
 from .constants import PACKAGE_NAME
 from .paths import LOGS, PACKAGE
@@ -21,7 +23,7 @@ if TYPE_CHECKING:
     from types import TracebackType
     from typing import TextIO
 
-    from .settings.models import Logging
+    from .settings.models import CloudLogging, Logging
 
 
 class CorrelationIdFormatter(logging.Formatter):
@@ -122,7 +124,11 @@ class LoggingConfiguration:
     def __init__(self) -> None:
         self._is_configured = False
 
-    def configure_logging(self, configuration: Logging) -> None:
+    def configure_logging(
+        self,
+        configuration: Logging,
+        cloud_logging: CloudLogging | None = None,
+    ) -> None:
         """Configures the logging for the application. This function should only be run once.
 
         Just use the common pattern
@@ -150,6 +156,9 @@ class LoggingConfiguration:
         Args:
             configuration: The logging configuration to use. See documentation in the `Logging`
                 model for more details on the available settings.
+            cloud_logging: Optional Cloud Logging configuration. When provided and `enabled` is
+                `True`, attaches a Cloud Logging handler that exports structured JSON logs to
+                Google Cloud Logging. Defaults to None (no Cloud Logging).
         """
         if self._is_configured:
             warnings.warn(
@@ -204,10 +213,49 @@ class LoggingConfiguration:
         self._install_warnings_hook()
         self._install_exception_hook()
 
+        if cloud_logging is not None and cloud_logging.enabled:
+            self._install_cloud_logging_handler(
+                project_id=cloud_logging.project_id,
+                labels=dict(cloud_logging.labels),
+                log_level=configuration.log_level,
+            )
+
         logger.debug("========== NEW EXECUTION ==========")
         logger.debug("Logging configured.")
 
         self._is_configured = True
+
+    @staticmethod
+    def _install_cloud_logging_handler(
+        project_id: str | None,
+        labels: dict[str, str],
+        log_level: str,
+    ) -> None:
+        """Attach a Cloud Logging handler to the root Python logger.
+
+        The handler exports structured JSON log entries to Google Cloud Logging.
+        Falls back gracefully with a warning when the client library is unavailable or
+        authentication fails.
+
+        Args:
+            project_id: GCP project identifier. When None, falls back to ADC project.
+            labels: Resource labels attached to every exported log entry.
+            log_level: Minimum log level to export to Cloud Logging.
+        """
+        del labels
+        try:
+            handler = cast(logging.Handler, install_cloud_logging_handler(project_id, log_level))
+            root_logger = logging.getLogger()
+            root_logger.addHandler(handler)
+            logger.info(
+                "cloud_logging_handler_installed project=%s",
+                project_id or "(from ADC)",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "cloud_logging_handler_unavailable reason=%s",
+                exc,
+            )
 
     @staticmethod
     def _install_warnings_hook() -> None:
