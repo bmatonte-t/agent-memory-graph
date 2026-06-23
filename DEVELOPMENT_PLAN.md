@@ -27,10 +27,10 @@ This document keeps v0.1 as the completed foundation and defines the development
 - **Phase 0**: Conditionally Ready — Policy contracts defined, but runtime/documentation consistency gaps remain.
 - **Phase 1**: ✅ Ready — Action-scaled weighting implemented; action-count consistency fixed (Blocker #5 resolved).
 - **Phase 2**: ✅ Ready — Retry/backoff and idempotency coverage complete for all mutation paths (Blocker #4 resolved).
-- **Phase 3**: Conditionally Ready — Core deny-by-default present, but dispatch audit logging incomplete.
+- **Phase 3**: ✅ Ready — Core deny-by-default present; dispatch audit logging with reason codes operational (Blocker #6 resolved).
 - **Phase 4**: ✅ Ready — Tenant-isolation fixed (Blocker #1); graph-backed aggregation now default (Blocker #2); cross-tenant test added.
 - **Phase 5**: ✅ Ready — Freshness gating now operational (Blocker #3); confidence and contradiction handling in place.
-- **Phase 6**: Blocked — Awaiting completion of Blockers #6 (dispatch audit), #7 (policy docs), #8 (operational query).
+- **Phase 6**: Blocked — Awaiting completion of Blockers #7 (policy docs), #8 (operational query).
 
 ## Critical Blockers (Phase Gate Holds)
 
@@ -72,16 +72,16 @@ The following must be fixed before declaring phases 0-5 ready for production dep
    - Previously only `_memory_search` incremented (only when `request.session_id is not None`); now all handlers participate
    - Date Fixed: 2026-06-23
 
-6. **Missing Dispatch Authorization Audit** [src/mcp/service.py:237-286]
-   Dispatch enforce deny-by-default but does not log grant/deny decisions with reason codes. Must add audit entries at MCP dispatch boundary with explicit reason codes (e.g., "AUTHORIZED_AGENT_SCOPE", "DENIED_NODE_ID_NOT_ALLOWED").
+✅ **Blocker #6: Missing Dispatch Authorization Audit** [RESOLVED]
+   - Added `AuthorizationDecision` dataclass with explicit reason_code field for auditability
+   - Refactored `_authorize_request()` to return decision objects instead of raising exceptions
+   - Implemented dual audit logging at MCP dispatch boundary: `MCP_AUTHORIZATION_GRANTED` and `MCP_AUTHORIZATION_DENIED`
+   - Reason codes track grant/denial reason: "AUTHORIZED_AGENT_SCOPE", "DENIED_SESSION_NOT_ALLOWED", "DENIED_NODE_ID_NOT_ALLOWED", "DENIED_AUDIT_ACCESS_NOT_ALLOWED", "DENIED_UNSUPPORTED_TOOL", "MISSING_AUTHORIZATION_SCOPE", "AUTHORIZATION_DISABLED"
+   - Audit logging non-blocking: failures don't prevent dispatch
+   - Added test coverage for dual audit event tracking (src/mcp/service.py:111-175; tests/unit/test_mcp_service.py:156-161)
+   - Date Fixed: 2026-06-24
 
-7. **Incomplete Policy Documentation** [src/security/governance.py:62; docs/operations/phase3-abac-enforcement-guide.md:137]
-   ABAC semantics inconsistent between runtime and documentation. Must align documentation with actual runtime behavior for empty restrictions (deny vs. unrestricted).
-
-8. **Unimplemented Operational Query** [src/memory/evidence_service.py:253-280]
-   `get_evidence_context_for_tenant()` is a stub. Must implement for operational phase 4/5 diagnostics.
-
-### Completed v0.1 Baseline
+**Remaining Blockers (2 of 8)**:
 
 - Tripartite memory model, schema, and audit trail foundation.
 - Grounded MindMap retrieval and synthesis with traceability.
