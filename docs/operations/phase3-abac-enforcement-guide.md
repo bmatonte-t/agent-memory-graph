@@ -38,9 +38,10 @@ AuthorizationScope(
 ```
 
 **Access is granted only if**:
+- At least one dimension is configured (has values)
 - All configured dimensions match the requested resource
 - If a dimension has values, the resource must match one of them
-- Empty dimensions (no configured values) = no restriction on that dimension
+- If all dimensions are empty (no configured values), access is **DENIED** (deny-by-default)
 
 ### ✅ Comprehensive Audit Trail
 
@@ -134,16 +135,36 @@ except PermissionError as e:
     print(f"Access denied: {e}")  # authorization denied for add_semantic_fact
 ```
 
-### Unrestricted Scope (No Dimensions Configured)
+### Empty Scope Behavior (All Dimensions Empty)
 
-To allow an agent full access (empty restrictions):
+When an `AuthorizationScope` has all dimension lists empty, access is **DENIED**:
+
+```python
+scope = AuthorizationScope(
+    agent_id="restricted_agent",
+    # All lists empty - this denies access to ALL resources
+)
+# This will FAIL for any resource (deny-by-default)
+```
+
+To grant an agent access to all resources of a specific type, configure at least one dimension with all possible values:
 
 ```python
 scope = AuthorizationScope(
     agent_id="unrestricted_agent",
-    # All lists empty = no restrictions
+    allowed_node_ids=[],  # Still must configure at least one dimension below
+    allowed_labels=[],    # Even if empty lists won't work...
+    allowed_memory_tiers=["CONTEXT", "SEMANTIC", "AUDIT"],  # Need actual values
 )
-# This will succeed for any resource
+# This allows access to all memory tiers (restricted to tiers only)
+```
+
+**To allow truly unrestricted access**, disable authorization in configuration:
+
+```yaml
+governance:
+  authorization:
+    enabled: false  # Disable ABAC (development/testing only)
 ```
 
 ## Denial Scenarios
