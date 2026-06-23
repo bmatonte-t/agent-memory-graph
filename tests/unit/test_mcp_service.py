@@ -14,6 +14,8 @@ from src.models.mcp import MCPInvokeRequest, MCPToolName
 from src.models.mindmap import MindMapResponse, MindMapTrace, StageTiming, SynthesisResult
 from src.models.schemas import AuditResponse, ContextResponse, FactResponse
 
+EXPECTED_AUDIT_CALLS_WITH_AUTH = 2  # 1 for authorization granted + 1 for operation
+
 
 class TestMCPToolService:
     """Contract tests for tenant propagation through MCP tools."""
@@ -153,13 +155,14 @@ class TestMCPToolService:
         )
 
         assert response.success is True
-        mock_record.assert_awaited_once_with(
-            tenant_id="tenant_a",
-            event_type="AGENT_REASONING_STEP",
-            source_node_id="sess_1",
-            context={"step": "mine"},
-            authorization_scope=None,
-        )
+        assert mock_record.await_count == EXPECTED_AUDIT_CALLS_WITH_AUTH
+        # Second call should be the actual trace logging
+        calls = mock_record.call_args_list
+        trace_call = calls[1]
+        assert trace_call.kwargs["tenant_id"] == "tenant_a"
+        assert trace_call.kwargs["event_type"] == "AGENT_REASONING_STEP"
+        assert trace_call.kwargs["source_node_id"] == "sess_1"
+        assert trace_call.kwargs["context"] == {"step": "mine"}
 
     async def test_memory_recall_context_passes_tenant_to_memory_api(
         self,

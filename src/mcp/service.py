@@ -42,6 +42,15 @@ class MCPToolServiceError(RuntimeError):
 
 
 @dataclass(slots=True)
+class AuthorizationDecision:
+    """Authorization decision with explicit reason code for audit trail."""
+
+    allowed: bool
+    reason_code: str  # e.g., AUTHORIZED_AGENT_SCOPE, DENIED_NODE_ID_NOT_ALLOWED
+    details: str | None = None  # Optional details for logging
+
+
+@dataclass(slots=True)
 class MCPToolService:
     """Service that exposes memory capabilities as MCP tools."""
 
@@ -99,7 +108,30 @@ class MCPToolService:
                 },
             )
             try:
-                self._authorize_request(request)
+                auth_decision = self._authorize_request(request)
+                if not auth_decision.allowed:
+                    error_msg = f"authorization denied: {auth_decision.reason_code}"
+                    raise PermissionError(error_msg)  # noqa: TRY301
+
+                # Audit log: authorization granted
+                try:
+                    await MemoryAPI.record_audit_event(
+                        tenant_id=request.tenant_id,
+                        event_type="MCP_AUTHORIZATION_GRANTED",
+                        source_node_id=request.authorization_scope.agent_id
+                        if request.authorization_scope
+                        else "unknown",
+                        context={
+                            "tool_name": str(request.tool_name),
+                            "reason_code": auth_decision.reason_code,
+                            "details": auth_decision.details or "",
+                            "session_id": request.session_id or "",
+                            "request_id": request.request_id or "",
+                        },
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Failed to audit MCP_AUTHORIZATION_GRANTED: %s", e)
+
                 if request.tool_name == MCPToolName.MEMORY_SEARCH:
                     result = await self._memory_search(request)
                 elif request.tool_name == MCPToolName.MEMORY_ADD_FACT:
@@ -157,6 +189,28 @@ class MCPToolService:
                 )
                 return response
             except PermissionError as error:
+                # Audit log: authorization denied
+                try:
+                    auth_context = request.arguments.copy() if request.arguments else {}
+                    auth_context.update(
+                        {
+                            "tool_name": str(request.tool_name),
+                            "reason_code": str(error).split(": ")[-1]
+                            if ": " in str(error)
+                            else "DENIED_UNKNOWN",
+                        }
+                    )
+                    await MemoryAPI.record_audit_event(
+                        tenant_id=request.tenant_id,
+                        event_type="MCP_AUTHORIZATION_DENIED",
+                        source_node_id=request.authorization_scope.agent_id
+                        if request.authorization_scope
+                        else "unknown",
+                        context=auth_context,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning("Failed to audit MCP_AUTHORIZATION_DENIED: %s", e)
+
                 token_usage = self._estimate_token_usage(
                     arguments=request.arguments,
                     result=None,
@@ -255,27 +309,51 @@ class MCPToolService:
         )
 
     @staticmethod
-    def _authorize_request(request: MCPInvokeRequest) -> None:
-        """Enforce deny-by-default authorization before tool dispatch."""
+    def _authorize_request(
+        request: MCPInvokeRequest,
+    ) -> AuthorizationDecision:
+        """Evaluate authorization decision with explicit reason code.
+
+        Args:
+            request: Tool invocation request.
+
+        Returns:
+            AuthorizationDecision with allowed status and reason code.
+        """
         from src.project_base.settings import settings  # noqa: PLC0415
 
-        scope_required_message = "authorization scope is required"
-        denied_request_message = "authorization denied for request"
-
         if not settings.governance.authorization.enabled:
-            return
+            return AuthorizationDecision(
+                allowed=True,
+                reason_code="AUTHORIZATION_DISABLED",
+                details="Authorization enforcement not enabled",
+            )
 
         scope = request.authorization_scope
         if scope is None:
-            raise PermissionError(scope_required_message)
+            return AuthorizationDecision(
+                allowed=False,
+                reason_code="MISSING_AUTHORIZATION_SCOPE",
+                details="No authorization scope provided in request",
+            )
+
+        node_id: str | None = None
+        allowed = False
+        reason = "DENIED_UNKNOWN"
+        details = ""
 
         if request.tool_name == MCPToolName.MEMORY_SEARCH:
+            node_id = request.session_id or request.arguments.get("session_id")
             allowed = scope.allows_resource(
-                node_id=request.session_id or request.arguments.get("session_id"),
+                node_id=node_id,
                 label="Session",
                 memory_tier="CONTEXT",
             )
-        elif request.tool_name == MCPToolName.MEMORY_ADD_FACT:
+            reason = "AUTHORIZED_AGENT_SCOPE" if allowed else "DENIED_SESSION_NOT_ALLOWED"
+            details = f"session_id={node_id}"
+        if request.tool_name == MCPToolName.MEMORY_ADD_FACT:
+            entity_id = request.arguments.get("entity_id")
+            entity_type = request.arguments.get("entity_type")
             relationship = request.arguments.get("relationship")  # type: ignore[arg-type]
             rel_type: str | None = None
             if isinstance(relationship, dict):
@@ -283,28 +361,49 @@ class MCPToolService:
                 if validated_relationship is not None:
                     rel_type = validated_relationship.get("type")
             allowed = scope.allows_resource(
-                node_id=request.arguments.get("entity_id"),
-                label=request.arguments.get("entity_type"),
+                node_id=entity_id,
+                label=entity_type,
                 memory_tier="SEMANTIC",
                 relationship_type=rel_type,
             )
-        elif request.tool_name == MCPToolName.MEMORY_LOG_TRACE:
+            reason = "AUTHORIZED_AGENT_SCOPE" if allowed else "DENIED_NODE_ID_NOT_ALLOWED"
+            details = f"entity_id={entity_id} entity_type={entity_type}"
+        if request.tool_name == MCPToolName.MEMORY_LOG_TRACE:
+            node_id = request.session_id or request.arguments.get("source_node_id")
             allowed = scope.allows_resource(
-                node_id=request.session_id or request.arguments.get("source_node_id"),
+                node_id=node_id,
                 label="AUDIT_EVENT",
                 memory_tier="AUDIT",
             )
-        elif request.tool_name == MCPToolName.MEMORY_RECALL_CONTEXT:
+            reason = "AUTHORIZED_AGENT_SCOPE" if allowed else "DENIED_AUDIT_ACCESS_NOT_ALLOWED"
+            details = f"source_node_id={node_id}"
+        if request.tool_name == MCPToolName.MEMORY_RECALL_CONTEXT:
+            node_id = request.session_id or request.arguments.get("session_id")
             allowed = scope.allows_resource(
-                node_id=request.session_id or request.arguments.get("session_id"),
+                node_id=node_id,
                 label="Session",
                 memory_tier="CONTEXT",
             )
-        else:
-            allowed = False
+            reason = "AUTHORIZED_AGENT_SCOPE" if allowed else "DENIED_SESSION_NOT_ALLOWED"
+            details = f"session_id={node_id}"
 
-        if not allowed:
-            raise PermissionError(denied_request_message)
+        if request.tool_name not in (
+            MCPToolName.MEMORY_SEARCH,
+            MCPToolName.MEMORY_ADD_FACT,
+            MCPToolName.MEMORY_LOG_TRACE,
+            MCPToolName.MEMORY_RECALL_CONTEXT,
+        ):
+            return AuthorizationDecision(
+                allowed=False,
+                reason_code="DENIED_UNSUPPORTED_TOOL",
+                details=f"tool_name={request.tool_name}",
+            )
+
+        return AuthorizationDecision(
+            allowed=allowed,
+            reason_code=reason,
+            details=details,
+        )
 
     async def _memory_search(self, request: MCPInvokeRequest) -> dict[str, Any]:
         """Invoke the MindMap query pipeline.
