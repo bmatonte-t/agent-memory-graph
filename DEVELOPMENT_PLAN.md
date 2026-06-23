@@ -2,7 +2,7 @@
 
 **Status**: Phase planning and roadmap definition with visible progress tracking
 **Version**: v0.2 development plan
-**Last Updated**: 2026-06-23
+**Last Updated**: 2026-06-24
 **Target Launch**: Google Cloud Marketplace
 
 ## Overview
@@ -23,14 +23,14 @@ This document keeps v0.1 as the completed foundation and defines the development
 
 **v0.1**: ✅ Complete. Core memory, MindMap, MCP, and baseline hardening are in place.
 
-**v0.2 Gate Assessment (2026-06-23)**:
+**v0.2 Gate Assessment (2026-06-24)**:
 - **Phase 0**: Conditionally Ready — Policy contracts defined, but runtime/documentation consistency gaps remain.
 - **Phase 1**: ✅ Ready — Action-scaled weighting implemented; action-count consistency fixed (Blocker #5 resolved).
-- **Phase 2**: Not Ready — Retry/backoff and idempotency coverage partial for mutation paths.
+- **Phase 2**: ✅ Ready — Retry/backoff and idempotency coverage complete for all mutation paths (Blocker #4 resolved).
 - **Phase 3**: Conditionally Ready — Core deny-by-default present, but dispatch audit logging incomplete.
 - **Phase 4**: ✅ Ready — Tenant-isolation fixed (Blocker #1); graph-backed aggregation now default (Blocker #2); cross-tenant test added.
 - **Phase 5**: ✅ Ready — Freshness gating now operational (Blocker #3); confidence and contradiction handling in place.
-- **Phase 6**: Blocked — Awaiting completion of Blockers #4 (retry/idempotency), #6 (dispatch audit), #7 (policy docs), #8 (operational query).
+- **Phase 6**: Blocked — Awaiting completion of Blockers #6 (dispatch audit), #7 (policy docs), #8 (operational query).
 
 ## Critical Blockers (Phase Gate Holds)
 
@@ -53,10 +53,17 @@ The following must be fixed before declaring phases 0-5 ready for production dep
    - Synthesis now gates on `config.freshness_threshold`; responses explicitly signal low-freshness evidence
    - Date Fixed: 2026-06-23
 
-**Remaining Blockers (4 of 8)**:
+**Remaining Blockers (3 of 8)**:
 
-4. **Incomplete Retry/Idempotency Coverage** [src/memory/api.py:265-316, 452, 913]
-   Only weight updates use retry/backoff. Must extend to all critical mutations (`create_session`, `add_semantic_fact`, audit writes). Must validate no duplicate side effects with real persistence tests.
+4. **Incomplete Retry/Idempotency Coverage** [RESOLVED]
+   - Extended async_retry_with_backoff with IdempotencyContext from weight updates to ALL critical mutations
+   - Refactored create_session to use _do_create_session_batch helper wrapped with retry/backoff (src/memory/api.py:265-390)
+   - Refactored add_semantic_fact to use _do_add_semantic_fact_batch helper wrapped with retry/backoff (src/memory/api.py:394-590)
+   - Refactored record_audit_event to use _do_record_audit_event_batch helper wrapped with retry/backoff (src/memory/api.py:710-803)
+   - All three mutations now use get_retry_policy() (max 3 attempts, exponential backoff 0.25s-5.0s) with IdempotencyContext
+   - Added explicit logging for completion and exhaustion scenarios for operational visibility
+   - Transient errors (ABORTED, RESOURCE_EXHAUSTED, DEADLINE_EXCEEDED) automatically retried
+   - Date Fixed: 2026-06-24
 
 ✅ **Blocker #5: Inconsistent Action Counting** [RESOLVED]
    - Added `_resolve_session_id()` helper that normalizes resolution from `request.arguments.get("session_id") or request.session_id`
