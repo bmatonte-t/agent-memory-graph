@@ -6,7 +6,7 @@ import json
 import logging
 from dataclasses import dataclass
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 
 from src.memory.api import MemoryAPI
 from src.memory.mindmap_pipeline import MindMapPipeline, MindMapPipelineError
@@ -23,7 +23,7 @@ from src.observability.tracing import trace_span
 from src.security.validators import (
     validate_mapping,
     validate_optional_string,
-    validate_relationship,
+    validate_relationship,  # type: ignore[import-untyped]
     validate_required_string,
     validate_tenant_id,
     validate_window_size,
@@ -46,6 +46,27 @@ class MCPToolService:
     """Service that exposes memory capabilities as MCP tools."""
 
     mindmap_pipeline: MindMapPipeline
+
+    def _resolve_session_id(
+        self,
+        request: MCPInvokeRequest,
+    ) -> str | None:
+        """Resolve session identifier consistently across all handlers.
+
+        Normalizes session_id resolution to support both:
+        - request.session_id (direct header)
+        - request.arguments.get("session_id") (argument payload)
+
+        Args:
+            request: Tool invocation request.
+
+        Returns:
+            str | None: Resolved session identifier, or None if not provided.
+        """
+        return validate_optional_string(
+            request.arguments.get("session_id") or request.session_id,
+            field_name="session_id",
+        )
 
     async def invoke(self, request: MCPInvokeRequest) -> MCPInvokeResponse:
         """Invoke a supported tool and return a typed response.
@@ -255,8 +276,12 @@ class MCPToolService:
                 memory_tier="CONTEXT",
             )
         elif request.tool_name == MCPToolName.MEMORY_ADD_FACT:
-            relationship = request.arguments.get("relationship")
-            rel_type = relationship.get("type") if isinstance(relationship, dict) else None
+            relationship = request.arguments.get("relationship")  # type: ignore[arg-type]
+            rel_type: str | None = None
+            if isinstance(relationship, dict):
+                validated_relationship = validate_relationship(cast("dict[str, Any]", relationship))
+                if validated_relationship is not None:
+                    rel_type = validated_relationship.get("type")
             allowed = scope.allows_resource(
                 node_id=request.arguments.get("entity_id"),
                 label=request.arguments.get("entity_type"),
@@ -293,10 +318,7 @@ class MCPToolService:
         try:
             tenant_id = validate_tenant_id(request.tenant_id)
             query = validate_required_string(request.arguments.get("query"), field_name="query")
-            session_id = validate_optional_string(
-                request.arguments.get("session_id") or request.session_id,
-                field_name="session_id",
-            )
+            session_id = self._resolve_session_id(request)
         except ValueError as error:
             raise MCPToolServiceError(
                 code="validation_error",
@@ -318,10 +340,11 @@ class MCPToolService:
                 retryable=False,
             ) from error
 
-        if request.session_id is not None:
-            MemoryAPI._increment_session_action_count(  # noqa: SLF001
+        # Increment action count using resolved session_id
+        if session_id is not None:
+            MemoryAPI._increment_session_action_count(  # noqa: SLF001  # type: ignore[attr-defined]
                 request.tenant_id,
-                request.session_id,
+                session_id,
             )
 
         return response.model_dump(mode="json")
@@ -350,6 +373,7 @@ class MCPToolService:
                 field_name="attributes",
             )
             relationship = validate_relationship(request.arguments.get("relationship"))
+            session_id = self._resolve_session_id(request)
         except ValueError as error:
             raise MCPToolServiceError(
                 code="validation_error",
@@ -363,8 +387,10 @@ class MCPToolService:
                 entity_id=entity_id,
                 attributes=attributes,
                 relationship=relationship,
-                session_id=request.session_id,
+                session_id=session_id,
                 authorization_scope=request.authorization_scope,
+                source_agent_id=request.agent_id if hasattr(request, "agent_id") else None,
+                source_query_id=request.request_id or None,
             )
         except ValueError as error:
             raise MCPToolServiceError(
@@ -377,6 +403,13 @@ class MCPToolService:
                 message=str(error),
                 retryable=True,
             ) from error
+
+        # Increment action count using resolved session_id
+        if session_id is not None:
+            MemoryAPI._increment_session_action_count(  # noqa: SLF001  # type: ignore[attr-defined]
+                request.tenant_id,
+                session_id,
+            )
 
         return response.model_dump(mode="json")
 
@@ -403,6 +436,7 @@ class MCPToolService:
                 request.arguments.get("source_node_id") or request.session_id,
                 field_name="source_node_id",
             )
+            session_id = self._resolve_session_id(request)
         except ValueError as error:
             raise MCPToolServiceError(
                 code="validation_error",
@@ -429,6 +463,13 @@ class MCPToolService:
                 retryable=True,
             ) from error
 
+        # Increment action count using resolved session_id if available
+        if session_id is not None:
+            MemoryAPI._increment_session_action_count(  # noqa: SLF001  # type: ignore[attr-defined]
+                request.tenant_id,
+                session_id,
+            )
+
         return response.model_dump(mode="json")
 
     async def _memory_recall_context(self, request: MCPInvokeRequest) -> dict[str, Any]:
@@ -443,7 +484,7 @@ class MCPToolService:
         try:
             tenant_id = validate_tenant_id(request.tenant_id)
             session_id = validate_required_string(
-                request.arguments.get("session_id") or request.session_id,
+                self._resolve_session_id(request),
                 field_name="session_id",
             )
             window_size = validate_window_size(request.arguments.get("window_size", 10))
@@ -471,5 +512,13 @@ class MCPToolService:
                 message=str(error),
                 retryable=True,
             ) from error
+
+        # Increment action count using resolved session_id
+        MemoryAPI._increment_session_action_count(  # noqa: SLF001  # type: ignore[attr-defined]
+            request.tenant_id,
+            session_id,
+        )
+
+        return response.model_dump(mode="json")
 
         return response.model_dump(mode="json")

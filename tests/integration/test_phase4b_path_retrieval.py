@@ -6,12 +6,17 @@ and tenant isolation for the EvidentPathFinder.
 
 from __future__ import annotations
 
+from unittest.mock import MagicMock
+
 import pytest
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
 
 from src.memory.retrieval import EvidentPathFinder, PathRetrievalError
-from src.models.evidence import EvidenceSourceType
+
+MAX_PATH_LENGTH = 5
+MAX_PATHS_DEFAULT = 5
+MAX_PATH_CHARS_DEFAULT = 1000
+MAX_PATHS_REDUCED = 2
+SMALL_CHAR_BUDGET = 100
 
 
 class TestEvidentPathFinder:
@@ -27,9 +32,9 @@ class TestEvidentPathFinder:
         """Create a path finder with mock client."""
         return EvidentPathFinder(
             client=mock_spanner_client,
-            max_path_length=5,
-            max_paths=5,
-            max_chars=1000,
+            max_path_length=MAX_PATH_LENGTH,
+            max_paths=MAX_PATHS_DEFAULT,
+            max_chars=MAX_PATH_CHARS_DEFAULT,
         )
 
     @pytest.mark.asyncio
@@ -84,7 +89,9 @@ class TestEvidentPathFinder:
         serialized = await path_finder.serialize_path(nodes, relationships)
 
         # Should fallback to concatenating entities only
-        assert "e1" in serialized and "e2" in serialized and "e3" in serialized
+        assert "e1" in serialized
+        assert "e2" in serialized
+        assert "e3" in serialized
 
     @pytest.mark.asyncio
     async def test_serialize_path_handles_missing_attributes(
@@ -113,8 +120,8 @@ class TestEvidentPathFinder:
         # connects to actual Spanner emulator
         assert hasattr(path_finder, "find_paths")
         assert callable(path_finder.find_paths)
-        assert path_finder.max_paths == 5
-        assert path_finder.max_chars == 1000
+        assert path_finder.max_paths == MAX_PATHS_DEFAULT
+        assert path_finder.max_chars == MAX_PATH_CHARS_DEFAULT
 
     @pytest.mark.asyncio
     async def test_find_paths_respects_max_paths_limit(
@@ -125,12 +132,12 @@ class TestEvidentPathFinder:
         # Create finder with max_paths=2
         finder = EvidentPathFinder(
             client=MagicMock(),
-            max_paths=2,
-            max_chars=1000,
+            max_paths=MAX_PATHS_REDUCED,
+            max_chars=MAX_PATH_CHARS_DEFAULT,
         )
 
         # Verify max_paths value is set
-        assert finder.max_paths == 2
+        assert finder.max_paths == MAX_PATHS_REDUCED
 
     @pytest.mark.asyncio
     async def test_find_paths_respects_max_chars_budget(
@@ -142,17 +149,16 @@ class TestEvidentPathFinder:
         finder = EvidentPathFinder(
             client=MagicMock(),
             max_paths=10,
-            max_chars=100,  # Very small budget
+            max_chars=SMALL_CHAR_BUDGET,  # Very small budget
         )
 
-        assert finder.max_chars == 100
+        assert finder.max_chars == SMALL_CHAR_BUDGET
 
     @pytest.mark.asyncio
     async def test_find_paths_tenant_isolation(self, path_finder: EvidentPathFinder) -> None:
         """find_paths enforces tenant isolation in WHERE clause."""
         # This test verifies that tenant_id is validated
-        with pytest.raises(ValueError):
-            # Empty tenant_id should raise ValueError
+        with pytest.raises(ValueError, match="cannot be blank"):
             await path_finder.find_paths(
                 tenant_id="",
                 start_entity_id="e1",
@@ -162,8 +168,7 @@ class TestEvidentPathFinder:
     @pytest.mark.asyncio
     async def test_find_paths_validates_entity_ids(self, path_finder: EvidentPathFinder) -> None:
         """find_paths validates entity_id parameters."""
-        with pytest.raises(ValueError):
-            # Empty entity_id should raise ValueError
+        with pytest.raises(ValueError, match="cannot be blank"):
             await path_finder.find_paths(
                 tenant_id="tenant-123",
                 start_entity_id="",
@@ -189,10 +194,8 @@ class TestEvidentPathFinder:
     ) -> None:
         """find_paths raises PathRetrievalError on database failure."""
         # Validate that PathRetrievalError is defined and catchable
-        from src.memory.retrieval import PathRetrievalError as PRE
-
-        assert PRE is not None
-        assert issubclass(PRE, Exception)
+        assert PathRetrievalError is not None
+        assert issubclass(PathRetrievalError, Exception)
 
 
 class TestPathSerializationEdgeCases:
@@ -219,9 +222,7 @@ class TestPathSerializationEdgeCases:
         nodes = [
             {
                 "NodeId": "n1",
-                "Attributes": {
-                    "entity_id": "acute_respiratory_distress_syndrome_patient"
-                },
+                "Attributes": {"entity_id": "acute_respiratory_distress_syndrome_patient"},
             },
             {
                 "NodeId": "n2",

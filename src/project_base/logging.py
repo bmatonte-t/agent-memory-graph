@@ -9,9 +9,11 @@ from copy import copy
 from datetime import UTC, datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from asgi_correlation_id import CorrelationIdFilter
+
+from src.integrations.google_sdk_wrappers import install_cloud_logging_handler
 
 from .constants import PACKAGE_NAME
 from .paths import LOGS, PACKAGE
@@ -242,15 +244,7 @@ class LoggingConfiguration:
         """
         del labels
         try:
-            import google.cloud.logging  # noqa: PLC0415
-
-            client_kwargs: dict[str, object] = {}
-            if project_id:
-                client_kwargs["project"] = project_id
-
-            client = google.cloud.logging.Client(**client_kwargs)
-            handler = client.get_default_handler()
-            handler.setLevel(log_level)
+            handler = cast(logging.Handler, install_cloud_logging_handler(project_id, log_level))
             root_logger = logging.getLogger()
             root_logger.addHandler(handler)
             logger.info(

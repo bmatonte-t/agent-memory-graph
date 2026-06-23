@@ -119,6 +119,8 @@ class TestMCPToolService:
             relationship=None,
             session_id="sess_1",
             authorization_scope=None,
+            source_agent_id=None,
+            source_query_id=None,
         )
 
     async def test_memory_log_trace_passes_tenant_to_memory_api(

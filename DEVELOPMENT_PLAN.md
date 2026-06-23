@@ -21,8 +21,44 @@ This document keeps v0.1 as the completed foundation and defines the development
 
 ## Progress Snapshot
 
-- v0.1: Complete. Core memory, MindMap, MCP, and baseline hardening are in place.
-- v0.2: Planned/in progress. Hardening, authorization, resilience, and evidence-quality work are the current focus.
+**v0.1**: ✅ Complete. Core memory, MindMap, MCP, and baseline hardening are in place.
+
+**v0.2 Gate Assessment (2026-06-23)**:
+- **Phase 0**: Conditionally Ready — Policy contracts defined, but runtime/documentation consistency gaps remain.
+- **Phase 1**: Not Ready — Action-scaled weighting and action-count consistency incomplete.
+- **Phase 2**: Not Ready — Retry/backoff and idempotency coverage partial for mutation paths.
+- **Phase 3**: Conditionally Ready — Core deny-by-default present, but dispatch audit logging incomplete.
+- **Phase 4**: Not Ready — Tenant-isolation vulnerability in neighbor retrieval; graph-backed aggregation not default.
+- **Phase 5**: Not Ready — Freshness gating not operational in synthesis decisions.
+- **Phase 6**: Blocked — Cannot begin until phases 0-5 blockers are resolved.
+
+## Critical Blockers (Phase Gate Holds)
+
+The following must be fixed before declaring phases 0-5 ready for production deployment:
+
+1. **Tenant-Safe Neighbor Enrichment** [src/memory/retrieval.py:371-381]
+   Neighbor query lacks tenant_id predicate, allowing cross-tenant data exposure. Must add tenant filter to `enrich_neighbors()` query and add cross-tenant integration test.
+
+2. **Graph-Backed Default Aggregation** [src/memory/mindmap_pipeline.py:579-654]
+   Current production path uses deterministic aggregation instead of graph traversal. Must switch to graph-first aggregation and enforce explicit insufficient-evidence response when graph yields no data.
+
+3. **Freshness Gating Not Operational** [src/memory/mindmap_pipeline.py:91, 936, 954]
+   Freshness configuration exists but is never used in synthesis decisions. Must wire `enrich_evidence_context_with_phase5()` into execute flow and gate synthesis on `config.freshness_threshold`.
+
+4. **Incomplete Retry/Idempotency Coverage** [src/memory/api.py:265-316, 452, 913]
+   Only weight updates use retry/backoff. Must extend to all critical mutations (`create_session`, `add_semantic_fact`, audit writes). Must validate no duplicate side effects with real persistence tests.
+
+5. **Inconsistent Action Counting** [src/mcp/service.py:300, 325, 370]
+   MCP tool counting only increments for `request.session_id`, not resolved session identifiers. Must normalize action counting across all successful tool paths using consistent session resolution.
+
+6. **Missing Dispatch Authorization Audit** [src/mcp/service.py:237-286]
+   Dispatch enforce deny-by-default but does not log grant/deny decisions with reason codes. Must add audit entries at MCP dispatch boundary with explicit reason codes (e.g., "AUTHORIZED_AGENT_SCOPE", "DENIED_NODE_ID_NOT_ALLOWED").
+
+7. **Incomplete Policy Documentation** [src/security/governance.py:62; docs/operations/phase3-abac-enforcement-guide.md:137]
+   ABAC semantics inconsistent between runtime and documentation. Must align documentation with actual runtime behavior for empty restrictions (deny vs. unrestricted).
+
+8. **Unimplemented Operational Query** [src/memory/evidence_service.py:253-280]
+   `get_evidence_context_for_tenant()` is a stub. Must implement for operational phase 4/5 diagnostics.
 
 ### Completed v0.1 Baseline
 
@@ -127,106 +163,162 @@ Adopt the useful parts of Engram’s confidence and contradiction handling witho
 
 ### Phase 0: Decision Freeze
 
+**Status**: Conditionally Ready
+
 **Goal**: Lock the v0.2 design so implementation stays consistent across weighting, resilience, and authorization.
 
 #### Deliverables
 
-1. Define tenant action-trigger thresholds and how they affect weighting.
-2. Define the ABAC policy model for agents and graph resources.
-3. Define transient error classification and idempotency strategy.
+1. ✅ Define tenant action-trigger thresholds and how they affect weighting. (Implemented in `WeightingTriggerPolicy`)
+2. ✅ Define the ABAC policy model for agents and graph resources. (Implemented in `AuthorizationScope` and `AuthorizationPolicy`)
+3. ✅ Define transient error classification and idempotency strategy. (Implemented in `RetryPolicy` and `IdempotencyContext`)
+
+#### Known Issues
+
+- ABAC documentation inconsistent with runtime semantics (empty restrictions). **Fix required before phase 3 deployment.**
 
 #### Success Criteria
 
-- A single canonical policy exists for weighting, authorization, and retries.
+- ✅ A single canonical policy exists for weighting, authorization, and retries.
+- 🔴 Policy documentation aligns with runtime semantics. **Blocker #7**
 
 ### Phase 1: Action-Scaled Weighting
+
+**Status**: Not Ready
 
 **Goal**: Make weighting scale with tenant activity volume.
 
 #### Deliverables
 
-1. Add config for weighting tiers and scaling strategy.
-2. Count successful agent actions in the orchestration/MCP path.
-3. Pass trigger context into weight updates for context and semantic memory.
-4. Add tests that compare high-volume and low-volume tenant behavior.
+1. ✅ Add config for weighting tiers and scaling strategy. (Implemented in `WeightingTriggerPolicy`)
+2. 🔴 Count successful agent actions in the orchestration/MCP path. (Partially implemented; action counting inconsistent across tool paths)
+3. ✅ Pass trigger context into weight updates for context and semantic memory. (Implemented via session action count)
+4. 🔴 Add tests that compare high-volume and low-volume tenant behavior. (Tests present but action counting precision is questionable)
+
+#### Known Issues
+
+- MCP action counting only increments for explicit `request.session_id`, not resolved sessions. **Blocker #5**
+- No multi-tier scaling (currently single threshold only). Implementation deferred pending blocker #5 fix.
 
 #### Success Criteria
 
-- High-volume tenants get more weighting opportunities than low-volume tenants.
+- 🔴 High-volume tenants get more weighting opportunities than low-volume tenants. **Blocked by #5**
+- 🔴 Action counting is consistent across all tool invocations. **Blocker #5**
 
 ### Phase 2: Lock Resilience
+
+**Status**: Not Ready
 
 **Goal**: Make write paths robust under contention.
 
 #### Deliverables
 
-1. Add retry/backoff around transient write failures.
-2. Add idempotency keys to mutation flows.
-3. Make weight-update failures visible and recoverable.
-4. Add contention and duplicate-request tests.
+1. 🔴 Add retry/backoff around transient write failures. (Partially implemented; only weight updates have retry/backoff)
+2. 🔴 Add idempotency keys to mutation flows. (Partially implemented; context exists but not enforced at persistence boundary)
+3. ✅ Make weight-update failures visible and recoverable. (Implemented)
+4. 🔴 Add contention and duplicate-request tests. (Tests are mocked; real persistence validation missing)
+
+#### Known Issues
+
+- Retry/backoff missing from core mutations (`create_session`, `add_semantic_fact`). **Blocker #4**
+- Idempotency context exists but does not guarantee duplicate-effect prevention at storage layer. **Blocker #4**
+- No real contention or duplicate-persistence tests. **Blocker #4**
 
 #### Success Criteria
 
-- Concurrent writes recover safely and do not duplicate effects.
+- 🔴 Concurrent writes recover safely and do not duplicate effects. **Blocked by #4**
+- 🔴 All critical mutation paths use retry/backoff. **Blocker #4**
+- 🔴 Idempotency is enforced end-to-end at persistence. **Blocker #4**
 
 ### Phase 3: ABAC Authorization
+
+**Status**: Conditionally Ready
 
 **Goal**: Enforce real authorization for agent access to graph resources.
 
 #### Deliverables
 
-1. Add agent identity and authorization attributes to request contracts.
-2. Enforce policy at MCP tool dispatch.
-3. Enforce policy at MemoryAPI query/mutation boundaries.
-4. Audit grant/deny decisions.
-5. Add allow/deny tests for node-set and subgraph access.
+1. ✅ Add agent identity and authorization attributes to request contracts. (Implemented in `AuthorizationScope`)
+2. ✅ Enforce policy at MCP tool dispatch. (Implemented; deny-by-default enforced)
+3. ✅ Enforce policy at MemoryAPI query/mutation boundaries. (Implemented; deny-by-default enforced)
+4. 🔴 Audit grant/deny decisions. (Partially implemented; missing dispatch-level reason codes)
+5. ✅ Add allow/deny tests for node-set and subgraph access. (Implemented)
+
+#### Known Issues
+
+- MCP dispatch does not audit authorization decisions with explicit reason codes. **Blocker #6**
 
 #### Success Criteria
 
-- Unauthorized reads and writes are denied at the boundary.
+- ✅ Unauthorized reads and writes are denied at the boundary.
+- 🔴 All authorization decisions are audited with explicit reason codes. **Blocker #6**
 
 ### Phase 4: MindMap Evidence Quality
 
-**Goal**: Improve evidence traceability and usefulness.
+**Status**: Not Ready
+
+**Goal**: Improve evidence traceability and usefulness with safe tenant isolation and grounded evidence.
 
 #### Deliverables
 
-1. Add provenance to serialized path evidence.
-2. Add bounded neighbor evidence when appropriate.
-3. Keep evidence compact and deterministic.
-4. Verify no-evidence behavior remains explicit.
+1. ✅ Add provenance to serialized path evidence. (Implemented)
+2. 🔴 Add bounded neighbor evidence when appropriate. (Partially implemented; but neighbor query lacks tenant predicate)
+3. 🔴 Keep evidence compact and deterministic. (Deterministic but current default is non-graph aggregation, not grounded)
+4. 🔴 Verify no-evidence behavior remains explicit. (Not enforced in default execution path)
+
+#### Known Issues
+
+- Neighbor enrichment query lacks tenant_id filter; cross-tenant exposure risk. **Blocker #1**
+- Graph-backed aggregation not the default; deterministic non-graph path used instead. **Blocker #2**
+- No explicit insufficient-evidence response when graph returns no data. **Blocker #2**
 
 #### Success Criteria
 
-- Evidence quality improves without expanding the system into a research prototype.
+- 🔴 Evidence retrieval is tenant-safe. **Blocker #1**
+- 🔴 Evidence quality improves without expanding the system into a research prototype. **Blocked by #1, #2**
+- 🔴 Graph queries are the default evidence path. **Blocker #2**
+- 🔴 Insufficient evidence is explicitly signaled. **Blocker #2**
 
 ### Phase 5: Engram Confidence Quality
 
-**Goal**: Improve confidence and contradiction handling.
+**Status**: Not Ready
+
+**Goal**: Improve confidence and contradiction handling with active gating on synthesis.
 
 #### Deliverables
 
-1. Add source-aware confidence metadata.
-2. Add freshness gating.
-3. Add contradiction/tension detection hooks.
-4. Use confidence signals to gate synthesis.
+1. ✅ Add source-aware confidence metadata. (Implemented in `ConfidenceBreakdown`, used at ingest)
+2. 🔴 Add freshness gating. (Freshness scoring computed but never gated in decisions)
+3. ✅ Add contradiction/tension detection hooks. (Implemented; contradictions detected and flagged)
+4. 🔴 Use confidence signals to gate synthesis. (Confidence configuration exists; freshness gating not operational)
+
+#### Known Issues
+
+- Freshness threshold configured but not used in synthesis eligibility checks. **Blocker #3**
+- Phase 5 enrichment functions exist but are not invoked in execute flow. **Blocker #3**
 
 #### Success Criteria
 
-- Low-confidence or conflicting facts do not dominate responses.
+- 🔴 Low-confidence or conflicting facts do not dominate responses. **Blocked by #3**
+- 🔴 Freshness scores influence synthesis decisions. **Blocker #3**
+- 🔴 Confidence gating is operational in synthesis path. **Blocker #3**
 
 ### Phase 6: Documentation and Rollout
 
+**Status**: Blocked
+
 **Goal**: Prepare v0.2 for validation and rollout.
 
-#### Deliverables
+**Blocker**: Cannot begin Phase 6 until all Critical Blockers (above) are resolved and phases 0-5 pass gate review.
+
+#### Deliverables (Deferred)
 
 1. Update the development plan and API docs.
 2. Document new config knobs and policy rules.
 3. Update runbooks for retries, auth boundaries, and evidence quality.
 4. Add rollout notes for shadow mode and canary behavior.
 
-#### Success Criteria
+#### Success Criteria (Deferred)
 
 - v0.2 is documented, testable, and safe to roll out incrementally.
 

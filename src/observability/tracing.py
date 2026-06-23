@@ -59,7 +59,7 @@ def configure_tracer(
     """
     if _allow_reset:
         # Reset OTel global state to allow provider replacement in tests.
-        trace._TRACER_PROVIDER = None  # noqa: SLF001
+        trace._TRACER_PROVIDER = None  # type: ignore[attr-defined] # noqa: SLF001
 
     provider = TracerProvider()
 

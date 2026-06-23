@@ -61,6 +61,13 @@ FACT 2: (Cloud Resources) -[BILLED_TO]-> (Q3 Budget)
 Required synthesis rule:
 - Never answer from parametric memory when graph evidence is missing.
 
+### Phase 5: Confidence and Contradiction Signals
+
+- Synthesis emits a typed confidence signal bundle alongside the grounded response.
+- Soft-signal mode keeps the grounded summary but appends a confidence/contradiction caveat.
+- Hard-reject mode returns explicit insufficiency when confidence falls below threshold or contradictions are present.
+- Clients can inspect the response-level confidence metadata instead of inferring risk from the text alone.
+
 ## Design Constraints
 
 - Deterministic retrieval before generation

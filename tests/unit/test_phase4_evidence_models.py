@@ -1,6 +1,6 @@
 """Unit tests for Phase 4 evidence models and sufficiency heuristic."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
@@ -12,6 +12,14 @@ from src.models.evidence import (
     EvidenceSourceType,
     EvidenceSummary,
 )
+
+MAX_COGNITIVE_WEIGHT = 10.0
+EVIDENCE_CONTEXT_ITEM_COUNT = 2
+EVIDENCE_SUMMARY_TOTAL_ITEMS = 5
+EVIDENCE_SUMMARY_PATH_COUNT = 2
+EVIDENCE_SUMMARY_NEIGHBOR_COUNT = 3
+EVIDENCE_SUMMARY_LATENCY_MS = 150.5
+TOKEN_BUDGET_EXCEEDED_REASON = "token_budget_exceeded"  # noqa: S105
 
 
 class TestEvidenceSourceType:
@@ -32,7 +40,7 @@ class TestEvidenceInsufficientReason:
         """Verify all expected insufficient reason variants exist."""
         assert EvidenceInsufficientReason.NO_PATHS_FOUND == "no_paths_found"
         assert EvidenceInsufficientReason.NO_NEIGHBORS_FOUND == "no_neighbors_found"
-        assert EvidenceInsufficientReason.TOKEN_BUDGET_EXCEEDED == "token_budget_exceeded"
+        assert EvidenceInsufficientReason.TOKEN_BUDGET_EXCEEDED == TOKEN_BUDGET_EXCEEDED_REASON
         assert EvidenceInsufficientReason.AUTHORIZATION_DENIED == "authorization_denied"
         assert EvidenceInsufficientReason.TIMEOUT == "timeout"
         assert EvidenceInsufficientReason.EMPTY_GRAPH == "empty_graph"
@@ -43,7 +51,7 @@ class TestEvidenceItem:
 
     def test_evidence_item_creation(self) -> None:
         """Create valid EvidenceItem."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         item = EvidenceItem(
             evidence_id="12345678-1234-5678-1234-567812345678",
             source_type=EvidenceSourceType.PATH_BASED,
@@ -62,7 +70,7 @@ class TestEvidenceItem:
 
     def test_evidence_item_minimal(self) -> None:
         """Create EvidenceItem with minimal fields."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         item = EvidenceItem(
             evidence_id="test-id",
             source_type=EvidenceSourceType.NEIGHBOR_BASED,
@@ -77,9 +85,8 @@ class TestEvidenceItem:
 
     def test_evidence_item_cognitive_weight_bounds(self) -> None:
         """Cognitive weight must be between 0.0 and 10.0."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
-        # Valid: 0.0
         item = EvidenceItem(
             evidence_id="id",
             source_type=EvidenceSourceType.PATH_BASED,
@@ -90,7 +97,6 @@ class TestEvidenceItem:
         )
         assert item.cognitive_weight == 0.0
 
-        # Valid: 10.0
         item = EvidenceItem(
             evidence_id="id",
             source_type=EvidenceSourceType.PATH_BASED,
@@ -99,10 +105,10 @@ class TestEvidenceItem:
             access_timestamp=now,
             cognitive_weight=10.0,
         )
-        assert item.cognitive_weight == 10.0
+        assert item.cognitive_weight == MAX_COGNITIVE_WEIGHT
 
         # Invalid: > 10.0
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="cognitive_weight"):
             EvidenceItem(
                 evidence_id="id",
                 source_type=EvidenceSourceType.PATH_BASED,
@@ -131,7 +137,7 @@ class TestEvidenceContext:
 
     def test_evidence_context_with_items(self) -> None:
         """Create EvidenceContext with retrieved items."""
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         item1 = EvidenceItem(
             evidence_id="id-1",
             source_type=EvidenceSourceType.PATH_BASED,
@@ -157,8 +163,8 @@ class TestEvidenceContext:
             is_sufficient=True,
         )
 
-        assert len(ctx.items) == 2
-        assert ctx.total_items == 2
+        assert len(ctx.items) == EVIDENCE_CONTEXT_ITEM_COUNT
+        assert ctx.total_items == EVIDENCE_CONTEXT_ITEM_COUNT
         assert ctx.path_count == 1
         assert ctx.neighbor_count == 1
         assert ctx.is_sufficient is True
@@ -184,19 +190,19 @@ class TestEvidenceSummary:
     def test_evidence_summary_creation(self) -> None:
         """Create EvidenceSummary for response payload."""
         summary = EvidenceSummary(
-            total_items=5,
-            path_count=2,
-            neighbor_count=3,
+            total_items=EVIDENCE_SUMMARY_TOTAL_ITEMS,
+            path_count=EVIDENCE_SUMMARY_PATH_COUNT,
+            neighbor_count=EVIDENCE_SUMMARY_NEIGHBOR_COUNT,
             is_sufficient=True,
-            retrieval_latency_ms=150.5,
+            retrieval_latency_ms=EVIDENCE_SUMMARY_LATENCY_MS,
         )
 
-        assert summary.total_items == 5
-        assert summary.path_count == 2
-        assert summary.neighbor_count == 3
+        assert summary.total_items == EVIDENCE_SUMMARY_TOTAL_ITEMS
+        assert summary.path_count == EVIDENCE_SUMMARY_PATH_COUNT
+        assert summary.neighbor_count == EVIDENCE_SUMMARY_NEIGHBOR_COUNT
         assert summary.is_sufficient is True
         assert summary.is_empty is False
-        assert summary.retrieval_latency_ms == 150.5
+        assert summary.retrieval_latency_ms == EVIDENCE_SUMMARY_LATENCY_MS
 
     def test_evidence_summary_insufficient(self) -> None:
         """Create EvidenceSummary indicating insufficient evidence."""

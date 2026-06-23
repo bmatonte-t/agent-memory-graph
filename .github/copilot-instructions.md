@@ -343,6 +343,43 @@ def test_set_membership(self) -> None:
 
 If ruff can auto-fix (with `uv run ruff check --fix`), do so, but review the output to ensure no behavior changes.
 
+## Type Safety and Gate Discipline
+
+Apply these concrete patterns from recent hardening work whenever touching typed code, external SDK integrations, or quality gates.
+
+### 1) Treat "Unknown" as a boundary-design signal
+
+- `Unknown` in basedpyright means the compiler cannot prove types at that call site; this is not a runtime failure but a design debt marker.
+- For external SDKs (Google Cloud Spanner, Scheduler, Vertex AI, Cloud Logging), isolate untyped APIs behind typed wrappers/protocols in `src/integrations/google_sdk_wrappers.py`.
+- Keep untyped objects from crossing module boundaries. Downstream modules should consume typed protocols and helper functions only.
+
+### 2) Keep SDK wrappers behavior-compatible
+
+- Wrappers must preserve existing error semantics relied on by tests (especially exact exception messages).
+- When refactoring to wrappers, consider behavior parity part of the contract, not an optional cleanup.
+
+### 3) Retry closure contract: accept keyword passthrough safely
+
+- `async_retry_with_backoff` may forward keyword arguments such as `tenant_id`.
+- Internal retry closures should accept passthrough kwargs (`**_`) unless strict keyword signatures are required.
+- Do not shadow outer variables used in query params/logging (for example, avoid redefining `tenant_id` inside nested closures).
+
+### 4) Preserve test patchability during import refactors
+
+- If tests patch symbols using module paths (for example `patch("src.memory.retrieval.EvidentPathFinder")`), instantiate via module namespace in production code (`retrieval.EvidentPathFinder(...)`) instead of directly imported symbols.
+- Refactors that bypass patch targets can silently turn unit/integration tests into real dependency calls.
+
+### 5) Pydantic v2 forward refs: rebuild explicitly when needed
+
+- For models with forward references gated by `TYPE_CHECKING`, run explicit `model_rebuild(...)` with a runtime namespace mapping when needed.
+- Keep runtime and static typing aligned to avoid late model construction failures.
+
+### 6) Fast, reliable gate workflow
+
+- Use tight loops first: run `uv run ruff check <touched_file>` and targeted `uv run pytest <failing_test> -q` before full gate.
+- Finish every task with `just check-all` as the repository-wide completion gate.
+- Do not claim completion until `ruff`, `basedpyright`, format check, pytest, and docstring coverage all pass via `just check-all`.
+
 ## CI Workflow Rules
 
 ### Blocking vs. non-blocking checks

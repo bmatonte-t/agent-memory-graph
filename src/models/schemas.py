@@ -16,7 +16,10 @@ class SessionResponse(BaseModel):
 
 
 class FactResponse(BaseModel):
-    """Response model for add_semantic_fact operation."""
+    """Response model for add_semantic_fact operation.
+
+    Phase 5: Extends with confidence and contradiction metadata.
+    """
 
     entity_id: str = Field(..., description="Unique entity identifier")
     tenant_id: str = Field(..., description="Tenant identifier for multi-tenant isolation")
@@ -26,6 +29,26 @@ class FactResponse(BaseModel):
     node_path: str = Field(..., description="Spanner node path")
     weight: float = Field(default=0.5, description="Initial cognitive weight")
     created_at: datetime = Field(..., description="Entity creation timestamp")
+    # Phase 5: Confidence and contradiction metadata
+    source_confidence_score: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=1.0,
+        description="Initial confidence score based on source type (Phase 5).",
+    )
+    detected_contradictions: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description=(
+            "Contradictions detected during ingestion (Phase 5); "
+            "format: [{'severity': str, 'conflicting_nodes': [str], 'reason': str}]"
+        ),
+    )
+    source_agent_id: str | None = Field(
+        default=None, description="Agent that created this fact (Phase 5)."
+    )
+    source_query_id: str | None = Field(
+        default=None, description="Query ID that created this fact (Phase 5)."
+    )
 
 
 class AuditResponse(BaseModel):

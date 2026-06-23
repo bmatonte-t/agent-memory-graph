@@ -4,8 +4,12 @@ import logging
 from pathlib import Path
 from typing import ClassVar
 
-from google.api_core import exceptions as gcp_exceptions
-from google.cloud import spanner  # noqa: TC002
+from google.api_core import exceptions as gcp_exceptions  # type: ignore[import-untyped]
+
+from src.integrations.google_sdk_wrappers import (
+    SpannerDatabaseProtocol,
+    execute_sql_rows,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +53,7 @@ class SchemaManager:
         return [statement.strip() for statement in cleaned_sql.split(";") if statement.strip()]
 
     @classmethod
-    def init_schema(cls, database: spanner.Database) -> None:
+    def init_schema(cls, database: SpannerDatabaseProtocol) -> None:
         """Initialize schema by running migrations in order.
 
         Args:
@@ -84,7 +88,7 @@ class SchemaManager:
                 raise RuntimeError(msg) from error
 
     @classmethod
-    def validate_schema(cls, database: spanner.Database) -> dict:
+    def validate_schema(cls, database: SpannerDatabaseProtocol) -> dict[str, bool]:
         """Validate that the expected schema exists.
 
         Args:
@@ -104,89 +108,86 @@ class SchemaManager:
 
         # Check if MemoryNode table exists
         try:
-            with database.snapshot() as snapshot:
-                results = snapshot.execute_sql(
-                    "SELECT column_name"
-                    " FROM information_schema.columns"
-                    " WHERE table_name = 'MemoryNode'"
-                )
-                columns = list(results)
-                if columns:
-                    validation_results["memory_node_exists"] = True
+            columns = execute_sql_rows(
+                database,
+                "SELECT column_name"
+                " FROM information_schema.columns"
+                " WHERE table_name = 'MemoryNode'",
+            )
+            if columns:
+                validation_results["memory_node_exists"] = True
         except Exception:  # noqa: BLE001
             logger.debug("Error checking MemoryNode table", exc_info=True)
 
         # Check if MemoryEdge table exists
         try:
-            with database.snapshot() as snapshot:
-                results = snapshot.execute_sql(
-                    "SELECT column_name"
-                    " FROM information_schema.columns"
-                    " WHERE table_name = 'MemoryEdge'"
-                )
-                columns = list(results)
-                if columns:
-                    validation_results["memory_edge_exists"] = True
+            columns = execute_sql_rows(
+                database,
+                "SELECT column_name"
+                " FROM information_schema.columns"
+                " WHERE table_name = 'MemoryEdge'",
+            )
+            if columns:
+                validation_results["memory_edge_exists"] = True
         except Exception:  # noqa: BLE001
             logger.debug("Error checking MemoryEdge table", exc_info=True)
 
         # Check if property graph exists
         try:
-            with database.snapshot() as snapshot:
-                results = snapshot.execute_sql(
-                    "SELECT property_graph_name"
-                    " FROM information_schema.property_graphs"
-                    " WHERE property_graph_name = 'AgentMemoryGraph'"
-                )
-                if list(results):
-                    validation_results["property_graph_exists"] = True
+            results = execute_sql_rows(
+                database,
+                "SELECT property_graph_name"
+                " FROM information_schema.property_graphs"
+                " WHERE property_graph_name = 'AgentMemoryGraph'",
+            )
+            if results:
+                validation_results["property_graph_exists"] = True
         except Exception:  # noqa: BLE001
             logger.debug("Error checking property graph", exc_info=True)
 
         # Check if AUDIT_EVENTS table exists
         try:
-            with database.snapshot() as snapshot:
-                results = snapshot.execute_sql(
-                    "SELECT column_name"
-                    " FROM information_schema.columns"
-                    " WHERE table_name = 'AUDIT_EVENTS'"
-                )
-                if list(results):
-                    validation_results["audit_events_exists"] = True
+            results = execute_sql_rows(
+                database,
+                "SELECT column_name"
+                " FROM information_schema.columns"
+                " WHERE table_name = 'AUDIT_EVENTS'",
+            )
+            if results:
+                validation_results["audit_events_exists"] = True
         except Exception:  # noqa: BLE001
             logger.debug("Error checking AUDIT_EVENTS table", exc_info=True)
 
         # Check if indexes exist
         try:
-            with database.snapshot() as snapshot:
-                results = snapshot.execute_sql(
-                    "SELECT index_name"
-                    " FROM information_schema.statistics"
-                    " WHERE table_name IN ('MemoryNode', 'MemoryEdge')"
-                )
-                indexes = list(results)
-                if len(indexes) >= _MINIMUM_INDEX_COUNT:  # We expect at least 3 indexes
-                    validation_results["indexes_exist"] = True
+            indexes = execute_sql_rows(
+                database,
+                "SELECT index_name"
+                " FROM information_schema.statistics"
+                " WHERE table_name IN ('MemoryNode', 'MemoryEdge')",
+            )
+            if len(indexes) >= _MINIMUM_INDEX_COUNT:  # We expect at least 3 indexes
+                validation_results["indexes_exist"] = True
         except Exception:  # noqa: BLE001
             logger.debug("Error checking indexes", exc_info=True)
 
         # Check if audit indexes exist
         try:
-            with database.snapshot() as snapshot:
-                results = snapshot.execute_sql(
-                    "SELECT index_name"
-                    " FROM information_schema.statistics"
-                    " WHERE table_name = 'AUDIT_EVENTS'"
-                )
-                if len(list(results)) >= _MINIMUM_AUDIT_INDEX_COUNT:
-                    validation_results["audit_indexes_exist"] = True
+            results = execute_sql_rows(
+                database,
+                "SELECT index_name"
+                " FROM information_schema.statistics"
+                " WHERE table_name = 'AUDIT_EVENTS'",
+            )
+            if len(results) >= _MINIMUM_AUDIT_INDEX_COUNT:
+                validation_results["audit_indexes_exist"] = True
         except Exception:  # noqa: BLE001
             logger.debug("Error checking audit indexes", exc_info=True)
 
         return validation_results
 
     @classmethod
-    def reset_schema_for_testing(cls, database: spanner.Database) -> None:
+    def reset_schema_for_testing(cls, database: SpannerDatabaseProtocol) -> None:
         """Reset schema for testing (truncate all tables).
 
         WARNING: This destroys all data!
@@ -199,7 +200,7 @@ class SchemaManager:
         for table in tables:
             try:
                 with database.batch() as batch:
-                    batch.execute_update(f"DELETE FROM {table} WHERE true")  # noqa: S608
+                    batch.execute_update(f"DELETE FROM {table} WHERE true", {})  # noqa: S608
             except Exception:  # noqa: BLE001
                 logger.debug("Error truncating %s", table, exc_info=True)
 

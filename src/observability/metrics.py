@@ -14,6 +14,7 @@ from __future__ import annotations
 from functools import lru_cache
 from importlib import import_module
 from logging import getLogger
+from typing import TYPE_CHECKING
 
 from opentelemetry.metrics import Counter, Histogram, Meter, get_meter_provider
 from opentelemetry.sdk.metrics import MeterProvider
@@ -21,6 +22,9 @@ from opentelemetry.sdk.metrics.export import (
     ConsoleMetricExporter,
     PeriodicExportingMetricReader,
 )
+
+if TYPE_CHECKING:
+    from opentelemetry.sdk.metrics.export import MetricReader
 
 try:
     CloudMonitoringMetricsExporter = import_module(
@@ -51,7 +55,7 @@ def configure_metrics(
     Returns:
         MeterProvider: The configured provider set as the global metrics provider.
     """
-    readers = []
+    readers: list[MetricReader] = []
 
     if export_to_console:
         readers.append(PeriodicExportingMetricReader(ConsoleMetricExporter()))
