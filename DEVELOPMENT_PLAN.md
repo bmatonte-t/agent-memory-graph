@@ -24,13 +24,13 @@ This document keeps v0.1 as the completed foundation and defines the development
 **v0.1**: ✅ Complete. Core memory, MindMap, MCP, and baseline hardening are in place.
 
 **v0.2 Gate Assessment (2026-06-24)**:
-- **Phase 0**: Conditionally Ready — Policy contracts defined, but runtime/documentation consistency gaps remain.
+- **Phase 0**: ✅ Ready — Policy contracts defined and runtime/docs consistent (Blocker #7 resolved).
 - **Phase 1**: ✅ Ready — Action-scaled weighting implemented; action-count consistency fixed (Blocker #5 resolved).
 - **Phase 2**: ✅ Ready — Retry/backoff and idempotency coverage complete for all mutation paths (Blocker #4 resolved).
 - **Phase 3**: ✅ Ready — Core deny-by-default present; dispatch audit logging with reason codes operational (Blocker #6 resolved).
 - **Phase 4**: ✅ Ready — Tenant-isolation fixed (Blocker #1); graph-backed aggregation now default (Blocker #2); cross-tenant test added.
 - **Phase 5**: ✅ Ready — Freshness gating now operational (Blocker #3); confidence and contradiction handling in place.
-- **Phase 6**: Blocked — Awaiting completion of Blockers #7 (policy docs), #8 (operational query).
+- **Phase 6**: Blocked — Awaiting completion of Blocker #8 (operational query).
 
 ## Critical Blockers (Phase Gate Holds)
 
@@ -65,13 +65,6 @@ The following must be fixed before declaring phases 0-5 ready for production dep
    - Transient errors (ABORTED, RESOURCE_EXHAUSTED, DEADLINE_EXCEEDED) automatically retried
    - Date Fixed: 2026-06-24
 
-✅ **Blocker #5: Inconsistent Action Counting** [RESOLVED]
-   - Added `_resolve_session_id()` helper that normalizes resolution from `request.arguments.get("session_id") or request.session_id`
-   - Applied to all four MCP tool handlers: `_memory_search`, `_memory_add_fact`, `_memory_log_trace`, `_memory_recall_context`
-   - All handlers now use consistent session_id resolution and increment action count when session available
-   - Previously only `_memory_search` incremented (only when `request.session_id is not None`); now all handlers participate
-   - Date Fixed: 2026-06-23
-
 ✅ **Blocker #6: Missing Dispatch Authorization Audit** [RESOLVED]
    - Added `AuthorizationDecision` dataclass with explicit reason_code field for auditability
    - Refactored `_authorize_request()` to return decision objects instead of raising exceptions
@@ -81,14 +74,21 @@ The following must be fixed before declaring phases 0-5 ready for production dep
    - Added test coverage for dual audit event tracking (src/mcp/service.py:111-175; tests/unit/test_mcp_service.py:156-161)
    - Date Fixed: 2026-06-24
 
-**Remaining Blockers (2 of 8)**:
+✅ **Blocker #7: Incomplete Policy Documentation** [RESOLVED]
+   - Verified ABAC semantics align between runtime and documentation regarding empty restrictions
+   - Updated docs/operations/phase3-abac-enforcement-guide.md to clarify deny-by-default behavior
+   - Added "Empty Scope Behavior" section documenting that empty AuthorizationScopes deny access
+   - Added comprehensive test coverage for allows_resource() and AuthorizationPolicy.authorize()
+   - Added 8 new tests validating: empty scope denial, configured dimension matching, policy delegation
+   - All governance tests passing; documentation and runtime behavior now consistent
+   - Date Fixed: 2026-06-24
 
-- Tripartite memory model, schema, and audit trail foundation.
-- Grounded MindMap retrieval and synthesis with traceability.
-- MCP tool contract and orchestration integration.
-- Observability safety baseline and local validation guidance.
+**Remaining Blockers (1 of 8)**:
 
-## v0.2 Development Goals
+8. **Unimplemented Operational Query** [src/memory/evidence_service.py:253-280]
+   `get_evidence_context_for_tenant()` is a stub. Must implement for operational phase 4/5 diagnostics.
+
+### Completed v0.1 Baseline
 
 ### 1. Tenant-Scaled Cognitive Weighting
 
@@ -196,12 +196,12 @@ Adopt the useful parts of Engram’s confidence and contradiction handling witho
 
 #### Known Issues
 
-- ABAC documentation inconsistent with runtime semantics (empty restrictions). **Fix required before phase 3 deployment.**
+- None. Blocker #7 resolved; ABAC documentation now aligns with runtime semantics.
 
 #### Success Criteria
 
 - ✅ A single canonical policy exists for weighting, authorization, and retries.
-- 🔴 Policy documentation aligns with runtime semantics. **Blocker #7**
+- ✅ Policy documentation aligns with runtime semantics. **Blocker #7 RESOLVED**
 
 ### Phase 1: Action-Scaled Weighting
 
@@ -253,7 +253,7 @@ Adopt the useful parts of Engram’s confidence and contradiction handling witho
 
 ### Phase 3: ABAC Authorization
 
-**Status**: Conditionally Ready
+**Status**: ✅ Ready
 
 **Goal**: Enforce real authorization for agent access to graph resources.
 
@@ -267,12 +267,12 @@ Adopt the useful parts of Engram’s confidence and contradiction handling witho
 
 #### Known Issues
 
-- MCP dispatch does not audit authorization decisions with explicit reason codes. **Blocker #6**
+- None. Blocker #6 resolved; all authorization decisions audited with explicit reason codes.
 
 #### Success Criteria
 
 - ✅ Unauthorized reads and writes are denied at the boundary.
-- 🔴 All authorization decisions are audited with explicit reason codes. **Blocker #6**
+- ✅ All authorization decisions are audited with explicit reason codes. **Blocker #6 RESOLVED**
 
 ### Phase 4: MindMap Evidence Quality
 
