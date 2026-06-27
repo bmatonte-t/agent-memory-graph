@@ -1,6 +1,7 @@
 """FastAPI application for Agent Memory Graph."""
 
 import logging
+import os
 from collections.abc import AsyncGenerator  # noqa: TC003
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -31,6 +32,51 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+_DEFAULT_EMULATOR_PROJECT_ID = "test-project"
+_DEFAULT_EMULATOR_INSTANCE_ID = "test-instance"
+_DEFAULT_EMULATOR_DATABASE_ID = "test-database"
+
+
+def _initialize_spanner_from_environment() -> None:
+    """Initialize the Spanner client from environment variables when available."""
+    emulator_host = os.getenv("SPANNER_EMULATOR_HOST")
+
+    project_id = os.getenv("GCP_PROJECT_ID")
+    instance_id = os.getenv("SPANNER_INSTANCE_ID")
+    database_id = os.getenv("SPANNER_DATABASE_ID")
+
+    if emulator_host:
+        project_id = project_id or _DEFAULT_EMULATOR_PROJECT_ID
+        instance_id = instance_id or _DEFAULT_EMULATOR_INSTANCE_ID
+        database_id = database_id or _DEFAULT_EMULATOR_DATABASE_ID
+
+    if not all((project_id, instance_id, database_id)):
+        logger.info("Spanner client not initialized at startup; missing configuration")
+        return
+
+    resolved_project_id = project_id
+    resolved_instance_id = instance_id
+    resolved_database_id = database_id
+
+    if resolved_project_id is None or resolved_instance_id is None or resolved_database_id is None:
+        logger.info("Spanner client not initialized at startup; missing configuration")
+        return
+
+    SpannerClient.initialize(
+        project_id=resolved_project_id,
+        instance_id=resolved_instance_id,
+        database_id=resolved_database_id,
+    )
+    logger.info(
+        "Spanner client initialized",
+        extra={
+            "spanner_project_id": project_id,
+            "spanner_instance_id": instance_id,
+            "spanner_database_id": database_id,
+            "using_emulator": bool(emulator_host),
+        },
+    )
+
 
 class DecayWeightsRequest(BaseModel):
     """Request payload for temporal decay endpoint."""
@@ -56,7 +102,7 @@ async def lifespan(_app: FastAPI) -> AsyncGenerator[None]:
         configure_tracer(
             project_id=settings.cloud_trace.project_id if settings.cloud_trace.enabled else None,
         )
-        # Initialize Spanner client lazily when needed.
+        _initialize_spanner_from_environment()
         yield
     finally:
         logger.info("Shutting down Agent Memory Graph API")
@@ -73,6 +119,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+_initialize_spanner_from_environment()
 
 mindmap_pipeline = MindMapPipeline()
 mcp_tool_service = MCPToolService(mindmap_pipeline=mindmap_pipeline)
@@ -286,4 +334,4 @@ async def runtime_exception_handler(_request: Request, exc: RuntimeError) -> JSO
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=8000, reload=True)  # noqa: S104
+    uvicorn.run("src.api.main:app", host="0.0.0.0", port=8000, reload=True)  # noqa: S104

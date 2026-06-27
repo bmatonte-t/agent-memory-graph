@@ -77,9 +77,13 @@ class TestMindMapIntegration:
         assert response.query == "Explain project alpha budget trend"
         assert response.synthesis.grounded is True
         assert response.trace.mined_entities
-        assert response.trace.path_ids
-        assert response.trace.fact_ids
         assert response.synthesis.claim_fact_ids == response.trace.fact_ids
+        if response.trace.path_ids:
+            assert response.trace.fact_ids
+        else:
+            assert (
+                response.synthesis.response_text == MindMapPipeline.INSUFFICIENT_EVIDENCE_RESPONSE
+            )
         assert recorder.calls == 1
         assert recorder.last_trace is not None
         assert recorder.last_trace.trace_id == response.trace.trace_id

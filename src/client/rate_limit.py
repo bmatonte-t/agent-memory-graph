@@ -5,10 +5,6 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from collections.abc import Deque
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +30,7 @@ class RateLimiter:
         self.burst_capacity = burst_capacity or rate_limit
         self.tokens: float = float(self.burst_capacity)
         self.last_refill = time.time()
-        self.request_times: Deque[float] = deque(maxlen=rate_limit)
+        self.request_times: deque[float] = deque(maxlen=rate_limit)
 
     def is_allowed(self) -> bool:
         """Check if a request is allowed under rate limit.

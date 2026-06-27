@@ -1,23 +1,23 @@
 # Phase 6: Pre-Production Validation and Testing Guide
 
-**Status**: v0.2 Ready for Production
+**Status**: v0.2 Emulator Validation Ready
 **Target Launch**: Google Cloud Marketplace
 **Date Prepared**: 2026-06-24
-**Testing Strategy**: End-to-end simulation + manual verification (no canary required for v0.1 launch)
+**Testing Strategy**: Local Spanner emulator + repository-backed verification (no live GCP project required for this phase)
 
 ---
 
 ## Overview
 
-This guide covers comprehensive pre-production validation for the Cognitive Agent Memory Graph v0.2. Since v0.1 was never deployed to production, we validate completeness through simulation and manual testing rather than gradual rollout.
+This guide covers comprehensive pre-production validation for the Cognitive Agent Memory Graph v0.2 using the local Google Cloud Spanner emulator as the primary validation environment. Since v0.1 was never deployed to production, and no live GCP project is required for this phase, we validate completeness through automated tests, emulator-backed local flows, and focused manual verification before any live-environment rollout.
 
 **Validation Goals**:
 - ✅ All 8 blockers resolved and tested
 - ✅ System behavior matches architectural mandates
 - ✅ Cross-component integration works end-to-end
 - ✅ Operational procedures are documented and tested
-- ✅ Production observability is in place
-- ✅ Failover and recovery procedures are viable
+- ✅ Production-facing configuration is prepared for later deployment
+- ✅ Failure handling is validated through emulator-backed and mock-backed testing
 
 ---
 
@@ -28,7 +28,7 @@ This guide covers comprehensive pre-production validation for the Cognitive Agen
 **All of the following must pass before production validation begins:**
 
 ```bash
-# 1. Run full test suite (401 tests, 84% coverage)
+# 1. Run full test suite (402 tests, 84% coverage)
 just test
 
 # 2. Check code coverage (minimum 80%)
@@ -49,7 +49,7 @@ just check-all
 ```
 
 **Expected Results:**
-- ✅ 401 tests passing (100%)
+- ✅ 402 tests passing (100%)
 - ✅ 84% code coverage
 - ✅ 96% docstring coverage
 - ✅ 0 type errors, 0 linting violations
@@ -78,148 +78,129 @@ python -c "import fastapi; print(fastapi.__version__)"
 
 ### 1.3 Configuration Validation
 
-**Ensure all production configs are in place:**
+**Ensure all emulator-ready configs are in place:**
 
 ```bash
-# Check config files exist
-ls -l config.yaml config.dev.yaml
+# Check committed config files exist
+ls -l config.yaml config.dev.yaml config.prod.yaml
 
 # Validate YAML syntax
-python -m yaml config.yaml
+python -c "import yaml, pathlib; [yaml.safe_load(pathlib.Path(path).read_text()) for path in ('config.yaml', 'config.dev.yaml', 'config.prod.yaml')]"
 
-# Verify all required settings are present
-grep -E 'project_id|spanner_instance|spanner_database' config.yaml
+# Verify shared application settings are present
+grep -E 'cloud_trace|cloud_logging|governance|log_level' config.yaml config.prod.yaml
+
+# Verify runtime environment selects production config
+echo "$AGENT_MEMORY_GRAPH_GCP_ENVIRONMENT"
+
+# Use emulator-backed local persistence and disable live exporters
+export SPANNER_EMULATOR_HOST=localhost:9010
+export AGENT_MEMORY_GRAPH_GCP_CLOUD_TRACE__ENABLED=false
+export AGENT_MEMORY_GRAPH_GCP_CLOUD_LOGGING__ENABLED=false
 ```
 
-**Production Configuration Checklist:**
-- [ ] `project_id` set to target GCP project
-- [ ] `spanner_instance` points to production instance
-- [ ] `spanner_database` points to production database
+**Emulator Configuration Checklist:**
+- [ ] `config.prod.yaml` exists and is loaded when `AGENT_MEMORY_GRAPH_GCP_ENVIRONMENT=prod`
 - [ ] Logging level set to `INFO` (not `DEBUG`)
-- [ ] Observability exports enabled (Cloud Trace, Cloud Logging)
+- [ ] Observability settings are present in config and can be overridden at runtime
 - [ ] All governance settings configured
+- [ ] Spanner emulator is reachable via `SPANNER_EMULATOR_HOST=localhost:9010`
+- [ ] Cloud Trace and Cloud Logging exporters disabled for local emulator validation
+- [ ] No live Spanner project is required for this validation phase
+
+### 1.4 Local Emulator Startup
+
+**Start the local Spanner emulator in a dedicated terminal:**
+
+```bash
+cd /Users/bmatonte/agent-memory-graph
+bash ./scripts/start-emulator.sh
+```
+
+**Expected Results:**
+- ✅ Emulator listens on `localhost:9010`
+- ✅ Test instance `test-instance` exists
+- ✅ Test database `test-database` exists
+- ✅ `SPANNER_EMULATOR_HOST` is exported in the emulator terminal
+
+**Notes:**
+- This script requires the Google Cloud SDK (`gcloud`) to be installed.
+- Keep the emulator terminal open while running local integration validation.
+- If you prefer direct execution, make the script executable once with `chmod +x scripts/start-emulator.sh`.
 
 ---
 
-## Part 2: Functional Validation (Simulation)
+## Part 2: Functional Validation
 
-### 2.1 Phase 0: Policy Contracts (Manual Verification)
+### 2.1 Phase 0: Policy Contracts
 
 **Objective**: Verify that weighting, ABAC, and retry policies are consistent.
 
-**Test Steps**:
+**Recommended Validation Command**:
+
+```bash
+uv run pytest tests/unit/test_governance.py -q
+uv run pytest tests/test_settings.py -q
+```
+
+**What This Covers**:
 
 ```python
-# 1. Verify WeightingTriggerPolicy loads correctly
-from src.memory.cognitive_weighting import WeightingTriggerPolicy
-from src.project_base.settings import ProjectSettings
-
-settings = ProjectSettings()
-policy = WeightingTriggerPolicy(action_count_threshold=settings.weighting_action_count_threshold)
-assert policy.should_trigger(action_count=3)  # True for default threshold 3
-assert policy.should_trigger(action_count=2)  # False
-
-# 2. Verify AuthorizationPolicy denies by default
+# 1. Verify AuthorizationPolicy denies by default
 from src.security.governance import AuthorizationPolicy, AuthorizationScope
 
 policy = AuthorizationPolicy(default_deny=True)
-empty_scope = AuthorizationScope(agent_id="agent_1")  # No restrictions
-assert not policy.authorize(empty_scope, resource_id="node_1")  # Denied
-
-# 3. Verify RetryPolicy is configured
-from src.db.retry import get_retry_policy
-
-retry_policy = get_retry_policy()
-assert retry_policy.max_attempts == 3
-assert retry_policy.initial_backoff_seconds == 0.25
+empty_scope = AuthorizationScope(agent_id="agent_1")
+assert not policy.authorize(empty_scope, node_id="node_1")
 ```
 
 **Validation Result**: ✅ All policies consistent and enforce expected behavior
 
 ---
 
-### 2.2 Phase 1: Action-Scaled Weighting (Simulation)
+### 2.2 Phase 1: Action-Scaled Weighting
 
 **Objective**: Verify weighting scales with tenant activity volume.
 
-**Test Steps**:
+**Recommended Validation Command**:
+
+```bash
+uv run pytest tests/load/test_comparative_weighting.py -q
+uv run pytest tests/unit/test_memory_api.py -q -k weighting
+```
+
+**What This Validates**:
 
 ```python
-from src.memory.api import MemoryAPI
 from src.memory.cognitive_weighting import WeightingTriggerPolicy
-from unittest.mock import AsyncMock, patch
-import asyncio
-
-async def simulate_high_volume_tenant():
-    """Simulate 1000 actions for high-activity tenant."""
-
-    # Create session
-    session = await MemoryAPI.create_session(
-        session_id="high_volume_session_1",
-        user_id="user_1",
-        metadata={"tenant": "high_volume"}
-    )
-
-    # Record 100 actions (simulated)
-    for i in range(100):
-        await MemoryAPI.add_semantic_fact(
-            entity_type="EVENT",
-            entity_id=f"event_{i}",
-            attributes={"index": i},
-            session_id=session.session_id
-        )
-
-    # Verify session action count increased
-    assert session.action_count >= 100
-
-    # Verify weighting was triggered (based on action count)
-    policy = WeightingTriggerPolicy(action_count_threshold=3)
-    assert policy.should_trigger(session.action_count)
-
-async def simulate_low_volume_tenant():
-    """Simulate 2 actions for low-activity tenant."""
-
-    session = await MemoryAPI.create_session(
-        session_id="low_volume_session_1",
-        user_id="user_2",
-        metadata={"tenant": "low_volume"}
-    )
-
-    # Record 2 actions
-    for i in range(2):
-        await MemoryAPI.add_semantic_fact(
-            entity_type="EVENT",
-            entity_id=f"event_{i}",
-            attributes={"index": i},
-            session_id=session.session_id
-        )
-
-    # Verify weighting was NOT triggered
-    policy = WeightingTriggerPolicy(action_count_threshold=3)
-    assert not policy.should_trigger(session.action_count)
-
-# Run simulations
-asyncio.run(simulate_high_volume_tenant())
-asyncio.run(simulate_low_volume_tenant())
+policy = WeightingTriggerPolicy(enabled=True, action_count_threshold=3)
+assert policy.should_trigger(3)
+assert not policy.should_trigger(2)
 ```
 
 **Validation Result**: ✅ Weighting scales correctly based on action count
 
 ---
 
-### 2.3 Phase 2: Lock Resilience and Retry (Simulation)
+### 2.3 Phase 2: Lock Resilience and Retry
 
-**Objective**: Verify retry/backoff survives transient failures.
+**Objective**: Verify retry/backoff survives transient failures with emulator-backed or simulated contention.
 
-**Test Steps**:
+**Recommended Validation Commands**:
+
+```bash
+uv run pytest tests/integration/test_weight_update_resilience.py -q
+uv run pytest tests/unit/test_cognitive_weighting.py -q
+```
+
+**What This Covers**:
 
 ```python
 from src.db.retry import async_retry_with_backoff
-from src.memory.api import MemoryAPI
 import asyncio
 
 async def test_transient_failure_recovery():
-    """Simulate transient Spanner contention."""
+    """Simulate transient Spanner-style contention."""
 
     attempt_count = 0
 
@@ -228,9 +209,7 @@ async def test_transient_failure_recovery():
         attempt_count += 1
 
         if attempt_count < 3:
-            # Simulate ABORTED (transient)
-            from google.cloud.spanner_v1 import SpannerException
-            raise SpannerException("ABORTED")
+            raise RuntimeError("ABORTED")
 
         # Success on retry
         return "success"
@@ -253,11 +232,18 @@ asyncio.run(test_transient_failure_recovery())
 
 ---
 
-### 2.4 Phase 3: ABAC Authorization (Simulation)
+### 2.4 Phase 3: ABAC Authorization
 
 **Objective**: Verify authorization denies by default and enforces scopes.
 
-**Test Steps**:
+**Recommended Validation Command**:
+
+```bash
+uv run pytest tests/unit/test_authorization_boundary.py -q
+uv run pytest tests/integration/test_phase3_abac_enforcement.py -q
+```
+
+**What This Covers**:
 
 ```python
 from src.security.governance import AuthorizationPolicy, AuthorizationScope
@@ -265,7 +251,7 @@ from src.security.governance import AuthorizationPolicy, AuthorizationScope
 # Test 1: Empty scope denies access
 policy = AuthorizationPolicy(default_deny=True)
 empty_scope = AuthorizationScope(agent_id="agent_1")
-assert not policy.authorize(empty_scope, resource_id="node_1")
+assert not policy.authorize(empty_scope, node_id="node_1")
 print("✅ Test 1: Empty scope correctly denied")
 
 # Test 2: Configured scope grants access to matching resource
@@ -273,11 +259,11 @@ scope_with_nodes = AuthorizationScope(
     agent_id="agent_1",
     allowed_node_ids=["node_1", "node_2"]
 )
-assert policy.authorize(scope_with_nodes, resource_id="node_1")
+assert policy.authorize(scope_with_nodes, node_id="node_1")
 print("✅ Test 2: Matching node ID granted")
 
 # Test 3: Configured scope denies access to non-matching resource
-assert not policy.authorize(scope_with_nodes, resource_id="node_999")
+assert not policy.authorize(scope_with_nodes, node_id="node_999")
 print("✅ Test 3: Non-matching node ID denied")
 
 # Test 4: Multi-dimension scope (all must match)
@@ -287,8 +273,8 @@ scope_multi = AuthorizationScope(
     allowed_labels=["PERSON", "SESSION"]
 )
 # Granted only if resource matches both node_id AND label
-assert policy.authorize(scope_multi, resource_id="node_1", resource_label="PERSON")
-assert not policy.authorize(scope_multi, resource_id="node_1", resource_label="LOCATION")
+assert policy.authorize(scope_multi, node_id="node_1", label="PERSON")
+assert not policy.authorize(scope_multi, node_id="node_1", label="LOCATION")
 print("✅ Test 4: Multi-dimension scope enforces all dimensions")
 ```
 
@@ -296,74 +282,45 @@ print("✅ Test 4: Multi-dimension scope enforces all dimensions")
 
 ---
 
-### 2.5 Phase 4: MindMap Evidence Quality (Simulation)
+### 2.5 Phase 4: MindMap Evidence Quality
 
-**Objective**: Verify evidence retrieval is tenant-safe and grounded.
+**Objective**: Verify evidence retrieval is tenant-safe and grounded using emulator-backed or mocked retrieval paths.
 
-**Test Steps**:
+**Recommended Validation Commands**:
+
+```bash
+uv run pytest tests/integration/test_phase4b_path_retrieval.py -q
+uv run pytest tests/integration/test_phase4e_evidence_synthesis.py -q
+uv run pytest tests/integration/test_audit_trail.py -q
+```
+
+**What This Covers**:
 
 ```python
-from src.memory.evidence_service import EvidenceService
-from src.memory.api import MemoryAPI
-import asyncio
-
-async def test_tenant_safe_evidence():
-    """Verify evidence is isolated by tenant."""
-
-    # Create two tenants
-    session_a = await MemoryAPI.create_session(
-        session_id="session_a",
-        user_id="user_a"
-    )
-
-    session_b = await MemoryAPI.create_session(
-        session_id="session_b",
-        user_id="user_b"
-    )
-
-    # Add semantic facts to each tenant
-    await MemoryAPI.add_semantic_fact(
-        entity_type="PERSON",
-        entity_id="person_a",
-        attributes={"name": "Alice"},
-        session_id=session_a.session_id
-    )
-
-    await MemoryAPI.add_semantic_fact(
-        entity_type="PERSON",
-        entity_id="person_b",
-        attributes={"name": "Bob"},
-        session_id=session_b.session_id
-    )
-
-    # Retrieve evidence for tenant_a
-    service = EvidenceService()
-    evidence_a = await service.get_evidence_context_for_tenant(
-        tenant_id=session_a.tenant_id,
-        limit_hours=24
-    )
-
-    # Verify tenant_a sees only tenant_a evidence
-    assert all(e.evidence_id != "person_b" for e in evidence_a)
-    print("✅ Tenant A evidence isolated from Tenant B")
-
-asyncio.run(test_tenant_safe_evidence())
+# Tenant isolation and evidence grounding are validated through integration tests
+# that exercise retrieval and persistence boundaries while asserting tenant-safe results.
 ```
 
 **Validation Result**: ✅ Evidence retrieval is tenant-safe
 
 ---
 
-### 2.6 Phase 5: Engram Confidence Quality (Simulation)
+### 2.6 Phase 5: Engram Confidence Quality
 
 **Objective**: Verify freshness gating and confidence handling.
 
-**Test Steps**:
+**Recommended Validation Command**:
+
+```bash
+uv run pytest tests/unit/test_phase4_evidence_models.py -q
+uv run pytest tests/unit/test_phase5c_evidence_service.py -q
+```
+
+**What This Covers**:
 
 ```python
 from src.models.confidence import FreshnessScore
 from datetime import datetime, timedelta
-import time
 
 # Test 1: Freshness decay over time
 now = datetime.utcnow()
@@ -397,63 +354,88 @@ print(f"✅ Confidence aggregated: {breakdown.aggregate_confidence}")
 
 ---
 
-## Part 3: Integration Testing (Manual)
+## Part 3: Emulator-Backed Local Integration Testing
 
 ### 3.1 End-to-End Workflow
 
-**Objective**: Verify complete flow from session creation to evidence retrieval.
+**Objective**: Verify the application boots locally against the Spanner emulator and exposes the expected API surface without requiring live GCP resources.
 
 **Manual Test Procedure**:
 
-1. **Start the system**:
+1. **Start the Spanner emulator**:
+    ```bash
+    cd /Users/bmatonte/agent-memory-graph
+    bash ./scripts/start-emulator.sh
+    ```
+
+2. **Start the system locally in a second terminal**:
    ```bash
    cd /Users/bmatonte/agent-memory-graph
+    export SPANNER_EMULATOR_HOST=localhost:9010
+    export AGENT_MEMORY_GRAPH_GCP_CLOUD_TRACE__ENABLED=false
+    export AGENT_MEMORY_GRAPH_GCP_CLOUD_LOGGING__ENABLED=false
    uv run python -m src.api.main
    ```
 
-2. **Create a session** (curl or Postman):
+3. **Bootstrap a session** (backend API utility):
+     ```bash
+     export SPANNER_EMULATOR_HOST=localhost:9010
+     /Users/bmatonte/agent-memory-graph/.venv/bin/python - <<'PY'
+     import asyncio
+     from src.db.spanner_client import SpannerClient
+     from src.memory.api import MemoryAPI
+
+     async def main() -> None:
+             SpannerClient.initialize("test-project", "test-instance", "test-database")
+             await MemoryAPI.create_session(
+                     tenant_id="tenant_demo",
+                     session_id="session_demo",
+                     user_id="user_demo",
+                     metadata={"app": "local-validation"},
+             )
+
+     asyncio.run(main())
+     PY
+     ```
+
+4. **Add semantic facts through the MCP endpoint**:
+     ```bash
+     curl -X POST http://localhost:8000/api/v1/mcp/invoke \
+         -H "Content-Type: application/json" \
+         -d '{
+             "tenant_id": "tenant_demo",
+             "agent_id": "agent_local",
+             "tool_name": "memory_add_fact",
+             "session_id": "session_demo",
+             "request_id": "req_add_fact_1",
+             "arguments": {
+                 "entity_type": "PERSON",
+                 "entity_id": "alice",
+                 "attributes": {"role": "engineer"}
+             }
+         }'
+     ```
+
+5. **Run grounded retrieval through MindMap**:
+     ```bash
+     curl -X POST http://localhost:8000/api/v1/mindmap/execute \
+         -H "Content-Type: application/json" \
+         -d '{
+             "query": "Who is Alice?",
+             "session_id": "session_demo"
+         }'
+     ```
+
+6. **Inspect logs**:
    ```bash
-   curl -X POST http://localhost:8000/api/memory/sessions \
-     -H "Content-Type: application/json" \
-     -d '{
-       "session_id": "test_session_1",
-       "user_id": "test_user_1",
-       "metadata": {"app": "testing"}
-     }'
+    # Use console logs from the running process
    ```
 
-3. **Add semantic facts**:
-   ```bash
-   curl -X POST http://localhost:8000/api/memory/facts \
-     -H "Content-Type: application/json" \
-     -d '{
-       "entity_type": "PERSON",
-       "entity_id": "alice",
-       "attributes": {"role": "engineer"},
-       "session_id": "test_session_1"
-     }'
-   ```
-
-4. **Retrieve context**:
-   ```bash
-   curl -X POST http://localhost:8000/api/memory/retrieve \
-     -H "Content-Type: application/json" \
-     -d '{
-       "session_id": "test_session_1",
-       "query": "Who is Alice?"
-     }'
-   ```
-
-5. **Inspect logs**:
-   ```bash
-   tail -f /var/log/agent-memory-graph/application.log
-   ```
-
-**Validation**: ✅ All endpoints respond correctly with expected data
+**Validation**: ✅ Local endpoints respond correctly with emulator-backed persistence
 
 ---
 
-### 3.2 Authorization Enforcement
+### 3.2 Authorization Enforcement (Optional Local Check)
 
 **Manual Test Procedure**:
 
@@ -491,7 +473,7 @@ print(f"✅ Confidence aggregated: {breakdown.aggregate_confidence}")
        print("✅ Empty scope correctly denied")
    ```
 
-**Validation**: ✅ Authorization enforced as expected
+**Validation**: ✅ Authorization enforced as expected when running against the emulator
 
 ---
 
@@ -500,11 +482,10 @@ print(f"✅ Confidence aggregated: {breakdown.aggregate_confidence}")
 **Manual Test Procedure**:
 
 ```bash
-# Run load test (1000 concurrent requests)
-cd tests/load
-uv run pytest test_comparative_weighting.py -v -k "test_high_throughput"
+# Run emulator-compatible load test
+uv run pytest tests/load/test_comparative_weighting.py -q
 
-# Expected: All requests complete successfully, no data loss
+# Expected: Local scenarios complete successfully, no behavioral regressions
 ```
 
 **Validation**: ✅ System stable under load
@@ -515,77 +496,66 @@ uv run pytest test_comparative_weighting.py -v -k "test_high_throughput"
 
 ### 4.1 Monitoring and Observability
 
-**Verify all metrics are being exported**:
+**Verify observability configuration is emulator-safe**:
 
 ```bash
-# Check Cloud Logging integration
-gcloud logging read "resource.type=cloud_run_revision AND resource.labels.service_name=agent-memory-graph" \
-  --limit 10 \
-  --format json | jq '.[] | .jsonPayload'
-
-# Check Cloud Trace integration
-gcloud trace list --filter="name:agent-memory-graph"
-
-# Verify Prometheus metrics (if using)
-curl http://localhost:8001/metrics | head -20
+# Confirm exporters are disabled for local emulator validation unless a real project is available
+echo "$AGENT_MEMORY_GRAPH_GCP_CLOUD_TRACE__ENABLED"
+echo "$AGENT_MEMORY_GRAPH_GCP_CLOUD_LOGGING__ENABLED"
 ```
 
-**Expected Output**: ✅ Logs, traces, and metrics flowing to observability backends
+**Expected Output**: ✅ Local emulator validation does not attempt live exporter initialization
 
 ---
 
 ### 4.2 Audit Trail Verification
 
-**Verify audit logging works**:
+**Verify audit logging works through tests and local persistence**:
 
 ```bash
-# Check audit table for authorization decisions
-gcloud spanner databases execute-sql \
-  --instance=production-instance \
-  --database=production-database \
-  --sql="SELECT * FROM ENGRAM_AUDIT WHERE EventType = 'MCP_AUTHORIZATION_DENIED' LIMIT 5"
+uv run pytest tests/integration/test_audit_trail.py -q
 ```
 
-**Expected Output**: ✅ All authorization decisions logged with reason codes
+**Expected Output**: ✅ Authorization and memory audit flows validated locally
 
 ---
 
 ### 4.3 Configuration Hot-Reload Testing
 
-**Verify configuration changes don't require restart**:
+**Verify configuration changes load correctly on process restart**:
 
-1. Edit `config.yaml` to change a non-critical setting (e.g., log level)
-2. Verify changes take effect within 30 seconds
-3. Existing connections continue to work
+1. Edit `config.dev.yaml` or export an overriding env var
+2. Restart the local process
+3. Verify the changed setting takes effect
 
-**Expected Output**: ✅ Hot-reload works, no disruption
+**Expected Output**: ✅ Config source precedence works as documented
 
 ---
 
-## Part 5: Failure Scenario Testing (Manual)
+## Part 5: Failure Scenario Testing
 
 ### 5.1 Database Unavailability
 
 **Test Procedure**:
-1. Stop Spanner instance (or simulate with network rule)
-2. Send request to system
-3. Observe retry behavior
+1. Stop the local emulator or disconnect the local API from `SPANNER_EMULATOR_HOST`
+2. Send a request to the local system or run the resilience suite
+3. Observe retry behavior and explicit failure handling
 
 **Expected Output**:
 - ✅ First attempt fails
 - ✅ Automatic retry begins
-- ✅ Backoff increases exponentially
-- ✅ After max attempts exhausted, error returned to client
-- ✅ Error is not an internal exception but a clear API error
+- ✅ Backoff increases as configured
+- ✅ After max attempts exhausted, explicit failure is returned
+- ✅ No live GCP database is required
 
 ---
 
 ### 5.2 Authentication/Authorization Failures
 
 **Test Procedure**:
-1. Create request with invalid agent_id
-2. Send to system
-3. Observe authorization failure
+1. Run authorization boundary and ABAC integration tests
+2. Optionally exercise the local API with an invalid or empty scope
+3. Confirm denied requests fail cleanly and allowed scopes pass
 
 **Expected Output**:
 - ✅ Request denied with reason code
@@ -597,14 +567,14 @@ gcloud spanner databases execute-sql \
 ### 5.3 Memory Pressure (High Cardinality)
 
 **Test Procedure**:
-1. Add 100,000 semantic facts to single session
-2. Attempt retrieve
-3. Monitor memory and latency
+1. Run load and evidence tests locally
+2. Review timing and completion status
+3. Record any anomalies for later live-environment testing
 
 **Expected Output**:
-- ✅ Memory usage stays within budget (< 2GB)
-- ✅ Latency stays acceptable (p95 < 5s)
-- ✅ No OOM errors
+- ✅ No behavioral regressions under local load
+- ✅ No unexpected exceptions
+- ✅ Live memory and latency limits remain pending real-environment validation
 
 ---
 
@@ -626,16 +596,16 @@ gcloud spanner databases execute-sql \
 **Before deploying to production, verify:**
 
 ```
-[  ] All 401 tests passing
+[  ] All 402 tests passing
 [  ] Code coverage >= 84%
 [  ] Type checking: 0 errors
 [  ] Linting: 0 violations
-[  ] All functional simulations successful
-[  ] All manual integration tests passed
-[  ] All resilience scenarios tested
+[  ] All functional emulator-backed validations successful
+[  ] Local integration checks passed
+[  ] All resilience scenarios tested locally
 [  ] Operational procedures documented
-[  ] Monitoring and alerting configured
-[  ] Disaster recovery validated
+[  ] Monitoring and alerting strategy documented
+[  ] Disaster recovery procedure documented
 [  ] Team trained on procedures
 ```
 
@@ -646,24 +616,25 @@ gcloud spanner databases execute-sql \
 
 ---
 
-## Part 8: Rollout Plan (v0.1 Direct to Production)
+## Part 8: Transition To Live Environment
 
-### No Canary Phase Required
+### Emulator Exit Criteria
 
-Since v0.1 has never been in production, we proceed directly to production after validation:
+This document validates application behavior using the local Spanner emulator and without requiring a live GCP environment. Before any real production rollout, the following must still be completed in a live environment:
 
-**Deployment Timeline**:
+1. Provision the target Spanner instance and database.
+2. Supply real Cloud Logging and Cloud Trace project configuration.
+3. Execute deployment-specific smoke tests.
+4. Validate live observability, audit persistence, and failure recovery.
 
-1. **T+0 (Deploy)**: Deploy v0.2 to production (Cloud Run)
-2. **T+1h (Smoke Test)**: Automated smoke tests verify all endpoints
-3. **T+2h (Manual Validation)**: Operations team manually tests critical paths
-4. **T+4h (Monitoring)**: Verify metrics, logs, and traces flowing correctly
-5. **T+24h (Stability Check)**: No alerts, SLOs being met
+**Emulator Exit Result**:
+- ✅ Application behavior validated by tests and local emulator verification
+- ✅ Config hierarchy prepared for later deployment
+- ⏳ Live infrastructure validation deferred until environment exists
 
-**Rollback Plan**:
-- If critical issues detected, revert to previous stable version
-- Rollback procedure: Deploy previous Git tag to Cloud Run
-- Estimated time to rollback: < 5 minutes
+**Rollback Plan For Emulator Phase**:
+- Revert to the last passing commit if emulator-validation regressions are introduced
+- Preserve `config.prod.yaml` and validation docs as the deployment handoff baseline
 
 ---
 
@@ -678,24 +649,32 @@ just lint                         # Linting
 just check-types                  # Type checking
 just docstring-coverage           # Docstring coverage
 
-# Deployment
-gcloud run deploy agent-memory-graph \
-  --source . \
-  --platform managed \
-  --region us-central1
+# Emulator-backed focused checks
+uv run pytest tests/unit/test_governance.py -q
+uv run pytest tests/test_settings.py -q
+uv run pytest tests/load/test_comparative_weighting.py -q
+uv run pytest tests/integration/test_weight_update_resilience.py -q
+uv run pytest tests/unit/test_cognitive_weighting.py -q
+uv run pytest tests/unit/test_authorization_boundary.py -q
+uv run pytest tests/integration/test_phase3_abac_enforcement.py -q
+uv run pytest tests/integration/test_phase4b_path_retrieval.py -q
+uv run pytest tests/integration/test_phase4e_evidence_synthesis.py -q
+uv run pytest tests/unit/test_phase4_evidence_models.py -q
+uv run pytest tests/unit/test_phase5c_evidence_service.py -q
+uv run pytest tests/integration/test_audit_trail.py -q
 
-# Monitoring
-gcloud logging read --resource-type=cloud_run_revision
-gcloud trace list
-gcloud monitoring metrics-descriptors list | grep agent_memory
+# Start emulator
+bash ./scripts/start-emulator.sh
 
-# Database management
-gcloud spanner databases describe production-database \
-  --instance=production-instance
+# Optional local app boot in a second terminal
+export SPANNER_EMULATOR_HOST=localhost:9010
+export AGENT_MEMORY_GRAPH_GCP_CLOUD_TRACE__ENABLED=false
+export AGENT_MEMORY_GRAPH_GCP_CLOUD_LOGGING__ENABLED=false
+uv run python -m src.api.main
 ```
 
 ---
 
-**Document Version**: 1.0 (Production Ready)
+**Document Version**: 1.2 (Emulator Validation Ready)
 **Last Updated**: 2026-06-24
-**Next Review**: Post-launch (T+7 days)
+**Next Review**: Before first live-environment deployment

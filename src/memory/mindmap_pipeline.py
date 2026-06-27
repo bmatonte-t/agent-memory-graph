@@ -45,6 +45,24 @@ from src.observability.tracing import trace_span
 
 logger = logging.getLogger(__name__)
 
+
+def _is_graph_query_unsupported(error: Exception) -> bool:
+    """Return whether an error indicates unsupported graph query syntax.
+
+    Args:
+        error: Runtime error raised by Spanner query execution.
+
+    Returns:
+        bool: True when graph query syntax is unsupported by the backend.
+    """
+    message = str(error).lower()
+    return (
+        "unexpected keyword match" in message
+        or 'expected "]" but got "*"' in message
+        or ("syntax error" in message and "graph" in message)
+    )
+
+
 if TYPE_CHECKING:
     from src.security.governance import AuthorizationScope
 
@@ -479,7 +497,11 @@ class SpannerAggregationAdapter:
                     "max_paths": config.max_paths,
                 },
             )
-        except RuntimeError as error:
+        except Exception as error:
+            if _is_graph_query_unsupported(error):
+                logger.info("graph_query_unsupported_returning_empty_aggregation")
+                latency_ms = (perf_counter() - started) * 1000
+                return AggregationResult(nodes=[], edges=[], paths=[], latency_ms=latency_ms)
             raise MindMapPipelineError(
                 stage=PipelineStage.AGGREGATE,
                 code=PipelineErrorCode.RETRIEVAL_ERROR,

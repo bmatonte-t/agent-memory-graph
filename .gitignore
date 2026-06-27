@@ -134,3 +134,5 @@ cython_debug/
 
 .personal_workspace/
 *.local*
+# Git worktrees
+worktrees/

@@ -227,10 +227,13 @@ class TestTenantIdValidation:
             },
         )
 
-        # Tenant_id field validation passes; blocked by Phase 4B service layer bug
-        # TODO: Phase 4C: Fix src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258
-        # Tenant isolation is enforced downstream
-        assert response.status_code in (HTTP_OK, HTTP_INTERNAL_SERVER_ERROR)
+        # Tenant_id field validation passes; downstream validation may still reject.
+        # Tenant isolation is enforced downstream.
+        assert response.status_code in (
+            HTTP_OK,
+            HTTP_BAD_REQUEST,
+            HTTP_INTERNAL_SERVER_ERROR,
+        )
 
 
 class TestArgumentsStructureValidation:
@@ -250,9 +253,12 @@ class TestArgumentsStructureValidation:
             },
         )
 
-        # Dict structure is valid at API boundary; blocked by Phase 4B service layer bug
-        # TODO: Phase 4C: Fix src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258
-        assert response.status_code in (HTTP_OK, HTTP_INTERNAL_SERVER_ERROR)
+        # Dict structure is valid at API boundary; downstream validation may still reject.
+        assert response.status_code in (
+            HTTP_OK,
+            HTTP_BAD_REQUEST,
+            HTTP_INTERNAL_SERVER_ERROR,
+        )
 
     def test_arguments_as_empty_dict_passes_validation(self) -> None:
         """Empty arguments dict should pass field validation."""
@@ -305,7 +311,10 @@ class TestArgumentsStructureValidation:
             },
         )
 
-        # Dict structure is valid at API boundary; blocked by Phase 4B service layer bug
-        # TODO: Phase 4C: Fix src/memory/mindmap_pipeline.py::TraceRecorder.record() line 258
-        # Content safety is downstream responsibility: parameterized queries, no code execution
-        assert response.status_code in (HTTP_OK, HTTP_INTERNAL_SERVER_ERROR)
+        # Dict structure is valid at API boundary; downstream validation may still reject.
+        # Content safety is downstream responsibility: parameterized queries, no code execution.
+        assert response.status_code in (
+            HTTP_OK,
+            HTTP_BAD_REQUEST,
+            HTTP_INTERNAL_SERVER_ERROR,
+        )

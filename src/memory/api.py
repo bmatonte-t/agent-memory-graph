@@ -5,7 +5,10 @@ import logging
 import math
 import uuid
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 from src.db.idempotency import IdempotencyContext
 from src.db.retry import async_retry_with_backoff, get_retry_policy
@@ -13,6 +16,7 @@ from src.db.schema import SchemaConfig
 from src.db.spanner_client import SpannerClient
 from src.integrations.google_sdk_wrappers import (
     SpannerBatchProtocol,
+    SpannerDatabaseProtocol,
     SpannerTransactionProtocol,
     execute_sql_rows,
     execute_sql_rows_in_transaction,
@@ -42,10 +46,51 @@ DEFAULT_SOURCE_CONFIDENCE_SCORE = 1.0
 API_DERIVED_SOURCE_CONFIDENCE_SCORE = 0.7
 RECENT_ACCESS_WINDOW_DAYS = 7
 ACTIVE_STATUS_VALUES = {"active", "open", "enabled"}
+TWriteResult = TypeVar("TWriteResult")
+
+
+def _is_match_query_unsupported(error: Exception) -> bool:
+    """Return whether an error indicates graph MATCH is unsupported.
+
+    Args:
+        error: Exception raised while executing a query.
+
+    Returns:
+        bool: True when the backend does not support MATCH syntax.
+    """
+    message = str(error).lower()
+    return "unexpected keyword match" in message
 
 
 class MemoryAPI:
     """Core memory API for tripartite memory operations."""
+
+    @staticmethod
+    def _run_write_operation(
+        database: SpannerDatabaseProtocol,
+        operation: Callable[[SpannerBatchProtocol], TWriteResult],
+    ) -> TWriteResult:
+        """Run write operations with batch-first, transaction fallback semantics.
+
+        Args:
+            database: Spanner database object.
+            operation: Callable that issues one or more execute_update statements.
+
+        Returns:
+            TWriteResult: Result returned by ``operation``.
+        """
+        try:
+            with database.batch() as batch:
+                execute_update = getattr(batch, "execute_update", None)
+                if callable(execute_update):
+                    return operation(batch)
+        except AttributeError:
+            logger.debug("Spanner batch execute_update unavailable; falling back to transaction")
+
+        def _run_in_transaction(transaction: SpannerTransactionProtocol) -> TWriteResult:
+            return operation(cast("SpannerBatchProtocol", transaction))
+
+        return database.run_in_transaction(_run_in_transaction)
 
     @staticmethod
     def _record_authorization_decision(
@@ -62,7 +107,8 @@ class MemoryAPI:
 
         timestamp = datetime.now(UTC)
         database = SpannerClient.get_database()
-        with database.batch() as batch:
+
+        def _write(batch: SpannerBatchProtocol) -> None:
             MemoryAPI._insert_audit_event_in_batch(
                 batch=batch,
                 tenant_id=tenant_id,
@@ -71,6 +117,8 @@ class MemoryAPI:
                 context=context,
                 timestamp=timestamp,
             )
+
+        MemoryAPI._run_write_operation(database, _write)
 
     @staticmethod
     def _authorize_operation(
@@ -198,7 +246,7 @@ class MemoryAPI:
                 Attributes, CreatedAt
             ) VALUES (
                 @event_id, @tenant_id, @source_node_id, @event_type,
-                JSON(@attributes), @now
+                CAST(@attributes AS JSON), @now
             )
         """
         batch.execute_update(
@@ -358,16 +406,19 @@ class MemoryAPI:
             Exception: If database write fails (may be retried by caller).
         """
         database = SpannerClient.get_database()
-        with IdempotencyContext(), database.batch() as batch:
-            node_sql = """
+        node_sql = """
                 INSERT INTO MemoryNode (
                     NodeId, TenantId, MemoryTier, Label, LogOddsWeight,
                     SessionActionCount, LastAccessed, Attributes, CreatedAt, UpdatedAt
                 ) VALUES (
                     @node_id, @tenant_id, @tier, @label, @weight,
-                    @action_count, @now, JSON(@attributes), @now, @now
+                    @action_count, @now, CAST(@attributes AS JSON), @now, @now
                 )
             """
+
+        audit_context = {"user_id": user_id}
+
+        def _write(batch: SpannerBatchProtocol) -> None:
             batch.execute_update(
                 node_sql,
                 {
@@ -387,9 +438,12 @@ class MemoryAPI:
                 tenant_id=tenant_id,
                 event_type="CREATE_SESSION",
                 source_node_id=session_id,
-                context={"user_id": user_id},
+                context=audit_context,
                 timestamp=created_at,
             )
+
+        with IdempotencyContext():
+            MemoryAPI._run_write_operation(database, _write)
 
     @staticmethod
     async def add_semantic_fact(
@@ -559,16 +613,17 @@ class MemoryAPI:
             Exception: If database write fails (may be retried by caller).
         """
         database = SpannerClient.get_database()
-        with IdempotencyContext(), database.batch() as batch:
-            node_sql = """
+        node_sql = """
                 INSERT INTO MemoryNode (
                     NodeId, TenantId, MemoryTier, Label, LogOddsWeight,
                     LastAccessed, Attributes, CreatedAt, UpdatedAt
                 ) VALUES (
                     @node_id, @tenant_id, @tier, @label, @weight,
-                    @now, JSON(@attributes), @now, @now
+                    @now, CAST(@attributes AS JSON), @now, @now
                 )
             """
+
+        def _write(batch: SpannerBatchProtocol) -> None:
             batch.execute_update(
                 node_sql,
                 {
@@ -618,6 +673,9 @@ class MemoryAPI:
                 context={"entity_type": entity_type, "relationship": relationship},
                 timestamp=created_at,
             )
+
+        with IdempotencyContext():
+            MemoryAPI._run_write_operation(database, _write)
 
     @staticmethod
     def _detect_contradictions(
@@ -806,7 +864,8 @@ class MemoryAPI:
             Exception: If database write fails (may be retried by caller).
         """
         database = SpannerClient.get_database()
-        with IdempotencyContext(), database.batch() as batch:
+
+        def _write(batch: SpannerBatchProtocol) -> AuditResponse:
             return MemoryAPI._insert_audit_event_in_batch(
                 batch=batch,
                 tenant_id=tenant_id,
@@ -815,6 +874,9 @@ class MemoryAPI:
                 context=context,
                 timestamp=timestamp,
             )
+
+        with IdempotencyContext():
+            return MemoryAPI._run_write_operation(database, _write)
 
     @staticmethod
     async def retrieve_context_window(
@@ -869,20 +931,50 @@ class MemoryAPI:
             LIMIT @window_size
         """
 
+        sql_fallback_query = """
+            SELECT
+                t.NodeId,
+                t.Label,
+                t.Attributes,
+                t.LogOddsWeight,
+                t.CreatedAt,
+                e.RelType
+            FROM MemoryNode AS s
+            JOIN MemoryEdge AS e
+                ON e.SourceNodeId = s.NodeId
+                AND e.TenantId = @tenant_id
+            JOIN MemoryNode AS t
+                ON t.NodeId = e.DestNodeId
+                AND t.TenantId = @tenant_id
+            WHERE s.TenantId = @tenant_id
+              AND s.NodeId = @session_id
+              AND s.MemoryTier = 'CONTEXT'
+              AND t.MemoryTier = 'CONTEXT'
+            ORDER BY t.CreatedAt DESC
+            LIMIT @window_size
+        """
+
         try:
             database = SpannerClient.get_database()
             turns: list[ContextTurn] = []
             total_weight_sum = 0.0
 
-            results = execute_sql_rows(
-                database,
-                gql_query,
-                {
-                    "tenant_id": tenant_id,
-                    "session_id": session_id,
-                    "window_size": window_size,
-                },
-            )
+            query_params = {
+                "tenant_id": tenant_id,
+                "session_id": session_id,
+                "window_size": window_size,
+            }
+            try:
+                results = execute_sql_rows(database, gql_query, query_params)
+            except Exception as error:
+                if not _is_match_query_unsupported(error):
+                    raise
+                logger.info(
+                    "retrieve_context_window_match_unsupported tenant_id=%s session_id=%s",
+                    tenant_id,
+                    session_id,
+                )
+                results = execute_sql_rows(database, sql_fallback_query, query_params)
 
             for row in results:
                 turn_id, label, attributes, weight, created_at, _rel_type = row
@@ -973,7 +1065,8 @@ class MemoryAPI:
         """
 
         database = SpannerClient.get_database()
-        with database.batch() as batch:
+
+        def _write(batch: SpannerBatchProtocol) -> None:
             batch.execute_update(
                 sql,
                 {
@@ -983,6 +1076,8 @@ class MemoryAPI:
                     "tier": memory_tier,
                 },
             )
+
+        MemoryAPI._run_write_operation(database, _write)
 
     @staticmethod
     async def _update_weight_on_successful_use(
