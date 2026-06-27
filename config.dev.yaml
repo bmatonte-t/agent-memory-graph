@@ -1,3 +1,7 @@
 logging:
   log_level: DEBUG
   third_party_log_level: INFO
+cloud_trace:
+  enabled: false
+cloud_logging:
+  enabled: false

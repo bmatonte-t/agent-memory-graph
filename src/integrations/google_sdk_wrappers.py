@@ -13,7 +13,7 @@ import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Protocol, TypeVar, cast
+from typing import Protocol, SupportsInt, TypeVar, cast
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ class SpannerDatabaseProtocol(Protocol):
 
     def batch(self) -> AbstractContextManager[SpannerBatchProtocol]: ...
 
-    def update_ddl(self, statements: list[str]) -> SpannerOperationProtocol: ...
+    def update_ddl(self, ddl_statements: list[str]) -> SpannerOperationProtocol: ...
 
     def run_in_transaction(self, callback: Callable[[SpannerTransactionProtocol], T]) -> T: ...
 
@@ -140,6 +140,41 @@ def execute_sql_rows_in_transaction(
     """
     rows = transaction.execute_sql(sql, params)
     return [tuple(row) for row in rows]
+
+
+def execute_dml(
+    database: SpannerDatabaseProtocol,
+    sql: str,
+    params: Mapping[str, object],
+) -> int:
+    """Execute a DML statement with batch-first, transaction fallback semantics.
+
+    Some emulator/runtime combinations expose ``batch`` objects without
+    ``execute_update``. In those cases we transparently fall back to a transaction
+    callback so DML still executes.
+
+    Args:
+        database: Spanner database protocol.
+        sql: DML statement.
+        params: Bound parameters for the statement.
+
+    Returns:
+        int: Number of affected rows when provided by the backend.
+    """
+    try:
+        with database.batch() as batch:
+            execute_update = getattr(batch, "execute_update", None)
+            if callable(execute_update):
+                rows_affected = execute_update(sql, params)
+                return int(cast("SupportsInt", rows_affected))
+    except AttributeError:
+        logger.debug("Spanner batch execute_update unavailable; falling back to transaction")
+
+    def _run(transaction: SpannerTransactionProtocol) -> int:
+        rows_affected = transaction.execute_update(sql, params)
+        return int(cast("SupportsInt", rows_affected))
+
+    return int(database.run_in_transaction(_run))
 
 
 def create_cloud_scheduler_http_job(

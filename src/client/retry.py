@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable, Coroutine
-from typing import TypeVar, overload
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
 
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 
 class RetryConfig:
@@ -47,11 +47,11 @@ class RetryConfig:
         Returns:
             Delay in seconds, capped at max_delay_sec.
         """
-        delay = self.base_delay_sec * (self.exponential_base ** attempt)
+        delay = self.base_delay_sec * (self.exponential_base**attempt)
         return min(delay, self.max_delay_sec)
 
 
-async def async_retry_with_backoff(
+async def async_retry_with_backoff[T](
     func: Callable[[], Coroutine[None, None, T]],
     config: RetryConfig | None = None,
     on_retry: Callable[[int, Exception], None] | None = None,

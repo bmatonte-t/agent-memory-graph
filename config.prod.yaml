@@ -1,0 +1,23 @@
+logging:
+  log_level: INFO
+  third_party_log_level: WARNING
+cloud_trace:
+  enabled: true
+  project_id: null
+cloud_logging:
+  enabled: true
+  project_id: null
+  labels:
+    service: agent-memory-graph
+    environment: prod
+governance:
+  weighting:
+    enabled: true
+    action_count_threshold: 5
+  authorization:
+    enabled: true
+    default_deny: true
+  retry:
+    max_attempts: 3
+    initial_backoff_seconds: 0.25
+    max_backoff_seconds: 5.0

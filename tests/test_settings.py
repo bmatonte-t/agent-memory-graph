@@ -15,6 +15,7 @@ from src.project_base.settings.models import Logging
 from src.security.governance import GovernanceSettings, WeightingTriggerPolicy
 
 EXPECTED_WEIGHTING_THRESHOLD = 7
+EXPECTED_PROD_WEIGHTING_THRESHOLD = 5
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -106,6 +107,26 @@ class TestYAMLLoading:
             config = Settings(environment=Environment.PROD)  # type: ignore[call-arg]
             # Should fall back to base config.yaml
             assert config.logging.log_level == LogLevel.INFO
+
+    def test_prod_yaml_overrides_base(
+        self,
+        base_yaml_config: Path,
+        prod_yaml_config: Path,
+        temp_config_dir: Path,
+    ) -> None:
+        """Test that config.prod.yaml overrides base settings for production."""
+        with patch("src.project_base.settings._core.ROOT", temp_config_dir):
+            config = Settings(environment=Environment.PROD)  # type: ignore[call-arg]
+            assert config.logging.log_level == LogLevel.INFO
+            assert config.logging.third_party_log_level == LogLevel.WARNING
+            assert config.cloud_trace.enabled is True
+            assert config.cloud_logging.enabled is True
+            assert config.governance.weighting.enabled is True
+            assert (
+                config.governance.weighting.action_count_threshold
+                == EXPECTED_PROD_WEIGHTING_THRESHOLD
+            )
+            assert config.governance.authorization.enabled is True
 
 
 class TestLoadingHierarchy:

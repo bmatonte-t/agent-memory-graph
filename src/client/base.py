@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 
 import httpx
 
@@ -13,7 +14,7 @@ from src.client.retry import RetryConfig, async_retry_with_backoff
 from src.models.mcp import MCPInvokeRequest, MCPInvokeResponse, MCPToolName
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from types import TracebackType
 
 logger = logging.getLogger(__name__)
 
@@ -65,14 +66,20 @@ class AgentMemoryGraphClient:
         self.retry_config = retry_config or RetryConfig()
         self.timeout_sec = timeout_sec
 
-    async def __aenter__(self) -> AgentMemoryGraphClient:
+    async def __aenter__(self) -> Self:
         """Async context manager entry."""
         if self._owns_http_client:
             self._http_client = httpx.AsyncClient()
         return self
 
-    async def __aexit__(self, exc_type: type, exc_val: Exception, exc_tb: Any) -> None:
+    async def __aexit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
+    ) -> None:
         """Async context manager exit."""
+        del exc_type, exc_val, exc_tb
         if self._owns_http_client and self._http_client:
             await self._http_client.aclose()
             self._http_client = None
@@ -107,7 +114,7 @@ class AgentMemoryGraphClient:
             httpx.HTTPError: On network or HTTP errors.
             ValueError: On validation errors.
         """
-        arguments = {
+        arguments: dict[str, Any] = {
             "query": query,
             "limit": min(100, max(1, limit)),
             "cognitive_weight_threshold": max(0.0, min(1.0, cognitive_weight_threshold)),
@@ -142,7 +149,7 @@ class AgentMemoryGraphClient:
             httpx.HTTPError: On network or HTTP errors.
             ValueError: On validation errors.
         """
-        arguments = {
+        arguments: dict[str, Any] = {
             "entity_type": entity_type,
             "entity_id": entity_id,
             "attributes": attributes,
@@ -175,7 +182,7 @@ class AgentMemoryGraphClient:
             httpx.HTTPError: On network or HTTP errors.
             ValueError: On validation errors.
         """
-        arguments = {
+        arguments: dict[str, Any] = {
             "source_node_id": source_node_id,
             "action": action,
         }
@@ -200,7 +207,7 @@ class AgentMemoryGraphClient:
             httpx.HTTPError: On network or HTTP errors.
             ValueError: On validation errors.
         """
-        arguments = {
+        arguments: dict[str, Any] = {
             "window_size": max(1, min(50, window_size)),
         }
 
@@ -260,22 +267,18 @@ class AgentMemoryGraphClient:
                     "Retry %d for %s: %s", attempt, tool_name, type(exc).__name__
                 ),
             )
-        except RuntimeError as e:
-            logger.error("Tool invocation failed after retries: %s", e)
+        except RuntimeError:
+            logger.exception("Tool invocation failed after retries")
             raise
 
         # Update session metrics
         self.session.increment_request(
-            mcp_response.token_usage.total_tokens
-            if mcp_response.token_usage
-            else 0
+            mcp_response.token_usage.total_tokens if mcp_response.token_usage else 0
         )
 
         # Validate response
         if not mcp_response.success:
-            error_msg = (
-                mcp_response.error.message if mcp_response.error else "unknown error"
-            )
+            error_msg = mcp_response.error.message if mcp_response.error else "unknown error"
             logger.error(
                 "Tool %s failed: %s (code: %s)",
                 tool_name,
@@ -289,7 +292,3 @@ class AgentMemoryGraphClient:
         logger.debug("Tool %s completed in %.1fms", tool_name, mcp_response.latency_ms)
 
         return mcp_response.result or {}
-
-
-# Required import for async_retry_with_backoff
-import asyncio  # noqa: E402
