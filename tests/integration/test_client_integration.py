@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import httpx
 import pytest
 
 from src.client.base import AgentMemoryGraphClient
@@ -18,9 +19,7 @@ class TestClientContextManager:
     """Test async context manager."""
 
     @pytest.mark.asyncio
-    async def test_context_manager_creates_http_client(
-        self, client_session: ClientSession
-    ) -> None:
+    async def test_context_manager_creates_http_client(self, client_session: ClientSession) -> None:
         """Context manager creates HTTP client on enter."""
         client = AgentMemoryGraphClient(
             base_url="http://localhost:8000",
@@ -42,8 +41,6 @@ class TestClientContextManager:
         self, client_session: ClientSession
     ) -> None:
         """Context manager does not close provided HTTP client."""
-        import httpx
-
         http_client = httpx.AsyncClient()
         client = AgentMemoryGraphClient(
             base_url="http://localhost:8000",

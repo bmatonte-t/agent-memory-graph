@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import time
 
-import pytest
-
 from src.client.rate_limit import RateLimiter
+
+EXPECTED_RATE_LIMIT = 50
+EXPECTED_BURST_CAPACITY = 100
+EXPECTED_LIMITER_REMAINING = 100
+EXPECTED_LIMITER_REMAINING_AFTER_ONE = 99
+EXPECTED_WAIT_MIN_SECONDS = 0.4
 
 
 class TestRateLimiter:
@@ -14,13 +18,16 @@ class TestRateLimiter:
 
     def test_init_burst_capacity_defaults_to_rate_limit(self) -> None:
         """Burst capacity defaults to rate_limit."""
-        limiter = RateLimiter(rate_limit=50)
-        assert limiter.burst_capacity == 50
+        limiter = RateLimiter(rate_limit=EXPECTED_RATE_LIMIT)
+        assert limiter.burst_capacity == EXPECTED_RATE_LIMIT
 
     def test_init_custom_burst_capacity(self) -> None:
         """Custom burst capacity."""
-        limiter = RateLimiter(rate_limit=50, burst_capacity=100)
-        assert limiter.burst_capacity == 100
+        limiter = RateLimiter(
+            rate_limit=EXPECTED_RATE_LIMIT,
+            burst_capacity=EXPECTED_BURST_CAPACITY,
+        )
+        assert limiter.burst_capacity == EXPECTED_BURST_CAPACITY
 
     def test_is_allowed_grants_token_on_available(self) -> None:
         """is_allowed() grants token when available."""
@@ -38,7 +45,9 @@ class TestRateLimiter:
 
     def test_refill_over_time(self) -> None:
         """Tokens refill over time."""
-        limiter = RateLimiter(rate_limit=60, window_sec=1, burst_capacity=1)  # 1 token per second, capacity 1
+        limiter = RateLimiter(
+            rate_limit=60, window_sec=1, burst_capacity=1
+        )  # 1 token per second, capacity 1
         assert limiter.is_allowed() is True  # Consume initial token
         assert limiter.tokens < 1.0
 
@@ -50,13 +59,16 @@ class TestRateLimiter:
 
     def test_remaining(self) -> None:
         """remaining() returns approximate token count."""
-        limiter = RateLimiter(rate_limit=100, burst_capacity=100)
+        limiter = RateLimiter(
+            rate_limit=EXPECTED_LIMITER_REMAINING,
+            burst_capacity=EXPECTED_LIMITER_REMAINING,
+        )
         remaining = limiter.remaining()
-        assert remaining == 100
+        assert remaining == EXPECTED_LIMITER_REMAINING
 
         limiter.is_allowed()
         remaining = limiter.remaining()
-        assert remaining == 99
+        assert remaining == EXPECTED_LIMITER_REMAINING_AFTER_ONE
 
     def test_wait_if_needed_blocks_until_available(self) -> None:
         """wait_if_needed() blocks until token available."""
@@ -70,4 +82,4 @@ class TestRateLimiter:
         elapsed = time.time() - start
 
         # Should wait ~0.5 seconds for one token to refill
-        assert elapsed >= 0.4
+        assert elapsed >= EXPECTED_WAIT_MIN_SECONDS

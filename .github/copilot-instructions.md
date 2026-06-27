@@ -23,6 +23,7 @@ Prioritize outcomes that improve customer trust and enterprise adoption:
 ## Core Workflow
 
 - Choose the right skill before starting work.
+- For Python implementation tasks, prefer the `tryolabs-python-implementation` agent and apply the `tryolabs-repo-template-coding` skill.
 - For non-trivial work: spec -> plan -> implement in small slices -> test -> review -> ship.
 - Keep scope tight: avoid unrelated refactors and cleanup.
 - Surface assumptions and ambiguities before implementing.
@@ -102,6 +103,10 @@ just check-all
   - just test-coverage
 - Check docstring coverage:
   - just docstring-coverage
+- Python implementation agent entrypoint:
+  - .github/agents/tryolabs-python-implementation.agent.md
+- Skill entrypoint:
+  - skills/tryolabs-repo-template-coding/SKILL.md
 
 ## Python and Testing Conventions
 

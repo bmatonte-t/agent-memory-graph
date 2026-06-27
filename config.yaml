@@ -1,6 +1,13 @@
 logging:
   log_level: INFO
   third_party_log_level: WARNING
+cloud_trace:
+  enabled: false
+  project_id: null
+cloud_logging:
+  enabled: false
+  project_id: null
+  labels: {}
 governance:
   weighting:
     enabled: false

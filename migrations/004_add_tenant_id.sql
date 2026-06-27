@@ -4,7 +4,7 @@
 -- Critical: tenant_id becomes part of composite primary key to enforce tenant isolation at schema level
 
 -- Step 1: Add tenant_id column to MemoryNode
-ALTER TABLE MemoryNode ADD COLUMN TenantId STRING(256) NOT NULL DEFAULT 'default-tenant';
+ALTER TABLE MemoryNode ADD COLUMN TenantId STRING(256) NOT NULL DEFAULT ('default-tenant');
 
 -- Step 2: Update PRIMARY KEY constraint to include TenantId
 -- Note: In Spanner, we must drop and recreate the primary key
@@ -22,7 +22,7 @@ CREATE INDEX idx_MemoryNode_TenantId_Tier ON MemoryNode (TenantId, MemoryTier);
 CREATE INDEX idx_MemoryNode_TenantId_Weight ON MemoryNode (TenantId, LogOddsWeight DESC);
 
 -- Step 6: Add tenant_id column to MemoryEdge
-ALTER TABLE MemoryEdge ADD COLUMN TenantId STRING(256) NOT NULL DEFAULT 'default-tenant';
+ALTER TABLE MemoryEdge ADD COLUMN TenantId STRING(256) NOT NULL DEFAULT ('default-tenant');
 
 -- Step 7: Add indexes for tenant_id filtering on edges
 CREATE INDEX idx_MemoryEdge_TenantId ON MemoryEdge (TenantId);
@@ -37,9 +37,9 @@ CREATE TABLE AUDIT_EVENTS (
   SourceNodeId STRING(256) NOT NULL,
   EventType STRING(256) NOT NULL,      -- e.g., CREATE_SESSION, ADD_SEMANTIC_FACT, MUTATION_ATTEMPT
   Attributes JSON,                     -- Event-specific context (request_id, user_id, etc.)
-  CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP(),
+  CreatedAt TIMESTAMP DEFAULT (CURRENT_TIMESTAMP()),
   PRIMARY KEY (EventId)
-) CLUSTER BY TenantId;
+);
 
 -- Step 10: Add indexes for audit queries
 CREATE INDEX idx_AUDIT_EVENTS_TenantId ON AUDIT_EVENTS (TenantId);

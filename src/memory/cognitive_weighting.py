@@ -4,7 +4,11 @@ import logging
 
 from src.db.schema import SchemaConfig
 from src.db.spanner_client import SpannerClient
-from src.integrations.google_sdk_wrappers import create_cloud_scheduler_http_job, execute_sql_rows
+from src.integrations.google_sdk_wrappers import (
+    create_cloud_scheduler_http_job,
+    execute_dml,
+    execute_sql_rows,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +49,15 @@ class CognitiveWeighting:
 
         try:
             database = SpannerClient.get_database()  # type: ignore[return-value]
-            with database.batch() as batch:  # type: ignore[union-attr]
-                batch.execute_update(  # type: ignore[union-attr]
-                    sql,
-                    {
-                        "decay_rate": decay_rate,
-                        "tier_semantic": SchemaConfig.MEMORY_TIER_SEMANTIC,
-                        "tier_context": SchemaConfig.MEMORY_TIER_CONTEXT,
-                    },
-                )
+            execute_dml(
+                database,
+                sql,
+                {
+                    "decay_rate": decay_rate,
+                    "tier_semantic": SchemaConfig.MEMORY_TIER_SEMANTIC,
+                    "tier_context": SchemaConfig.MEMORY_TIER_CONTEXT,
+                },
+            )
         except Exception as e:
             msg = f"Failed to decay weights: {e}"
             raise RuntimeError(msg) from e
@@ -96,15 +100,15 @@ class CognitiveWeighting:
 
         try:
             database = SpannerClient.get_database()  # type: ignore[return-value]
-            with database.batch() as batch:  # type: ignore[union-attr]
-                batch.execute_update(  # type: ignore[union-attr]
-                    sql,
-                    {
-                        "threshold": threshold,
-                        "tier_semantic": SchemaConfig.MEMORY_TIER_SEMANTIC,
-                        "tier_context": SchemaConfig.MEMORY_TIER_CONTEXT,
-                    },
-                )
+            execute_dml(
+                database,
+                sql,
+                {
+                    "threshold": threshold,
+                    "tier_semantic": SchemaConfig.MEMORY_TIER_SEMANTIC,
+                    "tier_context": SchemaConfig.MEMORY_TIER_CONTEXT,
+                },
+            )
         except Exception as e:
             msg = f"Failed to prune weights: {e}"
             raise RuntimeError(msg) from e

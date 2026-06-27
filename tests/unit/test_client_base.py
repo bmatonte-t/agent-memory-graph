@@ -2,16 +2,22 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
 
 from src.client.base import AgentMemoryGraphClient
 from src.client.models import ClientSession
-from src.client.retry import RetryConfig
-from src.models.mcp import MCPInvokeResponse, MCPToolError, MCPTokenUsage
+
+EXPECTED_LIMIT_CAP = 100
+EXPECTED_REQUEST_COUNT = 1
+EXPECTED_SECOND_REQUEST_COUNT = 2
+EXPECTED_TOTAL_TOKENS = 30
+EXPECTED_ENTITY_WEIGHT = 0.5
+EXPECTED_FIRST_TOKENS_USED = 100
+EXPECTED_SECOND_TOKENS_USED = 150
+EXPECTED_EXPORTED_TOKENS = 50
 
 
 @pytest.fixture
@@ -100,13 +106,11 @@ class TestMemorySearch:
         # Verify
         assert result["total_retrieved"] == 1
         assert len(result["results"]) == 1
-        assert client.session.request_count == 1
-        assert client.session.tokens_used == 30
+        assert client.session.request_count == EXPECTED_REQUEST_COUNT
+        assert client.session.tokens_used == EXPECTED_TOTAL_TOKENS
 
     @pytest.mark.asyncio
-    async def test_search_limits_parameters(
-        self, client: AgentMemoryGraphClient
-    ) -> None:
+    async def test_search_limits_parameters(self, client: AgentMemoryGraphClient) -> None:
         """Search enforces parameter limits."""
         mock_response = AsyncMock(spec=httpx.Response)
         mock_response.json.return_value = {
@@ -123,7 +127,7 @@ class TestMemorySearch:
         # Verify limits applied
         call_args = client.http_client.post.call_args
         request_body = call_args.kwargs["json"]
-        assert request_body["arguments"]["limit"] == 100  # capped
+        assert request_body["arguments"]["limit"] == EXPECTED_LIMIT_CAP  # capped
         assert request_body["arguments"]["cognitive_weight_threshold"] == 1.0  # capped
 
 
@@ -159,12 +163,10 @@ class TestMemoryAddFact:
 
         # Verify
         assert result["entity_id"] == "person_alice_001"
-        assert result["weight"] == 0.5
+        assert result["weight"] == EXPECTED_ENTITY_WEIGHT
 
     @pytest.mark.asyncio
-    async def test_add_fact_without_relationship(
-        self, client: AgentMemoryGraphClient
-    ) -> None:
+    async def test_add_fact_without_relationship(self, client: AgentMemoryGraphClient) -> None:
         """Add fact without relationship."""
         mock_response = AsyncMock(spec=httpx.Response)
         mock_response.json.return_value = {
@@ -222,9 +224,7 @@ class TestMemoryRecallContext:
     """Test memory_recall_context tool."""
 
     @pytest.mark.asyncio
-    async def test_recall_context_success(
-        self, client: AgentMemoryGraphClient
-    ) -> None:
+    async def test_recall_context_success(self, client: AgentMemoryGraphClient) -> None:
         """Successful context recall."""
         response_data = {
             "tool_name": "memory_recall_context",
@@ -232,9 +232,7 @@ class TestMemoryRecallContext:
             "latency_ms": 25.0,
             "result": {
                 "session_id": "test_session_001",
-                "turns": [
-                    {"turn_id": "turn_1", "role": "user", "weight": 0.9}
-                ],
+                "turns": [{"turn_id": "turn_1", "role": "user", "weight": 0.9}],
                 "total_weight_sum": 0.9,
             },
         }
@@ -254,9 +252,7 @@ class TestErrorHandling:
     """Test error handling."""
 
     @pytest.mark.asyncio
-    async def test_tool_failure_raises_value_error(
-        self, client: AgentMemoryGraphClient
-    ) -> None:
+    async def test_tool_failure_raises_value_error(self, client: AgentMemoryGraphClient) -> None:
         """Tool failure response raises ValueError."""
         response_data = {
             "tool_name": "memory_search",
@@ -277,13 +273,9 @@ class TestErrorHandling:
             await client.search(query="")
 
     @pytest.mark.asyncio
-    async def test_http_error_propagates(
-        self, client: AgentMemoryGraphClient
-    ) -> None:
+    async def test_http_error_propagates(self, client: AgentMemoryGraphClient) -> None:
         """HTTP errors propagate after retries exhausted."""
-        client.http_client.post = AsyncMock(
-            side_effect=httpx.HTTPError("Connection refused")
-        )
+        client.http_client.post = AsyncMock(side_effect=httpx.HTTPError("Connection refused"))
 
         # HTTPError retries, so we expect RuntimeError after exhaustion
         with pytest.raises(RuntimeError, match="All 3 retry attempts exhausted"):
@@ -296,17 +288,17 @@ class TestSessionTracking:
     def test_session_increments_request_count(self, client_session: ClientSession) -> None:
         """Session tracks request count and token usage."""
         assert client_session.request_count == 0
-        client_session.increment_request(token_count=100)
-        assert client_session.request_count == 1
-        assert client_session.tokens_used == 100
-        client_session.increment_request(token_count=50)
-        assert client_session.request_count == 2
-        assert client_session.tokens_used == 150
+        client_session.increment_request(token_count=EXPECTED_FIRST_TOKENS_USED)
+        assert client_session.request_count == EXPECTED_REQUEST_COUNT
+        assert client_session.tokens_used == EXPECTED_FIRST_TOKENS_USED
+        client_session.increment_request(token_count=EXPECTED_EXPORTED_TOKENS)
+        assert client_session.request_count == EXPECTED_SECOND_REQUEST_COUNT
+        assert client_session.tokens_used == EXPECTED_SECOND_TOKENS_USED
 
     def test_session_to_dict(self, client_session: ClientSession) -> None:
         """Session exports metadata as dict."""
         client_session.increment_request(token_count=50)
         metadata = client_session.to_dict()
         assert metadata["session_id"] == client_session.session_id
-        assert metadata["request_count"] == 1
-        assert metadata["tokens_used"] == 50
+        assert metadata["request_count"] == EXPECTED_REQUEST_COUNT
+        assert metadata["tokens_used"] == EXPECTED_EXPORTED_TOKENS

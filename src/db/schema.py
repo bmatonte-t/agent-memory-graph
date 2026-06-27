@@ -1,6 +1,7 @@
 """Schema initialization, migrations, and validation."""
 
 import logging
+import os
 from pathlib import Path
 from typing import ClassVar
 
@@ -8,6 +9,7 @@ from google.api_core import exceptions as gcp_exceptions  # type: ignore[import-
 
 from src.integrations.google_sdk_wrappers import (
     SpannerDatabaseProtocol,
+    execute_dml,
     execute_sql_rows,
 )
 
@@ -74,6 +76,12 @@ class SchemaManager:
                 sql = f.read()
 
             statements = cls._parse_sql_statements(sql)
+            if os.getenv("SPANNER_EMULATOR_HOST"):
+                statements = [
+                    statement
+                    for statement in statements
+                    if "PROPERTY GRAPH" not in statement.upper()
+                ]
             if not statements:
                 logger.warning(
                     "Skipping migration with no executable statements: %s", migration_file
@@ -81,9 +89,13 @@ class SchemaManager:
                 continue
 
             try:
-                operation = database.update_ddl(statements=statements)
+                operation = database.update_ddl(ddl_statements=statements)
                 operation.result()
             except (gcp_exceptions.GoogleAPICallError, gcp_exceptions.RetryError) as error:
+                error_text = str(error).lower()
+                if "already exists" in error_text or "duplicate" in error_text:
+                    logger.info("Skipping already-applied migration: %s", migration_file)
+                    continue
                 msg = f"Failed to apply migration {migration_file}: {error}"
                 raise RuntimeError(msg) from error
 
@@ -199,8 +211,7 @@ class SchemaManager:
 
         for table in tables:
             try:
-                with database.batch() as batch:
-                    batch.execute_update(f"DELETE FROM {table} WHERE true", {})  # noqa: S608
+                execute_dml(database, f"DELETE FROM {table} WHERE true", {})  # noqa: S608
             except Exception:  # noqa: BLE001
                 logger.debug("Error truncating %s", table, exc_info=True)
 

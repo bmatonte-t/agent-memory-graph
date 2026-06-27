@@ -25,14 +25,14 @@ CREATE TABLE ENGRAM_EVIDENCE (
   AccessTimestamp TIMESTAMP NOT NULL,
 
   -- Usage tracking for cognitive weighting (Phase 1 + Phase 5 integration)
-  UsageCount INT64 NOT NULL DEFAULT 0,
+  UsageCount INT64 NOT NULL DEFAULT (0),
   LastUsedTimestamp TIMESTAMP,
 
   -- Cognitive weight for evidence quality and freshness (Phase 5: Engram confidence)
-  CognitiveWeight FLOAT64 NOT NULL DEFAULT 1.0,
+  CognitiveWeight FLOAT64 NOT NULL DEFAULT (1.0),
 
   -- Sufficiency flag: explicit signal for whether this evidence was sufficient for grounding
-  IsSufficient BOOL NOT NULL DEFAULT TRUE,
+  IsSufficient BOOL NOT NULL DEFAULT (TRUE),
 
   -- Audit trail linkage: reference to AUDIT_EVENTS entry that recorded this evidence retrieval
   AuditLogRef STRING(36),
@@ -44,10 +44,8 @@ CREATE TABLE ENGRAM_EVIDENCE (
   ExtendedMetadata STRING(2048),
 
   -- Immutable creation time for audit compliance
-  CreatedAt TIMESTAMP NOT NULL,
-
-) PRIMARY KEY (TenantId, EvidenceId),
-  INTERLEAVE IN PARENT MEMORY_GRAPH ON DELETE CASCADE;
+  CreatedAt TIMESTAMP NOT NULL
+) PRIMARY KEY (TenantId, EvidenceId);
 
 -- Index for efficient lookup of evidence by tenant + source type + timestamp
 CREATE INDEX idx_ENGRAM_EVIDENCE_TenantId_SourceType_AccessTimestamp
@@ -56,11 +54,6 @@ ON ENGRAM_EVIDENCE (TenantId, SourceType, AccessTimestamp DESC);
 -- Index for temporal analysis: find recent evidence for a tenant
 CREATE INDEX idx_ENGRAM_EVIDENCE_TenantId_CreatedAt
 ON ENGRAM_EVIDENCE (TenantId, CreatedAt DESC);
-
--- Index for synthesis linkage: find all evidence used in a synthesis
--- (Supports Phase 5: analyzing which evidence was actually used)
-CREATE INDEX idx_ENGRAM_EVIDENCE_SynthesisRefs
-ON ENGRAM_EVIDENCE (TenantId, SynthesisRefs);
 
 -- Index for cognitive weight analysis: find high-weight evidence (Phase 1 + Phase 5)
 CREATE INDEX idx_ENGRAM_EVIDENCE_CognitiveWeight

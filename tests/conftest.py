@@ -52,7 +52,15 @@ def dev_yaml_config(temp_config_dir: Path) -> Path:
 def prod_yaml_config(temp_config_dir: Path) -> Path:
     """Create a config.prod.yaml file."""
     config_file = temp_config_dir / "config.prod.yaml"
-    config_data = {"logging": {"log_level": "WARNING", "third_party_log_level": "ERROR"}}
+    config_data = {
+        "logging": {"log_level": "INFO", "third_party_log_level": "WARNING"},
+        "cloud_trace": {"enabled": True},
+        "cloud_logging": {"enabled": True},
+        "governance": {
+            "weighting": {"enabled": True, "action_count_threshold": 5},
+            "authorization": {"enabled": True, "default_deny": True},
+        },
+    }
     config_file.write_text(yaml.dump(config_data))
     return config_file
 
