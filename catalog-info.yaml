@@ -1,0 +1,29 @@
+apiVersion: backstage.io/v1alpha1
+kind: Component
+metadata:
+  name: agent-memory-graph
+  description: >
+    GCP-native shared memory platform for AI agents. Provides tripartite memory
+    (Context, Semantic, Audit), a grounding-first MindMap reasoning pipeline,
+    and typed MCP tools for stable multi-agent orchestration.
+  labels:
+    product: agent-memory-graph
+    team: data-ai
+    domain: agents
+  annotations:
+    # GitLab source location
+    gitlab.com/project-slug: latamairlines/data/data-ai-ops/agent-memory-graph
+    # Runbook location
+    runbook-url: https://latamairlines.atlassian.net/wiki/spaces/DATA/agent-memory-graph-runbook
+    # Deployment environment (updated by CI on each deploy)
+    deployment/environment: "prod"
+spec:
+  type: service
+  lifecycle: production
+  owner: group:data-ai
+  system: data-ai-platform
+  dependsOn:
+    - resource:default/spanner-agent-memory-graph
+    - resource:default/cloud-run-agent-memory-graph
+  providesApis:
+    - agent-memory-graph-mcp-api

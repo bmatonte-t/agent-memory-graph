@@ -1,0 +1,47 @@
+###############################################################################
+# GitLab CI pipeline — agent-memory-graph (single-tenant-variant)
+#
+# Inherits the Cosmos shared Terraform pipeline template, matching the
+# pattern used across all data products (emx-magic-supply-infrastructure etc.)
+#
+# Usage:
+#   - Push to any branch → terraform plan (dev workspace)
+#   - Merge to develop  → terraform apply (dev workspace)
+#   - Merge to main     → terraform plan (intg) → human approval → apply (intg)
+#                         → human approval → apply (prod)
+###############################################################################
+
+include:
+  - project: "latamairlines/data/data-ai-ops/cosmos/cicd-pipelines/base-pipelines"
+    ref: main
+    file: "/templates/terraform-pipeline.yml"
+
+variables:
+  # Product name follows the Cosmos naming convention
+  PRODUCT_NAME: "agent-memory-graph"
+
+  # State bucket is supplied as a CI variable in the platform settings;
+  # do not hardcode a bucket name here.
+  # TF_STATE_BUCKET: supplied by platform
+
+  # Integration test workflow run before prod gate
+  intg_workflow: advana
+
+  # Require human approval before applying to prod
+  approval_on_prod: "true"
+
+  # Trigger on Terraform file changes and the container image tag file
+  TF_WORKING_DIR: "infrastructure/terraform"
+
+# ---------------------------------------------------------------------------
+# Workspace-per-environment override
+#
+# The base template runs `terraform workspace select $CI_ENVIRONMENT_SLUG`
+# which maps branch names to workspaces:
+#   develop  → dev
+#   intg     → intg
+#   main     → prod
+# ---------------------------------------------------------------------------
+
+# Any additional product-specific jobs can be added below using the
+# `extends` keyword to inherit from the base template stages.
