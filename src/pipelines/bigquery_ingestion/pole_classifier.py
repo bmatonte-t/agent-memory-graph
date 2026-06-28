@@ -13,9 +13,9 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-import vertexai
 from pydantic import BaseModel, Field
-from vertexai.generative_models import GenerativeModel, Part
+
+from src.integrations.google_sdk_wrappers import generate_generative_ai_text
 
 if TYPE_CHECKING:
     from src.pipelines.bigquery_ingestion.schema_analyzer import (
@@ -66,7 +66,7 @@ class TableClassification(BaseModel):
 class ClassificationCache:
     """Simple in-memory cache for POLE+O classifications (2-week TTL)."""
 
-    def __init__(self, ttl_hours: int = 336) -> None:
+    def __init__(self, ttl_hours: float = 336) -> None:
         """Initialize cache with TTL (default 2 weeks = 336 hours).
 
         Args:
@@ -139,10 +139,6 @@ class POLEClassifier:
         self.model_name = model_name
         self.cache = cache or ClassificationCache()
 
-        # Initialize Vertex AI
-        vertexai.init(project=project_id, location=location)
-        self.model = GenerativeModel(model_name)
-
     def classify_columns(
         self,
         table_metadata: TableMetadata,
@@ -208,11 +204,10 @@ class POLEClassifier:
         )
 
         try:
-            # Call Gemini with structured outputs
-            response = self.model.generate_content(
-                [
-                    Part.from_text(prompt),
-                ],
+            # Use shared SDK wrapper while preserving strict JSON-schema response constraints.
+            response_text = generate_generative_ai_text(
+                self.model_name,
+                prompt,
                 generation_config={
                     "response_mime_type": "application/json",
                     "response_schema": {
@@ -250,7 +245,7 @@ class POLEClassifier:
             )
 
             # Parse response
-            response_json = json.loads(response.text)
+            response_json = json.loads(response_text)
             classified_columns: list[ColumnClassification] = []
 
             for item in response_json.get("classifications", []):

@@ -406,16 +406,19 @@ class TestWarningsHook:
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         """Test that a non-None file argument bypasses the logging system entirely."""
-        LoggingConfiguration._install_warnings_hook()
+        with patch("warnings.showwarning") as original_showwarning:
+            LoggingConfiguration._install_warnings_hook()
 
-        with caplog.at_level(logging.WARNING):
-            warnings.showwarning(
-                UserWarning("file warning"),
-                UserWarning,
-                "anywhere.py",
-                lineno=1,
-                file=io.StringIO(),
-            )
+            with caplog.at_level(logging.WARNING):
+                warnings.showwarning(
+                    UserWarning("file warning"),
+                    UserWarning,
+                    "anywhere.py",
+                    lineno=1,
+                    file=io.StringIO(),
+                )
+
+        original_showwarning.assert_called_once()
 
         assert not caplog.records
 

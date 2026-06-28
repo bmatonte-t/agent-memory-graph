@@ -16,6 +16,8 @@ It applies the same workflow used in the template and this workspace instruction
 - Type Safety and Gate Discipline
 - CI Workflow Rules
 
+The implementation target is not merely local correctness. Code must be adjusted until it satisfies the repository's `code-quality` GitHub Actions job contract, using the same commands and pass criteria that CI applies.
+
 ## When To Use
 
 Use this skill when:
@@ -35,6 +37,7 @@ Do not use this skill for:
 1. Confirm repo is template-aligned:
   - `justfile` includes `lint`, `check-types`, `check-format`, `test-coverage`, `docstring-coverage`, `check-all`.
   - `pyproject.toml` targets Python 3.14+, Ruff, basedpyright, pytest config.
+  - The repository workflow defines a `code-quality` job whose blocking checks are the standard to satisfy, not an approximation.
 2. Keep scope surgical:
   - Touch only files needed for the task.
   - Avoid opportunistic refactors.
@@ -95,6 +98,15 @@ Do not use this skill for:
 2. Use hard failures only for issues the agent can fix automatically.
 3. Emit warnings (not failures) for metadata checks that cannot be reliably auto-remediated.
 4. Keep branch protection checks deterministic and reproducible locally.
+5. When the repository defines a `code-quality` job, treat its check list as mandatory completion criteria for code changes.
+6. Match the workflow's exact blocking steps and commands unless the task explicitly changes that workflow:
+  - `lint` -> `just lint`
+  - `check-format` -> `just check-format`
+  - `docstring-coverage` -> `just docstring-coverage`
+  - `check-types` -> `just check-types`
+  - `test-coverage` -> `just test-coverage`
+7. Do not consider code complete if it only passes targeted local checks but would still fail any blocking `code-quality` step.
+8. If a change introduces friction with these gates, fix the code to conform to the gates before proposing CI changes. Only change the workflow when the user explicitly asks to change the standard itself.
 
 ## Verification
 
@@ -104,7 +116,14 @@ Run fast local loops first on touched files:
 3. `uv run basedpyright <touched_paths>`
 4. `uv run pytest <targeted_tests> -q`
 
-Before declaring completion, run full gate:
+Before declaring completion, verify alignment with the `code-quality` job by running its effective gates locally:
+1. `just lint`
+2. `just check-format`
+3. `just docstring-coverage`
+4. `just check-types`
+5. `just test-coverage`
+
+Then run the repository-wide completion gate:
 1. `just check-all`
 
 Completion criteria:
@@ -113,6 +132,8 @@ Completion criteria:
 - Type check clean
 - Tests passing (or documented known blockers)
 - Docstring coverage gate passing
+- Coverage gate passing
+- No failing step from the repository `code-quality` job contract
 
 ## Common Rationalizations To Reject
 
@@ -120,6 +141,8 @@ Completion criteria:
 - "This broad except is fine for now."
 - "I only changed one file, no need to run full gate."
 - "We can patch CI later."
+- "The local targeted test passed, so the `code-quality` job can fail for now."
+- "Changing CI is easier than making the code satisfy the existing gate."
 
 ## Red Flags
 
@@ -128,11 +151,12 @@ Completion criteria:
 - Added dependencies with `pip install` instead of `uv add`.
 - Completion claimed without `just check-all` evidence.
 - CI checks failing early and hiding downstream failures.
+- A change passes ad hoc local commands but still fails one of `lint`, `check-format`, `docstring-coverage`, `check-types`, or `test-coverage`.
 
 ## Output Contract For Agents Using This Skill
 
 When reporting completion:
 1. List files changed.
 2. Summarize behavior impact.
-3. Report verification commands executed and key outcomes.
+3. Report verification commands executed and key outcomes, explicitly covering the repository `code-quality` steps.
 4. State any residual risks or follow-up actions.

@@ -2,8 +2,8 @@
 
 **Confidential — Internal Use & Customer Conversations**
 
-Date: 2026-06-27  
-Audience: Enterprise IT leaders, AI product teams, security/compliance stakeholders  
+Date: 2026-06-27
+Audience: Enterprise IT leaders, AI product teams, security/compliance stakeholders
 Context: Single-organization deployment; not a marketplace product
 
 ## One-Line Pitch

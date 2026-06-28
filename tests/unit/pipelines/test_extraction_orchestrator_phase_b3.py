@@ -429,26 +429,32 @@ class TestDocumentProcessing:
     def test_process_document_extraction_error(self) -> None:
         """Test error handling when extraction fails."""
         orchestrator = ExtractionOrchestrator()
-        with patch.object(
-            orchestrator.extractor,
-            "extract",
-            side_effect=ExtractionError(
-                error_code="PDF_FILE_NOT_FOUND",
-                error_message="File not found",
-                file_path="/tmp/missing.pdf",
-                file_format="pdf",
+        with (
+            patch.object(
+                orchestrator.extractor,
+                "extract",
+                side_effect=ExtractionError(
+                    error_code="PDF_FILE_NOT_FOUND",
+                    error_message="File not found",
+                    file_path="/tmp/missing.pdf",
+                    file_format="pdf",
+                ),
             ),
-        ), pytest.raises(ExtractionOrchestrationError, match="EXTRACTION_FAILED"):
+            pytest.raises(ExtractionOrchestrationError, match="EXTRACTION_FAILED"),
+        ):
             orchestrator.process_document("/tmp/missing.pdf")
 
     def test_process_document_unexpected_error(self) -> None:
         """Test error handling for unexpected exceptions."""
         orchestrator = ExtractionOrchestrator()
-        with patch.object(
-            orchestrator.extractor,
-            "extract",
-            side_effect=ValueError("Unexpected error"),
-        ), pytest.raises(ExtractionOrchestrationError, match="PROCESSING_FAILED"):
+        with (
+            patch.object(
+                orchestrator.extractor,
+                "extract",
+                side_effect=ValueError("Unexpected error"),
+            ),
+            pytest.raises(ExtractionOrchestrationError, match="PROCESSING_FAILED"),
+        ):
             orchestrator.process_document("/tmp/test.pdf")
 
     def test_process_document_multipage(self) -> None:
@@ -769,9 +775,12 @@ class TestErrorHandling:
                 file_paths=["/tmp/test.pdf"],
                 detect_entities=True,
             )
-            with patch.object(
-                orchestrator,
-                "process_document",
-                return_value=doc,
-            ), pytest.raises(ExtractionOrchestrationError, match="DEDUPLICATION_FAILED"):
+            with (
+                patch.object(
+                    orchestrator,
+                    "process_document",
+                    return_value=doc,
+                ),
+                pytest.raises(ExtractionOrchestrationError, match="DEDUPLICATION_FAILED"),
+            ):
                 orchestrator.process_batch(request)

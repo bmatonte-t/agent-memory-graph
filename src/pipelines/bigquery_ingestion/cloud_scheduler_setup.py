@@ -14,8 +14,19 @@ from __future__ import annotations
 import json
 import logging
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, cast
 
 from google.cloud import scheduler_v1
+
+from src.integrations.google_sdk_wrappers import as_scheduler_client
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from src.integrations.google_sdk_wrappers import (
+        SchedulerClientProtocol,
+        SchedulerJobData,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -149,8 +160,11 @@ class CloudSchedulerManager:
         self.project_id = project_id
         self.region = region
         self.topic_name = topic_name
-        self.client = client or scheduler_v1.CloudSchedulerClient()
-        self.parent_path = self.client.common_location_path(project_id, region)
+        # Keep reference to SDK client for methods not in protocol
+        self._sdk_client = client or scheduler_v1.CloudSchedulerClient()
+        # Cast to typed protocol at the boundary
+        self.client: SchedulerClientProtocol = as_scheduler_client(self._sdk_client)
+        self.parent_path = self._sdk_client.common_location_path(project_id, region)
 
         logger.debug(
             "Initialized CloudSchedulerManager (project=%s, region=%s)",
@@ -234,15 +248,16 @@ class CloudSchedulerManager:
                     "job": job,
                 }
             )
+            created_job_data = cast("SchedulerJobData", created_job)
 
             logger.info(
                 "Created Cloud Scheduler job: %s (table=%s, schedule=%s)",
-                created_job.name,
+                created_job_data.name,
                 table_id,
                 config.schedule,
             )
 
-            return created_job.name  # noqa: TRY300
+            return created_job_data.name  # noqa: TRY300
 
         except Exception as e:
             msg = f"Failed to create scheduler job for {table_id}: {e!s}"
@@ -340,7 +355,7 @@ class CloudSchedulerManager:
         try:
             job = self.client.get_job(request={"name": job_name})
             logger.debug("Retrieved Cloud Scheduler job: %s", job_name)
-            return job  # noqa: TRY300
+            return cast("scheduler_v1.Job", job)
 
         except Exception as e:
             msg = f"Failed to retrieve scheduler job {job_name}: {e!s}"
@@ -363,7 +378,8 @@ class CloudSchedulerManager:
         """
         try:
             request = {"parent": self.parent_path}
-            jobs = list(self.client.list_jobs(request=request))
+            jobs_iter = cast("Iterable[scheduler_v1.Job]", self.client.list_jobs(request=request))
+            jobs = list(jobs_iter)
             logger.debug("Listed %d Cloud Scheduler jobs", len(jobs))
             return jobs  # noqa: TRY300
 
@@ -390,4 +406,4 @@ class CloudSchedulerManager:
         """
         # Replace underscores with hyphens and lowercase
         job_id = table_id.replace("_", "-").lower()
-        return self.client.job_path(self.project_id, self.region, job_id)
+        return self._sdk_client.job_path(self.project_id, self.region, job_id)

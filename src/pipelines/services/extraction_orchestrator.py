@@ -45,6 +45,11 @@ logger = logging.getLogger(__name__)
 MIN_ENTITY_LENGTH = 3
 
 
+# Entity map type for deduplication
+# Maps entity_id (str) -> entity_name (str)
+EntityMap = dict[str, str]
+
+
 class ExtractionOrchestrationError(Exception):
     """Custom exception for extraction orchestration failures.
 
@@ -168,9 +173,9 @@ class ExtractionResult:
     @property
     def total_entities(self) -> int:
         """Return total unique entities across all documents."""
-        all_entities = {}
+        all_entities: dict[str, str] = {}
         for doc in self.documents:
-            all_entities.update(doc.entities)
+            all_entities.update(doc.entities)  # type: ignore[arg-type]
         return len(all_entities)
 
     @property
@@ -231,7 +236,7 @@ class ExtractionOrchestrator:
     def extract_entities_from_text(
         self,
         text: str,
-    ) -> dict[str, str]:
+    ) -> dict[str, str] | dict[str, object]:
         """Extract entities from raw text content.
 
         Current implementation uses naive word-based extraction.
@@ -243,7 +248,7 @@ class ExtractionOrchestrator:
         Returns:
             dict[str, str]: Mapping of entity_id to entity_name.
         """
-        entities = {}
+        entities: dict[str, str] = {}
         # Naive extraction: split by whitespace and filter
         words = text.split()
         entity_id = 0
@@ -284,7 +289,10 @@ class ExtractionOrchestrator:
             entities: dict[str, str] = {}
             if detect_entities:
                 combined_text = " ".join(page.text for page in extracted_doc.pages)
-                entities = self.extract_entities_from_text(combined_text)
+                extracted: dict[str, str] | dict[str, object] = self.extract_entities_from_text(
+                    combined_text
+                )
+                entities = {k: str(v) for k, v in extracted.items()}
 
             result = DocumentWithEntities(
                 document=extracted_doc,
@@ -371,9 +379,9 @@ class ExtractionOrchestrator:
                 )
 
             # Stage 3: Combine entities
-            all_entities = {}
+            all_entities: dict[str, str] = {}
             for doc in documents:
-                all_entities.update(doc.entities)
+                all_entities.update(doc.entities)  # type: ignore[typeddict-unknown-key]
 
             # Stage 4: Deduplicate entities if requested and entities exist
             dedup_result = None

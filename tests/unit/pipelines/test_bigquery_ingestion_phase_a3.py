@@ -437,8 +437,8 @@ class TestBigQueryIngestJobPipelineStages:
         mock_metadata.table_name = "table1"
         mock_classification = MagicMock()
         mock_classification.classified_columns = []
-        mock_classification.overall_confidence = 0.9
-        mock_classification.timestamp = datetime.now(UTC).isoformat()
+        mock_classification.overall_confidence = DEFAULT_CONFIDENCE
+        mock_classification.classification_timestamp = datetime.now(UTC).isoformat()
 
         with (
             patch.object(job.schema_analyzer, "sample_rows", return_value=[]),
@@ -450,7 +450,7 @@ class TestBigQueryIngestJobPipelineStages:
         ):
             result = job._classify_schema(mock_metadata)
 
-            assert result["overall_confidence"] == DEFAULT_CONFIDENCE
+            assert result.overall_confidence == DEFAULT_CONFIDENCE
 
     def test_map_schema(self, job: BigQueryIngestJob) -> None:
         """Test schema mapping stage."""
