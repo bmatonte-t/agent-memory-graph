@@ -4,21 +4,21 @@ Apply these rules for all coding tasks in this repository unless the user explic
 
 ## Project Identity
 
-You are assisting with the Cognitive Agent Memory Graph, a GCP-native, deterministic, anti-hallucination memory platform.
+You are assisting with the **Cognitive Agent Memory Graph**, an enterprise-grade AI agent coordination platform for single organizations.
 
-The system is designed as a production solution for managing memory across multiple agents operating in the same GCP project or organization, with strict guarantees for safety, token efficiency, and grounded responses.
+The system is designed as a production solution for managing shared memory across multiple AI agents operating within a single enterprise environment, with strict guarantees for safety, grounding, auditability, and operational transparency.
 
 ## Product Objective
 
-Build and evolve this product to be commercially viable and publishable in Google Cloud Marketplace.
+Build and evolve this product as an enterprise AI coordination platform for secure, grounded, multi-agent deployments within organizations.
 
-Prioritize outcomes that improve customer trust and enterprise adoption:
-- Clear value proposition and buyer-facing positioning.
-- Fast onboarding and time-to-value.
-- Production-grade reliability, observability, and supportability.
-- Strong security and IAM-aligned access controls.
-- Auditable operations and transparent deployment/upgrade paths.
-- Cost-aware operation, including low token-spending patterns.
+Prioritize outcomes that ensure customer success and operational excellence:
+- **Customer Integration** — Seamless deployment within customer GCP organizations and infrastructure
+- **Enterprise Quality** — Production-grade reliability, observability, and supportability from day one
+- **Security & Compliance** — Strict tenant isolation, immutable audit trails, and governance controls
+- **Operational Transparency** — Clear observability, deterministic behavior, and explainable decisions
+- **Reduced Hallucination** — All responses grounded in organizational data and evidence
+- **Cost Awareness** — Efficient token usage, intelligent caching, and predictable performance
 
 ## Core Workflow
 
