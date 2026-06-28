@@ -28,7 +28,7 @@ TABLE_SHAPE_TYPE = 14
 logger = logging.getLogger(__name__)
 
 
-def _to_iso8601(value: Any) -> str:
+def _to_iso8601(value: Any) -> str:  # noqa: ANN401
     """Convert value to ISO8601 timestamp string.
 
     Handles datetime objects, strings, and None values gracefully.
@@ -205,7 +205,7 @@ class PDFExtractor:
     """Extract text and metadata from PDF files."""
 
     @staticmethod
-    def extract(file_path: str) -> ExtractedDocument:
+    def extract(file_path: str) -> ExtractedDocument:  # noqa: PLR0912,PLR0915
         """Extract all pages from a PDF file.
 
         Args:
