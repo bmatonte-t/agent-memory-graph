@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
+from unittest.mock import patch
 
 import pytest
 import yaml
 
 if TYPE_CHECKING:
+    from collections.abc import Generator
     from pathlib import Path
 
 import uuid
@@ -20,6 +22,8 @@ from src.models.schemas import (
     RecordAuditEventRequest,
     RetrieveContextWindowRequest,
 )
+from src.project_base.settings.config import SingleCompanySettings
+from src.security import governance_adapter
 
 
 @pytest.fixture
@@ -52,7 +56,15 @@ def dev_yaml_config(temp_config_dir: Path) -> Path:
 def prod_yaml_config(temp_config_dir: Path) -> Path:
     """Create a config.prod.yaml file."""
     config_file = temp_config_dir / "config.prod.yaml"
-    config_data = {"logging": {"log_level": "WARNING", "third_party_log_level": "ERROR"}}
+    config_data = {
+        "logging": {"log_level": "INFO", "third_party_log_level": "WARNING"},
+        "cloud_trace": {"enabled": True},
+        "cloud_logging": {"enabled": True},
+        "governance": {
+            "weighting": {"enabled": True, "action_count_threshold": 5},
+            "authorization": {"enabled": True, "default_deny": True},
+        },
+    }
     config_file.write_text(yaml.dump(config_data))
     return config_file
 
@@ -150,3 +162,51 @@ def agent_orchestration_request(
         session_id=session_id,
         request_id=request_id,
     )
+
+
+SINGLE_COMPANY_ID = "test-org"
+"""Fixed company identifier used across single-company mode fixtures."""
+
+
+@pytest.fixture
+def single_company_settings() -> Generator[SingleCompanySettings]:
+    """Activate org-wide single-company mode with a fixed company identifier.
+
+    Patches ``settings.single_company`` so that ``validate_tenant_id(None)``
+    returns ``SINGLE_COMPANY_ID`` and no ``tenant_id`` is required in requests.
+
+    Also clears the governance adapter cache so each test gets a fresh adapter.
+    """
+    from src.project_base.settings import settings  # noqa: PLC0415
+
+    org_settings = SingleCompanySettings(enabled=True, company_id=SINGLE_COMPANY_ID)
+    governance_adapter._ADAPTER_CACHE.clear()
+
+    with patch.object(settings, "single_company", org_settings):
+        yield org_settings
+
+    governance_adapter._ADAPTER_CACHE.clear()
+
+
+@pytest.fixture
+def external_auth_settings(httpserver: object) -> Generator[object]:
+    """Activate org-wide mode with an external passthrough auth adapter.
+
+    Requires ``pytest-localserver`` or ``pytest-httpserver`` to provide
+    ``httpserver``.  The fixture yields the mock server so tests can configure
+    response stubs.
+    """
+    from src.project_base.settings import settings  # noqa: PLC0415
+
+    org_settings = SingleCompanySettings(
+        enabled=True,
+        company_id=SINGLE_COMPANY_ID,
+        auth_mode="external",
+        external_auth_url=httpserver.url_for("/authorize"),
+    )
+    governance_adapter._ADAPTER_CACHE.clear()
+
+    with patch.object(settings, "single_company", org_settings):
+        yield httpserver
+
+    governance_adapter._ADAPTER_CACHE.clear()

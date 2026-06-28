@@ -2,18 +2,47 @@
 
 These wrappers isolate dynamic SDK boundaries so that static type checking
 remains predictable in application modules.
+
+Architectural Pattern (ADR-0002):
+  Google Cloud SDKs (BigQuery, Cloud Spanner, Cloud Scheduler) are untyped from
+  basedpyright's perspective. This module centralizes all SDK calls and provides
+  typed Protocol definitions that downstream modules consume.
+
+  Key Components:
+  1. Protocol Definitions: Define typed contracts for SDK clients
+     - BigQueryClientProtocol: get_table(), list_rows()
+     - SchedulerClientProtocol: create_job(), delete_job(), pause_job(), etc.
+     - SpannerDatabaseProtocol: execute_update(), execute_sql()
+
+  2. Cast Functions: Establish typed boundaries at SDK instantiation
+     - as_bigquery_client(client: object) -> BigQueryClientProtocol
+     - as_scheduler_client(client: object) -> SchedulerClientProtocol
+     - as_spanner_database(database: object) -> SpannerDatabaseProtocol
+
+  3. Wrapper Functions: Encapsulate complex operations and return typed results
+     - get_bigquery_table_metadata() -> TableMetadata (typed, not Unknown)
+     - execute_spanner_update_in_batch() -> int (typed, not Unknown)
+
+  Result:
+    - All SDK Unknown types are contained at this module boundary
+    - Downstream modules import typed Protocols and wrapper functions
+    - Type checking passes with 0 errors in all application code
+    - Module-level pragmas suppress Unknown type reporting only here
+
+See copilot-instructions.md (lines 354-364) and ADR-0002 for full details.
 """
 
 # ruff: noqa: D102,PLC0415,TC003,TRY004
 # pyright: reportUnknownVariableType=false,reportUnknownMemberType=false,reportUnknownArgumentType=false
-
+# NOTE: Pragmas above are intentional. All untyped SDK calls are isolated here.
+# Do not use # type: ignore comments; instead, keep SDK calls within this module.
 from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Protocol, TypeVar, cast
+from typing import Protocol, SupportsInt, TypeVar, cast
 
 logger = logging.getLogger(__name__)
 
@@ -61,9 +90,62 @@ class SpannerDatabaseProtocol(Protocol):
 
     def batch(self) -> AbstractContextManager[SpannerBatchProtocol]: ...
 
-    def update_ddl(self, statements: list[str]) -> SpannerOperationProtocol: ...
+    def update_ddl(self, ddl_statements: list[str]) -> SpannerOperationProtocol: ...
 
     def run_in_transaction(self, callback: Callable[[SpannerTransactionProtocol], T]) -> T: ...
+
+
+class BigQueryTableMetadataProtocol(Protocol):
+    """Protocol for BigQuery table metadata."""
+
+    @property
+    def project_id(self) -> str: ...
+
+    @property
+    def dataset_id(self) -> str: ...
+
+    @property
+    def table_id(self) -> str: ...
+
+    @property
+    def full_table_id(self) -> str: ...
+
+    @property
+    def columns(self) -> list[object]: ...
+
+    @property
+    def row_count(self) -> int | None: ...
+
+
+class BigQueryClientProtocol(Protocol):
+    """Protocol for BigQuery client methods used by schema analyzer."""
+
+    def get_table(self, table_id: str) -> object: ...
+
+    def list_rows(self, table_id: str, max_results: int | None = None) -> object: ...
+
+
+class SchedulerClientProtocol(Protocol):
+    """Protocol for Cloud Scheduler client methods."""
+
+    def create_job(self, request: Mapping[str, object]) -> object: ...
+
+    def delete_job(self, request: Mapping[str, object]) -> None: ...
+
+    def pause_job(self, request: Mapping[str, object]) -> object: ...
+
+    def resume_job(self, request: Mapping[str, object]) -> object: ...
+
+    def get_job(self, request: Mapping[str, object]) -> object: ...
+
+    def list_jobs(self, request: Mapping[str, object]) -> object: ...
+
+
+@dataclass(frozen=True)
+class SchedulerJobData:
+    """Job data from Cloud Scheduler API response."""
+
+    name: str
 
 
 @dataclass(frozen=True)
@@ -83,6 +165,42 @@ def as_spanner_database(database: object) -> SpannerDatabaseProtocol:
         SpannerDatabaseProtocol: Typed view of the database object.
     """
     return cast("SpannerDatabaseProtocol", database)
+
+
+def as_bigquery_client(client: object) -> BigQueryClientProtocol:
+    """Cast raw BigQuery client to typed protocol at the boundary.
+
+    Args:
+        client: Raw SDK BigQuery client object.
+
+    Returns:
+        BigQueryClientProtocol: Typed view of the client object.
+    """
+    return cast("BigQueryClientProtocol", client)
+
+
+def as_bigquery_table_metadata(metadata: object) -> BigQueryTableMetadataProtocol:
+    """Cast raw table metadata to typed protocol at the boundary.
+
+    Args:
+        metadata: Raw SDK table metadata object.
+
+    Returns:
+        BigQueryTableMetadataProtocol: Typed view of the metadata object.
+    """
+    return cast("BigQueryTableMetadataProtocol", metadata)
+
+
+def as_scheduler_client(client: object) -> SchedulerClientProtocol:
+    """Cast raw Cloud Scheduler client to typed protocol at the boundary.
+
+    Args:
+        client: Raw SDK Cloud Scheduler client object.
+
+    Returns:
+        SchedulerClientProtocol: Typed view of the client object.
+    """
+    return cast("SchedulerClientProtocol", client)
 
 
 def execute_sql_rows(
@@ -140,6 +258,41 @@ def execute_sql_rows_in_transaction(
     """
     rows = transaction.execute_sql(sql, params)
     return [tuple(row) for row in rows]
+
+
+def execute_dml(
+    database: SpannerDatabaseProtocol,
+    sql: str,
+    params: Mapping[str, object],
+) -> int:
+    """Execute a DML statement with batch-first, transaction fallback semantics.
+
+    Some emulator/runtime combinations expose ``batch`` objects without
+    ``execute_update``. In those cases we transparently fall back to a transaction
+    callback so DML still executes.
+
+    Args:
+        database: Spanner database protocol.
+        sql: DML statement.
+        params: Bound parameters for the statement.
+
+    Returns:
+        int: Number of affected rows when provided by the backend.
+    """
+    try:
+        with database.batch() as batch:
+            execute_update = getattr(batch, "execute_update", None)
+            if callable(execute_update):
+                rows_affected = execute_update(sql, params)
+                return int(cast("SupportsInt", rows_affected))
+    except AttributeError:
+        logger.debug("Spanner batch execute_update unavailable; falling back to transaction")
+
+    def _run(transaction: SpannerTransactionProtocol) -> int:
+        rows_affected = transaction.execute_update(sql, params)
+        return int(cast("SupportsInt", rows_affected))
+
+    return int(database.run_in_transaction(_run))
 
 
 def create_cloud_scheduler_http_job(
@@ -209,12 +362,102 @@ def create_cloud_scheduler_http_job(
     return SchedulerJobResult(name=str(response.name))
 
 
-def generate_generative_ai_text(model_name: str, prompt: str) -> str:
+def get_bigquery_table_metadata(
+    bq_client: object,
+    full_table_id: str,
+) -> BigQueryTableMetadataProtocol:
+    """Retrieve BigQuery table metadata with typed protocol result.
+
+    Args:
+        bq_client: BigQuery client object.
+        full_table_id: Fully qualified table ID (project.dataset.table).
+
+    Returns:
+        BigQueryTableMetadataProtocol: Typed table metadata.
+
+    Raises:
+        RuntimeError: If table retrieval fails.
+    """
+    try:
+        client = as_bigquery_client(bq_client)
+        table_obj = client.get_table(full_table_id)
+    except Exception as error:
+        msg = f"Failed to get BigQuery table metadata for {full_table_id}: {error}"
+        raise RuntimeError(msg) from error
+
+    return as_bigquery_table_metadata(table_obj)
+
+
+def list_bigquery_rows(
+    bq_client: object,
+    full_table_id: str,
+    limit: int | None = None,
+) -> list[tuple[object, ...]]:
+    """List BigQuery table rows with typed result normalization.
+
+    Args:
+        bq_client: BigQuery client object.
+        full_table_id: Fully qualified table ID (project.dataset.table).
+        limit: Optional maximum number of rows to retrieve.
+
+    Returns:
+        list[tuple[object, ...]]: Materialized row tuples.
+
+    Raises:
+        RuntimeError: If row retrieval fails.
+    """
+    try:
+        client = as_bigquery_client(bq_client)
+        rows_iter = client.list_rows(full_table_id, max_results=limit)
+    except Exception as error:
+        msg = f"Failed to list BigQuery rows for {full_table_id}: {error}"
+        raise RuntimeError(msg) from error
+
+    return [tuple(row) for row in cast("Iterable[Sequence[object]]", rows_iter)]
+
+
+def execute_spanner_update_in_batch(
+    database: SpannerDatabaseProtocol,
+    sql: str,
+    params: Mapping[str, object],
+) -> int:
+    """Execute a DML update in a Spanner batch.
+
+    Args:
+        database: Spanner database protocol.
+        sql: DML statement.
+        params: Bound parameters for the statement.
+
+    Returns:
+        int: Number of affected rows (or 0 if not supported).
+    """
+    try:
+        with database.batch() as batch_conn:
+            execute_update = getattr(batch_conn, "execute_update", None)
+            if callable(execute_update):
+                rows_affected = execute_update(sql, params)
+                return int(cast("SupportsInt", rows_affected))
+    except AttributeError:
+        logger.debug("Spanner batch execute_update unavailable; falling back to transaction")
+
+    def _run(transaction: SpannerTransactionProtocol) -> int:
+        rows_affected = transaction.execute_update(sql, params)
+        return int(cast("SupportsInt", rows_affected))
+
+    return database.run_in_transaction(_run)
+
+
+def generate_generative_ai_text(
+    model_name: str,
+    prompt: str,
+    generation_config: dict[str, object] | None = None,
+) -> str:
     """Generate text using google.generativeai with typed output.
 
     Args:
         model_name: Generative model name.
         prompt: Prompt text sent to the model.
+        generation_config: Optional provider-specific generation configuration.
 
     Returns:
         str: Generated response text.
@@ -230,7 +473,10 @@ def generate_generative_ai_text(model_name: str, prompt: str) -> str:
 
     try:
         model = GenerativeModel(model_name)
-        response = model.generate_content(prompt)
+        if generation_config is None:
+            response = model.generate_content(prompt)
+        else:
+            response = model.generate_content(prompt, generation_config=generation_config)
     except Exception as error:
         msg = f"generative model invocation failed: {error}"
         raise RuntimeError(msg) from error

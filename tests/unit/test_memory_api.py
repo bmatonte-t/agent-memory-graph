@@ -17,6 +17,8 @@ from src.security.governance import GovernanceSettings, WeightingTriggerPolicy
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+EXPECTED_SQL_FALLBACK_CALL_COUNT = 2
+
 
 class TestMemoryAPI:
     """Behavioral tests for tenant-aware memory operations."""
@@ -185,6 +187,52 @@ class TestMemoryAPI:
             memory_tier=SchemaConfig.MEMORY_TIER_CONTEXT,
             session_action_count=2,
         )
+
+    async def test_retrieve_context_window_falls_back_when_match_unsupported(self) -> None:
+        """Context retrieval should use SQL fallback when graph MATCH is unavailable."""
+        with patch("src.memory.api.SpannerClient") as mock_client:
+            mock_db = MagicMock()
+            mock_db.run_in_transaction.return_value = 1
+            mock_client.get_database.return_value = mock_db
+            mock_client.validate_tenant_id.return_value = "tenant_a"
+
+            with (
+                patch(
+                    "src.memory.api.execute_sql_rows",
+                    side_effect=[
+                        RuntimeError("Unexpected keyword MATCH"),
+                        [
+                            (
+                                "turn_1",
+                                "User",
+                                '{"content": "Hello"}',
+                                0.6,
+                                datetime.now(UTC),
+                                "HAS_TURN",
+                            )
+                        ],
+                    ],
+                ) as mock_execute,
+                patch.object(MemoryAPI, "record_audit_event", new_callable=AsyncMock) as mock_audit,
+                patch.object(
+                    MemoryAPI,
+                    "_update_weight_on_successful_use",
+                    new_callable=AsyncMock,
+                ) as mock_update,
+                patch.object(MemoryAPI, "_increment_session_action_count", return_value=1),
+            ):
+                response = await MemoryAPI.retrieve_context_window(
+                    tenant_id="tenant_a",
+                    session_id="session_123",
+                    window_size=10,
+                )
+
+        assert response.tenant_id == "tenant_a"
+        assert len(response.turns) == 1
+        assert response.turns[0].turn_id == "turn_1"
+        assert mock_execute.call_count == EXPECTED_SQL_FALLBACK_CALL_COUNT
+        mock_audit.assert_awaited_once()
+        mock_update.assert_awaited_once()
 
     async def test_update_weight_uses_tenant_filter(self) -> None:
         """Weight updates should include the tenant filter in DML parameters."""

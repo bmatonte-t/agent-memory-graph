@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -117,7 +117,13 @@ class TestResilienceScenarios:
         """Spanner aggregation unavailability should raise retrieval-stage pipeline error."""
         pipeline = MindMapPipeline(config=MindMapConfig(use_spanner_aggregation=True))
 
-        with pytest.raises(MindMapPipelineError, match="spanner retrieval unavailable") as error:
+        with (
+            patch(
+                "src.memory.mindmap_pipeline.SpannerClient.execute_sql",
+                side_effect=RuntimeError("SpannerClient not initialized. Call initialize() first."),
+            ),
+            pytest.raises(MindMapPipelineError, match="spanner retrieval unavailable") as error,
+        ):
             await pipeline.execute(query="Explain dependency graph")
 
         assert error.value.stage == PipelineStage.AGGREGATE

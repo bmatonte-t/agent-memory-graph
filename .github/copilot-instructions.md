@@ -4,25 +4,26 @@ Apply these rules for all coding tasks in this repository unless the user explic
 
 ## Project Identity
 
-You are assisting with the Cognitive Agent Memory Graph, a GCP-native, deterministic, anti-hallucination memory platform.
+You are assisting with the **Cognitive Agent Memory Graph**, an enterprise-grade AI agent coordination platform for single organizations.
 
-The system is designed as a production solution for managing memory across multiple agents operating in the same GCP project or organization, with strict guarantees for safety, token efficiency, and grounded responses.
+The system is designed as a production solution for managing shared memory across multiple AI agents operating within a single enterprise environment, with strict guarantees for safety, grounding, auditability, and operational transparency.
 
 ## Product Objective
 
-Build and evolve this product to be commercially viable and publishable in Google Cloud Marketplace.
+Build and evolve this product as an enterprise AI coordination platform for secure, grounded, multi-agent deployments within organizations.
 
-Prioritize outcomes that improve customer trust and enterprise adoption:
-- Clear value proposition and buyer-facing positioning.
-- Fast onboarding and time-to-value.
-- Production-grade reliability, observability, and supportability.
-- Strong security and IAM-aligned access controls.
-- Auditable operations and transparent deployment/upgrade paths.
-- Cost-aware operation, including low token-spending patterns.
+Prioritize outcomes that ensure customer success and operational excellence:
+- **Customer Integration** — Seamless deployment within customer GCP organizations and infrastructure
+- **Enterprise Quality** — Production-grade reliability, observability, and supportability from day one
+- **Security & Compliance** — Strict tenant isolation, immutable audit trails, and governance controls
+- **Operational Transparency** — Clear observability, deterministic behavior, and explainable decisions
+- **Reduced Hallucination** — All responses grounded in organizational data and evidence
+- **Cost Awareness** — Efficient token usage, intelligent caching, and predictable performance
 
 ## Core Workflow
 
 - Choose the right skill before starting work.
+- For Python implementation tasks, prefer the `tryolabs-python-implementation` agent and apply the `tryolabs-repo-template-coding` skill.
 - For non-trivial work: spec -> plan -> implement in small slices -> test -> review -> ship.
 - Keep scope tight: avoid unrelated refactors and cleanup.
 - Surface assumptions and ambiguities before implementing.
@@ -102,6 +103,10 @@ just check-all
   - just test-coverage
 - Check docstring coverage:
   - just docstring-coverage
+- Python implementation agent entrypoint:
+  - .github/agents/tryolabs-python-implementation.agent.md
+- Skill entrypoint:
+  - skills/tryolabs-repo-template-coding/SKILL.md
 
 ## Python and Testing Conventions
 
@@ -352,6 +357,8 @@ Apply these concrete patterns from recent hardening work whenever touching typed
 - `Unknown` in basedpyright means the compiler cannot prove types at that call site; this is not a runtime failure but a design debt marker.
 - For external SDKs (Google Cloud Spanner, Scheduler, Vertex AI, Cloud Logging), isolate untyped APIs behind typed wrappers/protocols in `src/integrations/google_sdk_wrappers.py`.
 - Keep untyped objects from crossing module boundaries. Downstream modules should consume typed protocols and helper functions only.
+
+**✅ Implementation Status (2026-06-27)**: SDK wrapper pattern fully implemented for BigQuery, Cloud Scheduler, and Cloud Spanner. See [ADR-0002](docs/architecture/adr/ADR-0002-type-safety-sdk-boundaries.md) for details. Type checking: 0 errors across all files.
 
 ### 2) Keep SDK wrappers behavior-compatible
 

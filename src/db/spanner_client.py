@@ -9,6 +9,7 @@ from typing import Any, Self, cast
 from src.integrations.google_sdk_wrappers import (
     SpannerDatabaseProtocol,
     as_spanner_database,
+    execute_dml,
     execute_sql_rows,
 )
 from src.security.validators import validate_tenant_id
@@ -135,8 +136,7 @@ class SpannerClient:
             cls._validate_audit_mutation_forbidden(table_name, operation)
 
         database = cls.get_database()
-        with database.batch() as batch:
-            return batch.execute_update(sql, params or {})
+        return execute_dml(database, sql, params or {})
 
     @staticmethod
     def _extract_dml_target(sql: str) -> tuple[str, str] | None:

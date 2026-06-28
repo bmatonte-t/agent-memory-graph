@@ -19,12 +19,25 @@ from typing import Any, cast
 
 from src.db.retry import async_retry_with_backoff
 from src.db.spanner_client import SpannerClient
-from src.integrations.google_sdk_wrappers import execute_sql_rows
+from src.integrations.google_sdk_wrappers import execute_dml, execute_sql_rows
 from src.security.validators import validate_required_string, validate_tenant_id
 
 logger = logging.getLogger(__name__)
 
 _MIN_ROW_COLUMNS = 2
+
+
+def _is_match_query_unsupported(error: Exception) -> bool:
+    """Return whether an error indicates graph MATCH is unsupported.
+
+    Args:
+        error: Exception raised while executing a query.
+
+    Returns:
+        bool: True when the backend does not support MATCH syntax.
+    """
+    message = str(error).lower()
+    return "unexpected keyword match" in message
 
 
 class PathRetrievalError(Exception):
@@ -62,7 +75,7 @@ class EvidentPathFinder:
         self.max_paths = max_paths
         self.max_chars = max_chars
 
-    async def find_paths(
+    async def find_paths(  # noqa: PLR0915
         self,
         tenant_id: str,
         start_entity_id: str,
@@ -140,7 +153,41 @@ class EvidentPathFinder:
                     "tenant_id": tenant_id,
                     "max_paths": self.max_paths,
                 }
-                rows = execute_sql_rows(database, query, params)
+                try:
+                    rows = execute_sql_rows(database, query, params)
+                except Exception as error:
+                    if not _is_match_query_unsupported(error):
+                        raise
+                    logger.info(
+                        "path_retrieval_match_unsupported tenant_id=%s",
+                        tenant_id,
+                    )
+                    sql_fallback_query = """
+                        SELECT e.RelType
+                        FROM MemoryNode AS s
+                        JOIN MemoryEdge AS e
+                            ON e.SourceNodeId = s.NodeId
+                            AND e.TenantId = @tenant_id
+                        JOIN MemoryNode AS d
+                            ON d.NodeId = e.DestNodeId
+                            AND d.TenantId = @tenant_id
+                        WHERE s.TenantId = @tenant_id
+                          AND JSON_VALUE(s.Attributes, '$.entity_id') = @start_entity
+                          AND JSON_VALUE(d.Attributes, '$.entity_id') = @end_entity
+                        ORDER BY e.RelType ASC
+                        LIMIT @max_paths
+                    """
+                    rows = execute_sql_rows(database, sql_fallback_query, params)
+                    for row in rows:
+                        if not row:
+                            continue
+                        rel_type = str(row[0]).replace("_", " ")
+                        results.append(
+                            f"{start_entity_id.replace('_', ' ')}"
+                            f"->{rel_type}->{end_entity_id.replace('_', ' ')}"
+                        )
+                    total_chars = sum(len(path) for path in results)
+                    return results, total_chars
 
                 for row in rows:
                     if len(row) < _MIN_ROW_COLUMNS:
@@ -364,7 +411,7 @@ class NeighborEnricher:
         context_flags = context_flags or {}
         del entity_node_id
 
-        async def _execute_query(**_: Any) -> tuple[list[str], int]:
+        async def _execute_query(**_: Any) -> tuple[list[str], int]:  # noqa: PLR0912
             try:
                 # Tier 1: Direct neighbors (1-hop) with tenant isolation
                 query_tier1 = """
@@ -385,7 +432,32 @@ class NeighborEnricher:
                     "tenant_id": tenant_id,
                     "max_direct_neighbors": self.max_direct_neighbors,
                 }
-                rows = execute_sql_rows(database, query_tier1, params)
+                try:
+                    rows = execute_sql_rows(database, query_tier1, params)
+                except Exception as error:
+                    if not _is_match_query_unsupported(error):
+                        raise
+                    logger.info(
+                        "neighbor_enrichment_match_unsupported tenant_id=%s",
+                        tenant_id,
+                    )
+                    sql_fallback_query = """
+                        SELECT DISTINCT
+                            e.RelType AS rel_type,
+                            JSON_VALUE(n.Attributes, '$.entity_id') AS neighbor_id
+                        FROM MemoryNode AS src
+                        JOIN MemoryEdge AS e
+                            ON e.SourceNodeId = src.NodeId
+                            AND e.TenantId = @tenant_id
+                        JOIN MemoryNode AS n
+                            ON n.NodeId = e.DestNodeId
+                            AND n.TenantId = @tenant_id
+                        WHERE src.TenantId = @tenant_id
+                          AND JSON_VALUE(src.Attributes, '$.entity_id') = @entity_id
+                        ORDER BY rel_type ASC
+                        LIMIT @max_direct_neighbors
+                    """
+                    rows = execute_sql_rows(database, sql_fallback_query, params)
 
                 for row in rows:
                     if len(row) < _MIN_ROW_COLUMNS:
@@ -543,21 +615,21 @@ class EvidenceTracker:
                 )
             """
 
-            with database.batch() as batch:  # type: ignore[union-attr]
-                batch.execute_update(  # type: ignore[union-attr]
-                    insert_sql,
-                    {
-                        "tenant_id": tenant_id,
-                        "evidence_id": evidence_id,
-                        "source_type": source_type,
-                        "evidence_number": evidence_number,
-                        "graph_path": graph_path,
-                        "serialized_form": serialized_form,
-                        "now": now,
-                        "cognitive_weight": cognitive_weight,
-                        "audit_log_ref": audit_log_ref,
-                    },
-                )
+            execute_dml(
+                database,
+                insert_sql,
+                {
+                    "tenant_id": tenant_id,
+                    "evidence_id": evidence_id,
+                    "source_type": source_type,
+                    "evidence_number": evidence_number,
+                    "graph_path": graph_path,
+                    "serialized_form": serialized_form,
+                    "now": now,
+                    "cognitive_weight": cognitive_weight,
+                    "audit_log_ref": audit_log_ref,
+                },
+            )
 
             logger.info(
                 "evidence_recorded tenant_id=%s evidence_id=%s source_type=%s",
@@ -620,16 +692,16 @@ class EvidenceTracker:
                 WHERE TenantId = @tenant_id AND EvidenceId = @evidence_id
             """
 
-            with database.batch() as batch:  # type: ignore[union-attr]
-                batch.execute_update(  # type: ignore[union-attr]
-                    update_sql,
-                    {
-                        "tenant_id": tenant_id,
-                        "evidence_id": evidence_id,
-                        "synthesis_id": synthesis_id,
-                        "now": now,
-                    },
-                )
+            execute_dml(
+                database,
+                update_sql,
+                {
+                    "tenant_id": tenant_id,
+                    "evidence_id": evidence_id,
+                    "synthesis_id": synthesis_id,
+                    "now": now,
+                },
+            )
 
             logger.info(
                 "evidence_linked_to_synthesis tenant_id=%s evidence_id=%s synthesis_id=%s",

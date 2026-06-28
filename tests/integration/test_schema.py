@@ -125,8 +125,8 @@ class TestSchemaExecution:
             def __init__(self) -> None:
                 self.statements: list[list[str]] = []
 
-            def update_ddl(self, *, statements: list[str]) -> FakeOperation:
-                self.statements.append(statements)
+            def update_ddl(self, *, ddl_statements: list[str]) -> FakeOperation:
+                self.statements.append(ddl_statements)
                 return FakeOperation()
 
         fake_database = FakeDatabase()

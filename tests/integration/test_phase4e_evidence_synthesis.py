@@ -133,7 +133,7 @@ class TestEvidenceServiceBuildContext:
             # Act
             result = await service.build_evidence_context(
                 tenant_id="tenant-123",
-                mined_entities=["patient"],
+                mined_entities=["patient", "provider"],
             )
 
         # Assert

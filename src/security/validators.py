@@ -7,7 +7,14 @@ from typing import Any, cast
 
 
 def validate_tenant_id(tenant_id: str | None) -> str:
-    """Validate tenant identifier shape.
+    """Validate tenant identifier shape, with org-wide mode injection.
+
+    In org-wide single-company mode (``single_company.enabled = True``) a
+    ``None`` value is automatically replaced with the configured ``company_id``.
+    A mismatched value raises ``ValueError`` immediately.
+
+    In multi-tenant mode (default) the original behaviour is preserved:
+    ``None`` or blank values raise ``ValueError``.
 
     Args:
         tenant_id: Tenant identifier provided by callers.
@@ -16,9 +23,13 @@ def validate_tenant_id(tenant_id: str | None) -> str:
         str: Normalized tenant identifier.
 
     Raises:
-        ValueError: If tenant_id is not a non-empty string.
+        ValueError: If tenant_id is not a non-empty string and cannot be
+            resolved from org-wide context.
     """
-    return validate_required_string(tenant_id, field_name="tenant_id")
+    from src.security.tenant_context import OrgTenantContext  # noqa: PLC0415
+
+    resolved = OrgTenantContext.resolve(tenant_id)
+    return validate_required_string(resolved, field_name="tenant_id")
 
 
 def validate_required_string(value: str | None, *, field_name: str) -> str:

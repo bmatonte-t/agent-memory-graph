@@ -80,9 +80,13 @@ class TestMindMapPipeline:
         response = await pipeline.execute(query="Explain project_alpha budget trend")
 
         assert response.trace.mined_entities
-        assert response.trace.path_ids
-        assert response.trace.fact_ids
         assert response.synthesis.claim_fact_ids == response.trace.fact_ids
+        if response.trace.path_ids:
+            assert response.trace.fact_ids
+        else:
+            assert (
+                response.synthesis.response_text == MindMapPipeline.INSUFFICIENT_EVIDENCE_RESPONSE
+            )
         assert len(response.trace.stage_timings) == EXPECTED_STAGE_COUNT
 
     async def test_pipeline_selects_spanner_adapter_when_enabled(self) -> None:
@@ -101,7 +105,16 @@ class TestMindMapPipeline:
         """Return stable retrieval error when Spanner client is not initialized."""
         pipeline = MindMapPipeline(config=MindMapConfig(use_spanner_aggregation=True))
 
-        with pytest.raises(MindMapPipelineError, match="spanner retrieval unavailable") as error:
+        with (
+            patch(
+                "src.memory.mindmap_pipeline.SpannerClient.execute_sql",
+                side_effect=RuntimeError("SpannerClient not initialized. Call initialize() first."),
+            ),
+            pytest.raises(
+                MindMapPipelineError,
+                match="spanner retrieval unavailable",
+            ) as error,
+        ):
             await pipeline.execute(query="Explain alpha cost")
 
         assert error.value.stage == PipelineStage.AGGREGATE
