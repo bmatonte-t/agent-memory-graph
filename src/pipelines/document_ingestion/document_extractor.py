@@ -13,8 +13,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from enum import StrEnum
 from pathlib import Path
+from typing import Any, cast
 
 from pptx import Presentation
 from PyPDF2 import PdfReader
@@ -24,6 +26,26 @@ IMAGE_SHAPE_TYPE = 13
 TABLE_SHAPE_TYPE = 14
 
 logger = logging.getLogger(__name__)
+
+
+def _to_iso8601(value: Any) -> str:
+    """Convert value to ISO8601 timestamp string.
+
+    Handles datetime objects, strings, and None values gracefully.
+
+    Args:
+        value: Value to convert (datetime, str, or other type).
+
+    Returns:
+        str: ISO8601 formatted string or empty string if value is None/invalid.
+    """
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, str):
+        return value
+    if value is None:
+        return ""
+    return ""
 
 
 class DocumentFormat(StrEnum):
@@ -207,26 +229,40 @@ class PDFExtractor:
                 reader = PdfReader(f)
                 page_count = len(reader.pages)
 
-                metadata_dict = reader.metadata or {}
-                title = metadata_dict.get("/Title", "")
-                author = metadata_dict.get("/Author", "")
-                created = metadata_dict.get("/CreationDate", "")
+                metadata_dict: dict[str, Any] = cast(dict[str, Any], reader.metadata or {})
+                title: str = ""
+                author: str = ""
+                created: str = ""
 
-                if isinstance(title, bytes):
-                    title = title.decode("utf-8", errors="ignore")
-                if isinstance(author, bytes):
-                    author = author.decode("utf-8", errors="ignore")
-                if isinstance(created, bytes):
-                    created = created.decode("utf-8", errors="ignore")
+                if "/Title" in metadata_dict:
+                    title_val = metadata_dict["/Title"]
+                    if isinstance(title_val, bytes):
+                        title = title_val.decode("utf-8", errors="ignore")
+                    elif isinstance(title_val, str):
+                        title = title_val
+
+                if "/Author" in metadata_dict:
+                    author_val = metadata_dict["/Author"]
+                    if isinstance(author_val, bytes):
+                        author = author_val.decode("utf-8", errors="ignore")
+                    elif isinstance(author_val, str):
+                        author = author_val
+
+                if "/CreationDate" in metadata_dict:
+                    created_val = metadata_dict["/CreationDate"]
+                    if isinstance(created_val, bytes):
+                        created = created_val.decode("utf-8", errors="ignore")
+                    elif isinstance(created_val, str):
+                        created = created_val
 
                 doc_metadata = DocumentMetadata(
                     file_path=file_path,
                     file_format="pdf",
                     file_size_bytes=file_size,
                     page_count=page_count,
-                    title=str(title),
-                    author=str(author),
-                    created_at=str(created),
+                    title=title,
+                    author=author,
+                    created_at=created,
                 )
 
                 pages: list[DocumentPage] = []
@@ -315,22 +351,22 @@ class PowerPointExtractor:
             presentation = Presentation(file_path)
 
             slide_count = len(presentation.slides)
-            title = presentation.core_properties.title or ""
-            author = presentation.core_properties.author or ""
-            created = (
-                presentation.core_properties.created.isoformat()
-                if presentation.core_properties.created
-                else ""
-            )
+            title_val: Any = presentation.core_properties.title or ""
+            author_val: Any = presentation.core_properties.author or ""
+            created_val: Any = getattr(presentation.core_properties, "created", None)  # type: ignore[assignment]
+
+            title_str: str = str(title_val) if title_val else ""
+            author_str: str = str(author_val) if author_val else ""
+            created_str: str = _to_iso8601(created_val)
 
             doc_metadata = DocumentMetadata(
                 file_path=file_path,
                 file_format="pptx",
                 file_size_bytes=file_size,
                 page_count=slide_count,
-                title=str(title),
-                author=str(author),
-                created_at=str(created),
+                title=title_str,
+                author=author_str,
+                created_at=created_str,
             )
 
             pages: list[DocumentPage] = []
@@ -340,7 +376,7 @@ class PowerPointExtractor:
                     has_images = PowerPointExtractor._has_images_in_slide(slide)
                     has_tables = PowerPointExtractor._has_tables_in_slide(slide)
 
-                    slide_title = PowerPointExtractor._extract_slide_title(slide)
+                    slide_title: str = PowerPointExtractor._extract_slide_title(slide)
 
                     page_meta = PageMetadata(
                         page_number=slide_num,
@@ -356,7 +392,20 @@ class PowerPointExtractor:
                         metadata=page_meta,
                         raw_attributes={
                             "shape_count": len(slide.shapes),
-                            "has_speaker_notes": (len(slide.notes_slide.notes_text_frame.text) > 0),
+                            "has_speaker_notes": (
+                                len(
+                                    getattr(
+                                        getattr(
+                                            getattr(slide, "notes_slide", None),
+                                            "notes_text_frame",
+                                            None,
+                                        ),
+                                        "text",
+                                        "",
+                                    )
+                                )
+                                > 0
+                            ),
                         },
                     )
                     pages.append(doc_page)
@@ -408,11 +457,14 @@ class PowerPointExtractor:
         Returns:
             str: Concatenated text from slide.
         """
-        return "\n".join(
-            shape.text  # type: ignore[attr-defined]
-            for shape in slide.shapes  # type: ignore[attr-defined]
-            if hasattr(shape, "text") and shape.text  # type: ignore[attr-defined]
-        )
+        text_parts: list[str] = []
+        shapes: Any = getattr(slide, "shapes", [])
+        for shape in shapes:
+            if hasattr(shape, "text"):
+                shape_text: Any = getattr(shape, "text", "")
+                if isinstance(shape_text, str) and shape_text:
+                    text_parts.append(shape_text)
+        return "\n".join(text_parts)
 
     @staticmethod
     def _extract_slide_title(slide: object) -> str:
@@ -425,17 +477,22 @@ class PowerPointExtractor:
             str: Slide title if available.
         """
         try:
-            if hasattr(slide, "shapes"):  # type: ignore[attr-defined]
-                for shape in slide.shapes:  # type: ignore[attr-defined]
-                    if (
-                        hasattr(shape, "is_placeholder") and shape.is_placeholder  # type: ignore[attr-defined]
-                    ):
-                        phf = shape.placeholder_format  # type: ignore[attr-defined]
-                        if phf.type == SLIDE_TITLE_PLACEHOLDER_TYPE:  # Title placeholder
-                            return shape.text  # type: ignore[attr-defined]
+            shapes: Any = getattr(slide, "shapes", None)
+            if shapes is None:
+                return ""
+
+            for shape in shapes:
+                is_placeholder: bool = getattr(shape, "is_placeholder", False)
+                if is_placeholder:
+                    placeholder_format: Any = getattr(shape, "placeholder_format", None)
+                    if placeholder_format is not None:
+                        phf_type: Any = getattr(placeholder_format, "type", None)
+                        if phf_type == SLIDE_TITLE_PLACEHOLDER_TYPE:
+                            title_text: Any = getattr(shape, "text", "")
+                            if isinstance(title_text, str):
+                                return title_text
         except Exception as e:  # noqa: BLE001
-            logger.debug("Failed to extract shape: %s", e)
-            return False
+            logger.debug("Failed to extract title shape: %s", e)
         return ""
 
     @staticmethod

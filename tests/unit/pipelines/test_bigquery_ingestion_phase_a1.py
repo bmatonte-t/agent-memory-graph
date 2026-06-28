@@ -295,8 +295,8 @@ class TestPOLEClassifier:
         cache.clear()
         assert len(cache.cache) == 0
 
-    @patch("vertexai.init")
-    @patch("vertexai.generative_models.GenerativeModel.generate_content")
+    @patch("src.pipelines.bigquery_ingestion.pole_classifier.vertexai.init")
+    @patch("src.pipelines.bigquery_ingestion.pole_classifier.GenerativeModel.generate_content")
     def test_classify_columns_success(
         self,
         mock_generate: MagicMock,
@@ -345,8 +345,8 @@ class TestPOLEClassifier:
         }
         assert result.overall_confidence == EXPECTED_OVERALL_CONFIDENCE
 
-    @patch("vertexai.init")
-    @patch("vertexai.generative_models.GenerativeModel.generate_content")
+    @patch("src.pipelines.bigquery_ingestion.pole_classifier.vertexai.init")
+    @patch("src.pipelines.bigquery_ingestion.pole_classifier.GenerativeModel.generate_content")
     def test_classify_columns_caching(
         self,
         mock_generate: MagicMock,

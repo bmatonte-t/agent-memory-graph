@@ -80,10 +80,10 @@ single_company:
 
 ### What You Get
 
-✅ **Isolation** — Complete data isolation for your organization  
-✅ **Auditability** — Every agent decision is logged and traceable  
-✅ **Compliance** — Immutable audit trails for regulatory requirements  
-✅ **Multi-Agent Coordination** — All agents share organizational memory  
+✅ **Isolation** — Complete data isolation for your organization
+✅ **Auditability** — Every agent decision is logged and traceable
+✅ **Compliance** — Immutable audit trails for regulatory requirements
+✅ **Multi-Agent Coordination** — All agents share organizational memory
 ✅ **No Context Loss** — Session history preserved indefinitely
 
 ## API Surface
