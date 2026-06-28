@@ -48,6 +48,7 @@ Use this file to track debated decisions before formal ADRs.
 ## Active ADRs
 
 - ADR-0001 (proposed): [Phase-One Architecture Direction](adr/ADR-0001-phase-one-architecture.md)
+- ADR-0002 (accepted): [Type Safety Through SDK Wrapper Boundaries](adr/ADR-0002-type-safety-sdk-boundaries.md)
 
 ## Readiness Gate
 

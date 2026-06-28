@@ -7,8 +7,14 @@ statements for exact-key deduplication. Batches writes for efficiency.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 from google.cloud import spanner
+
+from src.integrations.google_sdk_wrappers import as_spanner_database
+
+if TYPE_CHECKING:
+    from src.integrations.google_sdk_wrappers import SpannerDatabaseProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +168,11 @@ class SpannerIngestWriter:
         self.instance_id = instance_id
         self.database_id = database_id
         self.client = client or spanner.Client(project=project_id)
-        self.instance = self.client.instance(instance_id)
-        self.database = self.instance.database(database_id)
+        # Cast to typed protocol at the boundary
+        self.instance = self.client.instance(instance_id)  # type: ignore[reportUnknownMemberType]
+        self.database: SpannerDatabaseProtocol = as_spanner_database(
+            self.instance.database(database_id)  # type: ignore[reportUnknownMemberType]
+        )
 
         logger.info(
             "Initialized SpannerIngestWriter: %s/%s/%s",

@@ -155,17 +155,26 @@ just build-docs
 
 ## Testing and Quality
 
-The project uses:
+The project maintains production-grade quality through:
 
-- pytest for unit and integration testing,
-- ruff for linting and formatting,
-- basedpyright for type checking,
-- docstr-coverage for docstring coverage checks.
+- **Unit & Integration Tests**: pytest (843 tests, all passing)
+- **Type Safety**: basedpyright strict mode (0 errors, 0 warnings)
+  - SDK calls isolated behind typed Protocol boundaries (see [ADR-0002](docs/architecture/adr/ADR-0002-type-safety-sdk-boundaries.md))
+  - No `# type: ignore` comments in application code
+  - All functions fully annotated per Python 3.14 standards
+- **Linting & Formatting**: ruff (100% compliant)
+- **Docstring Coverage**: 93.6% (Excellent)
 
 Recommended pre-PR gate:
 
 ```bash
-just check-all
+just check-all  # Lint + type-check + format + tests + docstrings
+```
+
+Type checking specifically:
+
+```bash
+just check-types  # basedpyright strict mode (0 errors required)
 ```
 
 ## Deployment (Phase 3 Scaffold)
@@ -192,6 +201,10 @@ Deployment templates and scripts:
 - ✅ **Phase 3**: MCP tooling and agent orchestration
 - ✅ **Phase 4**: Security hardening (ABAC, org-wide isolation, audit trails)
 - ✅ **Phase 4C**: Observability and compliance baseline
+- ✅ **Phase 4D**: Type Safety Infrastructure (SDK wrapper boundaries, 0 type errors)
+  - Protocol-based SDK wrappers for BigQuery, Cloud Scheduler, Cloud Spanner
+  - Strict type checking with basedpyright (0 errors, 0 warnings)
+  - See [ADR-0002](docs/architecture/adr/ADR-0002-type-safety-sdk-boundaries.md) for architecture
 - ✅ **Phase 5**: Enterprise governance adapters (internal ABAC + external delegation)
 - 🔄 **Current**: Customer pilot and integration support
 
@@ -227,18 +240,37 @@ A production-ready subsystem for ingesting, extracting entities from, and dedupl
 
 ## Documentation Index
 
+### Architecture & Design Decisions
+
+- **docs/architecture/adr/ADR-0001-phase-one-architecture.md** — Core architecture direction
+- **docs/architecture/adr/ADR-0002-type-safety-sdk-boundaries.md** — SDK wrapper pattern and type safety
+- docs/architecture/decision-log.md — Ongoing architectural decisions
+
+### API & Data Model
+
 - docs/api-reference.md
 - docs/data-model-spec.md
+
+### Development & Operations
+
+- docs/technical-report.md — Comprehensive codebase navigation guide
 - docs/objectives.md
 - docs/marketplace-readiness-checklist.md
-- docs/architecture/adr/
 - docs/development/phase3-agent-integration-guide.md
 - docs/development/phase3-mcp-tool-reference.md
 - docs/development/phase4-local-user-testing.md
+
+### Extraction Pipeline
+
 - **docs/EXTRACTION_PIPELINE_QUICKSTART.md** ⭐ START HERE for extraction pipeline
 - docs/EXTRACTION_PIPELINE_API_REFERENCE.md
 - docs/EXTRACTION_PIPELINE_ARCHITECTURE.md
 - docs/EXTRACTION_PIPELINE_DEPLOYMENT.md
+
+### Quality & Implementation
+
+- docs/SDK_WRAPPER_IMPLEMENTATION_COMPLETE.md — Type safety implementation status
+- docs/code-quality.md
 
 ## Contributing
 

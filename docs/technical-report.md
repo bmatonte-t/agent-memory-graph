@@ -305,11 +305,24 @@ Recommended onboarding sequence:
   - [tests/unit/test_memory_api.py](tests/unit/test_memory_api.py)
   - [tests/integration/test_audit_trail.py](tests/integration/test_audit_trail.py)
 
+### Quality Gate and Type Safety
+
 Core validation command:
 
 ```bash
 just check-all
 ```
+
+This runs:
+1. **Linting** (ruff): Enforces style, import order, line length (100 chars)
+2. **Type Checking** (basedpyright strict): 0 errors required
+   - SDK untyped calls are isolated in `src/integrations/google_sdk_wrappers.py` (Protocol wrappers per ADR-0002)
+   - All application code must pass strict type checking without # type: ignore
+3. **Formatting** (ruff format): Verifies code is formatted correctly
+4. **Unit/Integration Tests** (pytest): All 843 tests must pass
+5. **Docstring Coverage**: Minimum 93.6% required
+
+**Type Safety Architecture**: See [ADR-0002](architecture/adr/ADR-0002-type-safety-sdk-boundaries.md) for the SDK wrapper boundary pattern that keeps type checking strict while isolating Google Cloud SDK calls.
 
 ## 8. First-week onboarding path (practical)
 

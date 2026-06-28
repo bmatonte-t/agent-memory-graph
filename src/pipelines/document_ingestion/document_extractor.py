@@ -1,7 +1,7 @@
 """Document extraction from PDF and PowerPoint files.
 
 This module extracts text and metadata from various document formats:
-  - PDF files via PyPDF2
+    - PDF files via pypdf
   - PowerPoint presentations via python-pptx
   - Structured metadata extraction
   - Page/slide-level chunking support
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from pptx import Presentation
-from PyPDF2 import PdfReader
+from pypdf import PdfReader
 
 SLIDE_TITLE_PLACEHOLDER_TYPE = 1
 IMAGE_SHAPE_TYPE = 13

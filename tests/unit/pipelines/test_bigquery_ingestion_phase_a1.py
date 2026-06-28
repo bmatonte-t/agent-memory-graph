@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -295,12 +296,10 @@ class TestPOLEClassifier:
         cache.clear()
         assert len(cache.cache) == 0
 
-    @patch("src.pipelines.bigquery_ingestion.pole_classifier.vertexai.init")
-    @patch("src.pipelines.bigquery_ingestion.pole_classifier.GenerativeModel.generate_content")
+    @patch("src.pipelines.bigquery_ingestion.pole_classifier.generate_generative_ai_text")
     def test_classify_columns_success(
         self,
-        mock_generate: MagicMock,
-        mock_init: MagicMock,
+        mock_generate_text: MagicMock,
         table_metadata: TableMetadata,
         sample_rows: list[dict[str, object]],
     ) -> None:
@@ -330,9 +329,7 @@ class TestPOLEClassifier:
             "overall_confidence": 0.97,
         }
 
-        mock_response = MagicMock()
-        mock_response.text = json.dumps(gemini_response)
-        mock_generate.return_value = mock_response
+        mock_generate_text.return_value = json.dumps(gemini_response)
 
         classifier = POLEClassifier(project_id="project-1")
         result = classifier.classify_columns(table_metadata, sample_rows)
@@ -345,23 +342,19 @@ class TestPOLEClassifier:
         }
         assert result.overall_confidence == EXPECTED_OVERALL_CONFIDENCE
 
-    @patch("src.pipelines.bigquery_ingestion.pole_classifier.vertexai.init")
-    @patch("src.pipelines.bigquery_ingestion.pole_classifier.GenerativeModel.generate_content")
+    @patch("src.pipelines.bigquery_ingestion.pole_classifier.generate_generative_ai_text")
     def test_classify_columns_caching(
         self,
-        mock_generate: MagicMock,
-        mock_init: MagicMock,
+        mock_generate_text: MagicMock,
         table_metadata: TableMetadata,
     ) -> None:
         """Test classification caching."""
-        gemini_response = {
+        gemini_response: dict[str, Any] = {
             "classifications": [],
             "overall_confidence": 0.8,
         }
 
-        mock_response = MagicMock()
-        mock_response.text = json.dumps(gemini_response)
-        mock_generate.return_value = mock_response
+        mock_generate_text.return_value = json.dumps(gemini_response)
 
         cache = ClassificationCache()
         classifier = POLEClassifier(project_id="project-1", cache=cache)
@@ -372,7 +365,7 @@ class TestPOLEClassifier:
         result2 = classifier.classify_columns(table_metadata)
 
         # Should only call Gemini once
-        assert mock_generate.call_count == 1
+        assert mock_generate_text.call_count == 1
         assert result1 == result2
 
 
@@ -476,7 +469,7 @@ class TestSchemaMapper:
         entity_mapping = mapping.entity_nodes[0]
         assert entity_mapping.id_strategy == EntityIDStrategy.PRIMARY_KEY
 
-        row_data = {"customer_id": "C001", "name": "Alice"}
+        row_data: dict[str, object] = {"customer_id": "C001", "name": "Alice"}
         entity_id = mapper.get_entity_id(mapping, row_data, entity_mapping)
 
         assert entity_id == "C001"
@@ -492,7 +485,7 @@ class TestSchemaMapper:
         entity_mapping = mapping.entity_nodes[1]  # name column
         assert entity_mapping.id_strategy == EntityIDStrategy.HASH
 
-        row_data = {"name": "Alice"}
+        row_data: dict[str, object] = {"name": "Alice"}
         entity_id = mapper.get_entity_id(mapping, row_data, entity_mapping)
 
         # Should start with column name

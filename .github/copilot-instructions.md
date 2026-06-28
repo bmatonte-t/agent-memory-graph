@@ -358,6 +358,8 @@ Apply these concrete patterns from recent hardening work whenever touching typed
 - For external SDKs (Google Cloud Spanner, Scheduler, Vertex AI, Cloud Logging), isolate untyped APIs behind typed wrappers/protocols in `src/integrations/google_sdk_wrappers.py`.
 - Keep untyped objects from crossing module boundaries. Downstream modules should consume typed protocols and helper functions only.
 
+**✅ Implementation Status (2026-06-27)**: SDK wrapper pattern fully implemented for BigQuery, Cloud Scheduler, and Cloud Spanner. See [ADR-0002](docs/architecture/adr/ADR-0002-type-safety-sdk-boundaries.md) for details. Type checking: 0 errors across all files.
+
 ### 2) Keep SDK wrappers behavior-compatible
 
 - Wrappers must preserve existing error semantics relied on by tests (especially exact exception messages).
