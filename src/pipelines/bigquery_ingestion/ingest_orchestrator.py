@@ -156,10 +156,12 @@ class BigQueryIngestJob:
         self.spanner_client = spanner_client or spanner.Client(project=spanner_project_id)
 
         # Initialize pipeline components
-        self.schema_analyzer = BigQuerySchemaAnalyzer(self.bq_client)
-        self.classifier = POLEClassifier(project_id=project_id)
-        self.schema_mapper = SchemaMapper()
-        self.spanner_writer = SpannerIngestWriter(
+        self.schema_analyzer: BigQuerySchemaAnalyzer = BigQuerySchemaAnalyzer(
+            self.bq_client
+        )
+        self.classifier: POLEClassifier = POLEClassifier(project_id=project_id)
+        self.schema_mapper: SchemaMapper = SchemaMapper()
+        self.spanner_writer: SpannerIngestWriter = SpannerIngestWriter(
             spanner_project_id,
             spanner_instance_id,
             spanner_database_id,
@@ -375,7 +377,7 @@ class BigQueryIngestJob:
         try:
             # Sample rows for classification context
             sample_rows = self.schema_analyzer.sample_rows(
-                f"{self.project_id}.{self.bigquery_dataset_id}.{table_metadata.table_name}",
+                f"{self.project_id}.{self.bigquery_dataset_id}.{table_metadata.table_id}",
                 limit=10,
             )
             logger.debug("Sampled %d rows for classification", len(sample_rows))
@@ -390,7 +392,7 @@ class BigQueryIngestJob:
             return {  # noqa: TRY300
                 "classified_columns": classification.classified_columns,
                 "overall_confidence": classification.overall_confidence,
-                "timestamp": classification.timestamp,
+                "timestamp": classification.classification_timestamp,
             }
         except Exception as e:
             msg = f"Schema classification failed: {e!s}"
@@ -400,7 +402,7 @@ class BigQueryIngestJob:
                 error_message=msg,
                 project_id=self.project_id,
                 dataset_id=self.bigquery_dataset_id,
-                table_id=table_metadata.table_name,
+                table_id=table_metadata.table_id,
                 stage="classify_schema",
                 tenant_id=self.tenant_id,
             ) from e
@@ -438,7 +440,7 @@ class BigQueryIngestJob:
                 error_message=msg,
                 project_id=self.project_id,
                 dataset_id=self.bigquery_dataset_id,
-                table_id=table_metadata.table_name,
+                table_id=table_metadata.table_id,
                 stage="map_schema",
                 tenant_id=self.tenant_id,
             ) from e
@@ -520,19 +522,23 @@ class BigQueryIngestJob:
             )
 
             # Record audit trail
-            self.spanner_writer.record_engram_evidence(
-                tenant_id=self.tenant_id,
-                source="bigquery_table",
-                provenance={
-                    "project_id": self.project_id,
-                    "dataset_id": self.bigquery_dataset_id,
-                    "table_id": table_id,
-                    "ingestion_timestamp": datetime.now(UTC).isoformat(),
-                },
-                entity_nodes_count=len(node_batches),
-                relationships_count=len(edge_batches),
-            )
-            logger.debug("Recorded engram evidence for %s", table_id)
+            if node_batches:
+                # Use the first node as the reference for audit evidence
+                primary_node_id = node_batches[0].node_id
+                self.spanner_writer.record_engram_evidence(
+                    tenant_id=self.tenant_id,
+                    node_id=primary_node_id,
+                    source="bigquery_table",
+                    provenance={
+                        "project_id": self.project_id,
+                        "dataset_id": self.bigquery_dataset_id,
+                        "table_id": table_id,
+                        "ingestion_timestamp": datetime.now(UTC).isoformat(),
+                        "nodes_count": str(len(node_batches)),
+                        "edges_count": str(len(edge_batches)),
+                    },
+                )
+                logger.debug("Recorded engram evidence for %s", table_id)
 
             return {  # noqa: TRY300
                 "nodes_written": nodes_written,
