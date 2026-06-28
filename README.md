@@ -55,6 +55,25 @@ Agent Memory Graph addresses this with:
 - Structured logging, tracing hooks, and metrics instrumentation.
 - Tenant-aware memory access patterns and hardened error envelopes.
 
+## Org-Wide Single-Tenant Mode
+
+For enterprise deployments where all agents share memory within a single organization:
+
+```yaml
+# Enable org-wide mode in config.yaml
+single_company:
+  enabled: true
+  company_id: "acme-corp"
+  auth_mode: "internal"  # or "external" for policy delegation
+```
+
+**Features**:
+- Fixed company_id injection (no explicit tenant_id required in requests)
+- Pluggable governance: internal ABAC or external policy delegation
+- Backward compatible with multi-tenant deployments (toggle via flag)
+
+**See Also**: [docs/CONSOLIDATION_NOTES.md](docs/CONSOLIDATION_NOTES.md) for architecture, deployment patterns, and governance adapters.
+
 ## API Endpoints
 
 Primary endpoints:

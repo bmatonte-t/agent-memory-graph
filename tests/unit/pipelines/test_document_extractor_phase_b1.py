@@ -19,11 +19,11 @@ from src.pipelines.document_ingestion.document_extractor import (
 )
 
 # Test constants
-SAMPLE_PDF_PATH = "/tmp/sample.pdf"  # noqa: S108
-SAMPLE_PPTX_PATH = "/tmp/sample.pptx"  # noqa: S108
-SAMPLE_PPT_PATH = "/tmp/sample.ppt"  # noqa: S108
-UNSUPPORTED_FILE_PATH = "/tmp/sample.txt"  # noqa: S108
-NONEXISTENT_FILE_PATH = "/tmp/nonexistent.pdf"  # noqa: S108
+SAMPLE_PDF_PATH = "/tmp/sample.pdf"
+SAMPLE_PPTX_PATH = "/tmp/sample.pptx"
+SAMPLE_PPT_PATH = "/tmp/sample.ppt"
+UNSUPPORTED_FILE_PATH = "/tmp/sample.txt"
+NONEXISTENT_FILE_PATH = "/tmp/nonexistent.pdf"
 EXTRACTED_TEXT_SHORT = "Sample PDF text"
 EXTRACTED_TEXT_MEDIUM = "This is a longer sample text for testing"
 EXTRACTED_TEXT_LONG = " ".join(["word"] * 100)

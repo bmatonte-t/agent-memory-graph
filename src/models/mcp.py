@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, cast
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.security.governance import AuthorizationScope  # noqa: TC001
 
@@ -22,11 +22,43 @@ class MCPToolName(StrEnum):
 class MCPInvokeRequest(BaseModel):
     """Tool invocation request payload."""
 
-    tenant_id: str = Field(...)
+    tenant_id: str = Field(
+        ...,
+        description=(
+            "Tenant identifier. Required in multi-tenant mode. "
+            "Auto-injected in org-wide single-company mode."
+        ),
+    )
     agent_id: str | None = Field(default=None, min_length=1)
     tool_name: MCPToolName
     arguments: dict[str, Any] = Field(default_factory=dict)
     session_id: str | None = Field(default=None)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _inject_tenant_id_in_org_wide_mode(cls, data: object) -> object:
+        """Inject the fixed company_id when org-wide mode is active and tenant_id is absent.
+
+        In multi-tenant mode this validator is a no-op; a missing or null
+        ``tenant_id`` will still fail Pydantic field validation (422).
+
+        In single-company mode a missing or null ``tenant_id`` is replaced
+        with the configured ``company_id`` before type checking occurs.
+        """
+        if not isinstance(data, dict):
+            return data
+        typed_data = cast(dict[str, Any], data)
+        if typed_data.get("tenant_id") is not None:
+            return typed_data
+
+        from src.project_base.settings import settings  # noqa: PLC0415
+
+        if settings.single_company.enabled:
+            result = dict(typed_data)
+            result["tenant_id"] = settings.single_company.company_id
+            return result
+        return typed_data
+
     request_id: str | None = Field(default=None)
     authorization_scope: AuthorizationScope | None = Field(default=None)
 
