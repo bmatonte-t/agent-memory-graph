@@ -1,52 +1,50 @@
-# Repo Template
+# Agent Memory Graph
 
-A repository template for easily setting up a well behaved development environment for a smooth collaboration experience. Start coding, not configuring.
+**Enterprise-grade AI agent coordination platform for single organizations.**
 
-Some features at a glance
+Agent Memory Graph is a deterministic, grounding-first memory system for coordinating multiple AI agents within an enterprise. It eliminates hallucination by ensuring every response is grounded in organizational data, preserves context across sessions, and provides immutable audit trails for compliance.
+
+## Key Features
 
 <div class="grid cards" markdown>
 
-- :material-package-variant:{ .lg .middle } __Virtual Environment__
+- :material-brain:{ .lg .middle } __Tripartite Memory Model__
 
     ---
 
-    A virtual environment using `uv` for Python version and dependency management.
+    Context (session history), Semantic (organizational facts), and Audit (immutable traces) tiers—strictly isolated for security and compliance.
 
-- :material-cog:{ .lg .middle } __Configuration Management__
-
-    ---
-
-    Type-safe settings with Pydantic, layered YAML configs, and fail-fast validation.
-
-- :material-math-log:{ .lg .middle } __Logging__
+- :material-chart-line:{ .lg .middle } __Evidence-Grounded Responses__
 
     ---
 
-    Logging with configurable levels, formats, and outputs out of the box.
+    Every agent response is grounded in retrieved organizational data. Unsupported claims are rejected with explicit insufficiency—no hallucination.
 
-- :material-format-paint:{ .lg .middle } __Formatting and Linting__
-
-    ---
-
-    Formatting and linting tools configured for code quality.
-
-- :material-microsoft-visual-studio-code:{ .lg .middle } __VSCode Settings__
+- :material-lock:{ .lg .middle } __Enterprise Security__
 
     ---
 
-    Shared, sane and default VSCode settings for consistency.
+    Strict tenant isolation, pluggable governance (internal ABAC or external delegation), immutable audit trails, and IAM-aligned access controls.
 
-- :octicons-copilot-24:{ .lg .middle } __Coding Agents__
-
-    ---
-
-    GitHub Copilot configured with project-specific instructions and custom agents.
-
-- :octicons-git-pull-request-24:{ .lg .middle } __Pull Request Template__
+- :material-database-check:{ .lg .middle } __Production-Ready Infrastructure__
 
     ---
 
-    A Pull Request template to standardize contributions.
+    Built on Google Cloud Spanner for scale, with comprehensive observability, deterministic performance, and enterprise-grade reliability.
+
+- :material-network:{ .lg .middle } __Multi-Agent Coordination__
+
+    ---
+
+    All agents share organizational memory via a common graph. Enables coordinated decision-making and eliminates context loss across agent boundaries.
+
+- :material-book-check:{ .lg .middle } __Compliance & Auditability__
+
+    ---
+
+    Every memory access, reasoning step, and agent decision is logged in immutable audit trails. Built for regulated industries.
+
+</div>
 
 - :material-github:{ .lg .middle } __GitHub Actions__
 

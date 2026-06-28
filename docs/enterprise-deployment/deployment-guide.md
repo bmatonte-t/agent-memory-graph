@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Provide a customer-facing deployment and upgrade playbook for the marketplace package.
+Provide step-by-step procedures for deploying Agent Memory Graph in an enterprise customer's GCP organization.
 
 ## Deployment Architecture
 

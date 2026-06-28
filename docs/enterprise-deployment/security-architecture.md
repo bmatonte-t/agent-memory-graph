@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document summarizes the security controls and trust boundaries for the Cognitive Agent Memory Graph marketplace package.
+This document summarizes the security controls and trust boundaries for Agent Memory Graph enterprise deployments.
 
 ## Security Objectives
 

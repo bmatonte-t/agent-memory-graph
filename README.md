@@ -1,73 +1,104 @@
 # Agent Memory Graph
 
-Agent Memory Graph is a GCP-native shared memory platform for AI agents.
+**Enterprise-grade AI agent coordination platform for single organizations.**
 
-It is designed for multi-agent environments where trust, grounding, and auditability matter as much as answer quality. The system combines a strict tripartite memory model with deterministic retrieval and synthesis stages so responses are tied to graph evidence instead of model guesswork.
+Agent Memory Graph is a deterministic, grounding-first memory system for coordinating multiple AI agents within an enterprise. It eliminates hallucination, preserves context across sessions, and provides immutable audit trails for compliance—all deployed within your GCP organization.
 
-## What Problem It Solves
+## The Problem
 
-Most agent systems degrade in production because they:
+Enterprise AI deployments fail when:
 
-- lose short-term context,
-- hallucinate unsupported claims, or
-- cannot explain how an answer was produced.
+- **Agents lose context** between sessions, forcing users to re-explain problems
+- **Responses lack evidence**, making it impossible to audit decisions or debug failures
+- **Agents hallucinate** facts not grounded in organizational data
+- **Multi-agent coordination breaks**, with conflicting decisions or redundant work
+- **Compliance is impossible**, because there's no audit trail of reasoning
 
-Agent Memory Graph addresses this with:
+Agent Memory Graph solves this by:
 
-- memory tier isolation (Context, Semantic, Audit),
-- a grounding-first MindMap pipeline,
-- typed MCP tools for stable orchestration,
-- immutable audit traces for reproducibility.
+- **Grounding every response** in graph-evidence (no hallucination)
+- **Preserving organizational context** across all agents and sessions
+- **Providing immutable audit trails** for compliance and debugging
+- **Enabling agent coordination** through shared, deterministic memory
+- **Isolating tenant data** strictly at the database and API layers
 
 ## Core Architecture
 
-### Tripartite Memory Topology
+Agent Memory Graph uses a **strict tripartite memory model** with deterministic retrieval and synthesis pipelines:
 
-- CONTEXT
-  - Session-scoped turn history and short-horizon recall.
+### Memory Tiers
 
-- SEMANTIC
-  - Durable entities and facts with cognitive weighting and temporal decay.
+- **CONTEXT**: Session-scoped turn history and short-horizon recall (user requests, responses, intermediate states)
+- **SEMANTIC**: Durable organizational facts with cognitive weighting and temporal decay (entities, relationships, discovered insights)
+- **AUDIT**: Immutable operation and reasoning traces (who accessed what, reasoning chain, consent decisions)
 
-- AUDIT
-  - Immutable operation and reasoning traces for compliance and debugging.
+Each tier is isolated: writes and reads never cross tiers in a single transaction.
 
 ### MindMap Reasoning Pipeline
 
-1. Mine
-   - Extract intent and entities from user query.
+Every agent response follows this deterministic flow:
 
-2. Aggregate
-   - Retrieve graph evidence with bounded traversal and cognitive horizon filters.
+1. **Mine** — Extract intent and entities from the user request
+2. **Aggregate** — Retrieve graph evidence with bounded traversal and cognitive filters
+3. **Serialize** — Convert evidence to structured, traceable fact payloads
+4. **Synthesize** — Generate response *only* from serialized evidence; fail gracefully if evidence insufficient
 
-3. Serialize
-   - Convert graph evidence into traceable fact payloads.
+**No direct LLM answering from user input.** All responses are grounded.
 
-4. Synthesize
-   - Generate response only from serialized evidence.
-   - If evidence is insufficient, return explicit insufficiency.
+## Enterprise Deployment Model
 
-## Runtime Capabilities
+Agent Memory Graph is deployed as an **isolated single-organization service**:
 
-- FastAPI API surface for memory and orchestration operations.
-- MCP tool service for memory search, fact ingestion, audit logging, and context recall.
-- Agent orchestration modes: single, supervisor_worker, vertex.
-- Structured logging, tracing hooks, and metrics instrumentation.
-- Tenant-aware memory access patterns and hardened error envelopes.
+- **Fixed Organization Context** — All agents in the organization share memory within the same company_id
+- **No Multi-Tenancy** — Strict tenant isolation at database and API levels (no cross-org data leakage)
+- **Pluggable Governance** — Choose between internal policy (ABAC) or external policy delegation (connect to your policy service)
+- **GCP Organization Bound** — Deployed within your GCP project or organization
 
-## API Endpoints
+### Configuration
 
-Primary endpoints:
+Enable org-wide deployment in `config.yaml`:
 
-- GET /health
-- POST /api/v1/mindmap/execute
-- POST /api/v1/mcp/invoke
-- POST /api/v1/agent/respond
+```yaml
+single_company:
+  enabled: true
+  company_id: "your-org-id"
+  auth_mode: "internal"  # or "external" for policy delegation
+  external_auth_url: null  # provide URL if external mode
+```
+
+### Governance Options
+
+**Internal ABAC** (default):
+- Uses existing authorization policies stored in Spanner
+- No external dependencies
+- Suitable for organizations with centralized policy management
+
+**External Delegation** (enterprise):
+- Delegates authorization decisions to your policy service (e.g., Entitlements Platform, Okta, Auth0)
+- Your service receives `POST /authorize` with agent context and responds with allow/deny
+- Enables sync between your identity infrastructure and agent permissions
+
+### What You Get
+
+✅ **Isolation** — Complete data isolation for your organization  
+✅ **Auditability** — Every agent decision is logged and traceable  
+✅ **Compliance** — Immutable audit trails for regulatory requirements  
+✅ **Multi-Agent Coordination** — All agents share organizational memory  
+✅ **No Context Loss** — Session history preserved indefinitely
+
+## API Surface
+
+Core memory and orchestration endpoints:
+
+- **GET /health** — Health check and readiness probe
+- **POST /api/v1/mindmap/execute** — Execute MindMap reasoning pipeline (Mine → Aggregate → Synthesize)
+- **POST /api/v1/mcp/invoke** — Invoke MCP tools for memory search, ingestion, audit querying
+- **POST /api/v1/agent/respond** — Orchestrate agent responses across single/supervisor/vertex modes
 
 Internal maintenance endpoints:
 
-- POST /internal/decay-weights
-- POST /internal/prune-weights
+- **POST /internal/decay-weights** — Apply cognitive weight decay (scheduled or manual)
+- **POST /internal/prune-weights** — Prune low-confidence evidence from Semantic tier
 
 ## Quickstart
 
@@ -154,16 +185,20 @@ Deployment templates and scripts:
 
 ## Project Status
 
-- Phase 1: Foundation and core memory layer complete.
-- Phase 2: MindMap retrieval and grounding pipeline complete.
-- Phase 3: MCP tooling and orchestration integration complete.
-- Phase 4: Security, observability, and marketplace hardening in progress.
-- Phase 4C: Observability safety baseline complete.
-- Phase 5-6: Comparative pilot and launch preparation planned.
+**Production-Ready for Enterprise Deployment**
 
-Roadmap reference:
+- ✅ **Phase 1**: Core memory architecture (Context, Semantic, Audit tiers)
+- ✅ **Phase 2**: MindMap retrieval and grounding pipeline
+- ✅ **Phase 3**: MCP tooling and agent orchestration
+- ✅ **Phase 4**: Security hardening (ABAC, org-wide isolation, audit trails)
+- ✅ **Phase 4C**: Observability and compliance baseline
+- ✅ **Phase 5**: Enterprise governance adapters (internal ABAC + external delegation)
+- 🔄 **Current**: Customer pilot and integration support
 
-- DEVELOPMENT_PLAN.md
+Roadmap:
+
+- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) — Technical roadmap
+- [docs/CONSOLIDATION_NOTES.md](docs/CONSOLIDATION_NOTES.md) — Architecture and deployment patterns
 
 ## Document Extraction Pipeline
 

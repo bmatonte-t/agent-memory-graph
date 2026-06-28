@@ -5,3 +5,8 @@ cloud_trace:
   enabled: false
 cloud_logging:
   enabled: false
+single_company:
+  enabled: false
+  company_id: ""
+  auth_mode: internal
+  external_auth_url: null

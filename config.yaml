@@ -19,3 +19,8 @@ governance:
     max_attempts: 3
     initial_backoff_seconds: 0.25
     max_backoff_seconds: 5.0
+single_company:
+  enabled: false
+  company_id: ""
+  auth_mode: internal
+  external_auth_url: null

@@ -14,7 +14,7 @@ Test Structure:
   - Error handling: 8 tests
   Total: 30 tests
 """
-# ruff: noqa: PLR2004, S108
+# ruff: noqa: PLR2004
 
 from __future__ import annotations
 

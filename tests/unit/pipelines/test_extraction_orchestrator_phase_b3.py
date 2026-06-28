@@ -22,7 +22,7 @@ Test Structure:
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -37,8 +37,6 @@ from src.pipelines.document_ingestion.document_extractor import (
 from src.pipelines.entity_linking.fuzzy_matcher import (
     DeduplicationResult,
     FuzzyMatcherError,
-    MatchCandidate,
-    SimilarityScore,
 )
 from src.pipelines.services.extraction_orchestrator import (
     DocumentWithEntities,
@@ -440,9 +438,8 @@ class TestDocumentProcessing:
                 file_path="/tmp/missing.pdf",
                 file_format="pdf",
             ),
-        ):
-            with pytest.raises(ExtractionOrchestrationError, match="EXTRACTION_FAILED"):
-                orchestrator.process_document("/tmp/missing.pdf")
+        ), pytest.raises(ExtractionOrchestrationError, match="EXTRACTION_FAILED"):
+            orchestrator.process_document("/tmp/missing.pdf")
 
     def test_process_document_unexpected_error(self) -> None:
         """Test error handling for unexpected exceptions."""
@@ -451,9 +448,8 @@ class TestDocumentProcessing:
             orchestrator.extractor,
             "extract",
             side_effect=ValueError("Unexpected error"),
-        ):
-            with pytest.raises(ExtractionOrchestrationError, match="PROCESSING_FAILED"):
-                orchestrator.process_document("/tmp/test.pdf")
+        ), pytest.raises(ExtractionOrchestrationError, match="PROCESSING_FAILED"):
+            orchestrator.process_document("/tmp/test.pdf")
 
     def test_process_document_multipage(self) -> None:
         """Test processing multi-page document."""
@@ -777,6 +773,5 @@ class TestErrorHandling:
                 orchestrator,
                 "process_document",
                 return_value=doc,
-            ):
-                with pytest.raises(ExtractionOrchestrationError, match="DEDUPLICATION_FAILED"):
-                    orchestrator.process_batch(request)
+            ), pytest.raises(ExtractionOrchestrationError, match="DEDUPLICATION_FAILED"):
+                orchestrator.process_batch(request)
