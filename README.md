@@ -47,10 +47,10 @@ Every agent response follows this deterministic flow:
 
 ## Enterprise Deployment Model
 
-Agent Memory Graph is deployed as an **isolated single-organization service**:
+Agent Memory Graph is deployed as an **isolated single-organization service**, one deployment per team within a GCP organization:
 
-- **Fixed Organization Context** — All agents in the organization share memory within the same company_id
-- **No Multi-Tenancy** — Strict tenant isolation at database and API levels (no cross-org data leakage)
+- **Project-per-team isolation** — Each adopting team gets its own triad of GCP projects (dev/intg/prod) with a dedicated Cloud Run service, Spanner instance, and Artifact Registry
+- **No shared infrastructure** — No shared Spanner instances, no shared IAM, no cross-project data access
 - **Pluggable Governance** — Choose between internal policy (ABAC) or external policy delegation (connect to your policy service)
 - **GCP Organization Bound** — Deployed within your GCP project or organization
 
@@ -69,8 +69,8 @@ single_company:
 ### Governance Options
 
 **Internal ABAC** (default):
-- Uses existing authorization policies stored in Spanner
-- No external dependencies
+- Deny-by-default with `AuthorizationScope` per request
+- Dual audit logging (GRANTED/DENIED decisions)
 - Suitable for organizations with centralized policy management
 
 **External Delegation** (enterprise):
@@ -78,35 +78,45 @@ single_company:
 - Your service receives `POST /authorize` with agent context and responds with allow/deny
 - Enables sync between your identity infrastructure and agent permissions
 
-### What You Get
-
-✅ **Isolation** — Complete data isolation for your organization
-✅ **Auditability** — Every agent decision is logged and traceable
-✅ **Compliance** — Immutable audit trails for regulatory requirements
-✅ **Multi-Agent Coordination** — All agents share organizational memory
-✅ **No Context Loss** — Session history preserved indefinitely
-
 ## API Surface
 
 Core memory and orchestration endpoints:
 
-- **GET /health** — Health check and readiness probe
-- **POST /api/v1/mindmap/execute** — Execute MindMap reasoning pipeline (Mine → Aggregate → Synthesize)
-- **POST /api/v1/mcp/invoke** — Invoke MCP tools for memory search, ingestion, audit querying
-- **POST /api/v1/agent/respond** — Orchestrate agent responses across single/supervisor/vertex modes
+| Endpoint | Description |
+|---|---|
+| `GET /health` | Health check and readiness probe |
+| `POST /api/v1/mindmap/execute` | Execute MindMap reasoning pipeline (Mine → Aggregate → Serialize → Synthesize) |
+| `POST /api/v1/mcp/invoke` | Invoke MCP tools: `MEMORY_SEARCH`, `MEMORY_ADD_FACT`, `MEMORY_LOG_TRACE`, `MEMORY_RECALL_CONTEXT` |
+| `POST /api/v1/agent/respond` | Orchestrate agent responses across single/supervisor/gemini modes |
 
 Internal maintenance endpoints:
 
-- **POST /internal/decay-weights** — Apply cognitive weight decay (scheduled or manual)
-- **POST /internal/prune-weights** — Prune low-confidence evidence from Semantic tier
+| Endpoint | Description |
+|---|---|
+| `POST /internal/decay-weights` | Apply temporal cognitive weight decay (scheduled or manual) |
+| `POST /internal/prune-weights` | Prune low-confidence evidence below configurable threshold |
+
+## Technology Stack
+
+| Component | Technology |
+|---|---|
+| Runtime | Python 3.14, FastAPI, uvicorn |
+| Database | Google Cloud Spanner (property graph with GQL) |
+| AI Engine | Gemini Enterprise Agent Platform (Gemini 1.5 Flash for extraction, Gemini 1.5 Pro for synthesis) |
+| Compute | Cloud Run gen2 (2 vCPU / 4 Gi) |
+| Observability | Cloud Logging, Cloud Trace, Cloud Monitoring |
+| Infrastructure | Terraform (workspace-per-environment: dev/intg/prod) |
+| Package Manager | uv |
+| Task Runner | just |
+| CI/CD | GitHub Actions (code quality) + GitLab CI (deployment) |
 
 ## Quickstart
 
 ### Prerequisites
 
 - Python 3.14+
-- uv
-- just
+- [uv](https://docs.astral.sh/uv/)
+- [just](https://github.com/casey/just)
 
 ### Install Dependencies
 
@@ -114,7 +124,7 @@ Internal maintenance endpoints:
 uv sync --all-groups
 ```
 
-Optional hook setup:
+Optional pre-commit hook setup:
 
 ```bash
 just setup-hooks
@@ -132,151 +142,194 @@ Health check:
 curl http://127.0.0.1:8000/health
 ```
 
-## Developer Commands
-
-Common commands from justfile:
+### Run with Spanner Emulator
 
 ```bash
-just test
-just lint
-just check-types
-just check-format
-just format
-just test-coverage
-just check-all
+source scripts/start-emulator.sh
+uv run uvicorn src.api.main:app --reload
 ```
 
-Documentation tasks:
+## Developer Commands
 
 ```bash
-just serve-docs
-just build-docs
+just --list          # Show all available commands
+
+# Quality checks
+just lint            # Run ruff linter
+just check-types     # basedpyright strict mode
+just check-format    # Check formatting without changes
+just test            # Run all tests
+just test-coverage   # Run tests with coverage report
+just docstring-coverage  # Check docstring coverage
+just check-all       # Run ALL quality gates (lint + types + format + tests + docstrings)
+
+# Fix/format
+just format          # Auto-format code
+just lint-fix        # Auto-fix lint issues
+
+# Documentation
+just serve-docs      # Local MkDocs with live reload
+just build-docs      # Build static documentation site
+just docs-publish-site  # Publish to documentation.tryolabs.com
+
+# Deployment
+just phase3-render-cloudrun <project_id>   # Render Cloud Run manifest
+just phase3-build-image <project_id>       # Build container with Cloud Build
+just phase3-deploy-cloudrun <project_id>   # Deploy to Cloud Run
 ```
 
 ## Testing and Quality
 
-The project maintains production-grade quality through:
+| Metric | Status |
+|---|---|
+| Tests | 843 passing (unit, integration, chaos, load) |
+| Type Safety | basedpyright strict mode — 0 errors, 0 warnings |
+| Linting | ruff — 100% compliant |
+| Formatting | ruff format — 100% compliant |
+| Docstring Coverage | 93.6% (Excellent) |
 
-- **Unit & Integration Tests**: pytest (843 tests, all passing)
-- **Type Safety**: basedpyright strict mode (0 errors, 0 warnings)
-  - SDK calls isolated behind typed Protocol boundaries (see [ADR-0002](docs/architecture/adr/ADR-0002-type-safety-sdk-boundaries.md))
-  - No `# type: ignore` comments in application code
-  - All functions fully annotated per Python 3.14 standards
-- **Linting & Formatting**: ruff (100% compliant)
-- **Docstring Coverage**: 93.6% (Excellent)
+Test categories:
 
-Recommended pre-PR gate:
+- **Unit tests** (`tests/unit/`) — Core memory, MindMap pipeline, MCP tools, governance, cognitive weighting, pipelines
+- **Integration tests** (`tests/integration/`) — Cross-tenant isolation, ABAC enforcement, agent concurrency, audit trails, evidence synthesis
+- **Chaos tests** (`tests/chaos/`) — Resilience under failure conditions
+- **Load tests** (`tests/load/`) — SLO validation, comparative weighting, emulator workloads
 
-```bash
-just check-all  # Lint + type-check + format + tests + docstrings
-```
-
-Type checking specifically:
-
-```bash
-just check-types  # basedpyright strict mode (0 errors required)
-```
-
-## Deployment (Phase 3 Scaffold)
-
-Cloud Run helper tasks are available:
+Pre-PR gate (runs all checks):
 
 ```bash
-just phase3-render-cloudrun <project_id>
-just phase3-build-image <project_id>
-just phase3-deploy-cloudrun <project_id>
+just check-all
 ```
 
-Deployment templates and scripts:
+## Project Structure
 
-- infrastructure/phase3/cloudrun-service.yaml
-- scripts/render_phase3_cloudrun_manifest.py
+```
+src/
+├── api/              # FastAPI application and route handlers
+├── agent/            # Agent orchestrator and Vertex AI adapter
+├── client/           # HTTP client with retry and rate limiting
+├── db/               # Spanner client and database access
+├── deployment/       # Cloud Run configuration helpers
+├── integrations/     # Typed SDK wrappers (BigQuery, Scheduler, Spanner)
+├── mcp/              # MCP tool service (4 tools)
+├── memory/           # Core memory: MindMap pipeline, cognitive weighting, retrieval, evidence
+├── models/           # Pydantic schemas for all API contracts
+├── observability/    # Structured logging, metrics, distributed tracing
+├── pipelines/        # Data ingestion pipelines
+│   ├── api/              # Extraction REST API endpoints
+│   ├── bigquery_ingestion/   # BigQuery → Spanner graph ingestion (POLE+ classification)
+│   ├── document_ingestion/   # PDF/PPTX text and entity extraction
+│   ├── entity_linking/       # Fuzzy deduplication with confidence tiers
+│   └── services/             # Pipeline orchestration
+├── project_base/     # Settings, logging configuration
+└── security/         # Governance, ABAC, tenant context, validators
+
+tests/
+├── unit/             # 25+ test modules covering all src/ modules
+│   ├── deployment/       # Cloud Run config tests
+│   └── pipelines/        # Pipeline-specific tests (8 modules)
+├── integration/      # 23 integration test modules
+├── chaos/            # Resilience tests
+└── load/             # Performance and SLO tests
+
+infrastructure/
+├── terraform/        # Full Terraform module (Cloud Run, Spanner, IAM, Secrets, Monitoring, Registry)
+├── docker/           # Container configuration
+├── documentation/    # MkDocs documentation server
+├── phase2/           # Phase 2 infrastructure artifacts
+└── phase3/           # Cloud Run service manifests
+
+migrations/           # 9 Spanner DDL migrations (nodes, edges, property graph, audit, evidence)
+docs/                 # MkDocs documentation source
+scripts/              # Utility scripts (deploy, metrics, rendering)
+```
+
+## Infrastructure
+
+All infrastructure is provisioned by a Terraform module at `infrastructure/terraform/`:
+
+| Resource | Description |
+|---|---|
+| Cloud Run service | 2 vCPU / 4 Gi, min 1 instance |
+| Spanner instance | 100 PU (dev/intg), 200 PU (prod) |
+| Spanner database | 9 migrations auto-applied |
+| Artifact Registry | Docker repository for container images |
+| Service Accounts | Product SA + Spanner SA with least-privilege IAM |
+| Secret Manager | Spanner credentials + app config |
+| Cloud Monitoring | Alert policies for error rate and p99 latency |
+
+Terraform is workspace-aware (`dev`, `intg`, `prod`) and state is stored in GCS.
+
+## CI/CD
+
+### GitHub Actions
+
+- **Code Quality** (`code-quality.yaml`) — Runs on every push: lint, format, types, tests, docstring coverage
+- **PR Style** (`check-pr-style.yaml`) — Validates PR titles and labels
+- **Documentation** (`build-and-publish-documentation.yaml`) — Builds and publishes MkDocs site
+- **Code Complexity** (`code-complexity-metrics.yaml`) — Tracks complexity metrics
+- **Pre-commit Autoupdate** (`pre-commit-autoupdate.yaml`) — Keeps hooks current
+
+### GitLab CI (Deployment)
+
+- Docker build and push to Artifact Registry
+- Terraform plan/apply with workspace-aware environments
+- Human approval gate on production deployments
+
+## Database Schema
+
+9 migrations in `migrations/`:
+
+1. `MemoryNode` table with cognitive weight and temporal metadata
+2. `MemoryEdge` table with relationship types and weights
+3. Property graph definition (GQL-queryable)
+4. Tenant isolation (`TenantId` column)
+5. Audit immutability controls (cannot UPDATE/DELETE audit events)
+6. Session action count for weighting
+7. Property graph session action count integration
+8. `ENGRAM_EVIDENCE` table for fact grounding
+9. Confidence metadata on evidence records
+
+## Documentation
+
+Full documentation is served via MkDocs:
+
+```bash
+just serve-docs  # http://localhost:8000
+```
+
+### Documentation Structure
+
+| Section | Contents |
+|---|---|
+| [Concepts](docs/concepts/tripartite-memory.md) | Tripartite memory model, MindMap pipeline, cognitive weighting |
+| [Architecture](docs/architecture.md) | System components, data flows, tech stack |
+| [User Guide — MCP Tools](docs/user-guide/mcp-tools.md) | The four MCP tools with request/response examples |
+| [User Guide — REST API](docs/user-guide/api-reference.md) | Every HTTP endpoint with examples |
+| [User Guide — Extraction Pipeline](docs/user-guide/extraction-pipeline.md) | Document and BigQuery ingestion |
+| [Deployment](docs/deployment.md) | Adoption model, project-by-project rollout, onboarding steps |
+| [Infrastructure](docs/infrastructure.md) | Terraform resources, CI/CD pipeline, GCP configuration |
+| [Backlog](docs/backlog.md) | Current state, open work, known limitations |
 
 ## Project Status
 
-**Production-Ready for Enterprise Deployment**
+**Production-Ready** — awaiting first real GCP deployment.
 
 - ✅ **Phase 1**: Core memory architecture (Context, Semantic, Audit tiers)
 - ✅ **Phase 2**: MindMap retrieval and grounding pipeline
 - ✅ **Phase 3**: MCP tooling and agent orchestration
 - ✅ **Phase 4**: Security hardening (ABAC, org-wide isolation, audit trails)
-- ✅ **Phase 4C**: Observability and compliance baseline
-- ✅ **Phase 4D**: Type Safety Infrastructure (SDK wrapper boundaries, 0 type errors)
-  - Protocol-based SDK wrappers for BigQuery, Cloud Scheduler, Cloud Spanner
-  - Strict type checking with basedpyright (0 errors, 0 warnings)
-  - See [ADR-0002](docs/architecture/adr/ADR-0002-type-safety-sdk-boundaries.md) for architecture
+- ✅ **Phase 4C**: Observability and compliance baseline (Cloud Logging, Cloud Trace, Monitoring alerts)
+- ✅ **Phase 4D**: Type Safety Infrastructure (Protocol-based SDK wrappers, 0 type errors)
 - ✅ **Phase 5**: Enterprise governance adapters (internal ABAC + external delegation)
-- 🔄 **Current**: Customer pilot and integration support
-
-Roadmap:
-
-- [DEVELOPMENT_PLAN.md](DEVELOPMENT_PLAN.md) — Technical roadmap
-- [docs/CONSOLIDATION_NOTES.md](docs/CONSOLIDATION_NOTES.md) — Architecture and deployment patterns
-
-## Document Extraction Pipeline
-
-A production-ready subsystem for ingesting, extracting entities from, and deduplicating documents across PDFs and PowerPoint files. The pipeline includes:
-
-- **Document Extraction** (Phase B1): Text and entity extraction from PDF/PPTX
-- **Entity Deduplication** (Phase B2): Fuzzy matching with confidence scoring
-- **Pipeline Orchestration** (Phase B3): Coordinated extraction across batches
-- **REST API** (Phase C): FastAPI service with extraction endpoints
-- **Cloud Run Deployment** (Phase D): Production-ready container deployment
-- **Integration Tests** (Phase E): 22 comprehensive end-to-end tests
-
-### Extraction Pipeline Quick Links
-
-- **Quickstart**: [EXTRACTION_PIPELINE_QUICKSTART.md](docs/EXTRACTION_PIPELINE_QUICKSTART.md)
-- **API Reference**: [EXTRACTION_PIPELINE_API_REFERENCE.md](docs/EXTRACTION_PIPELINE_API_REFERENCE.md)
-- **Architecture**: [EXTRACTION_PIPELINE_ARCHITECTURE.md](docs/EXTRACTION_PIPELINE_ARCHITECTURE.md)
-- **Deployment Guide**: [EXTRACTION_PIPELINE_DEPLOYMENT.md](docs/EXTRACTION_PIPELINE_DEPLOYMENT.md)
-
-### Extraction Pipeline Test Status
-
-- ✅ **746 tests passing** (all phases)
-- ✅ **100% linting clean** (ruff compliance)
-- ✅ **95%+ code coverage**
-- ✅ **Production ready** (deployed to Cloud Run)
-
-## Documentation Index
-
-### Architecture & Design Decisions
-
-- **docs/architecture/adr/ADR-0001-phase-one-architecture.md** — Core architecture direction
-- **docs/architecture/adr/ADR-0002-type-safety-sdk-boundaries.md** — SDK wrapper pattern and type safety
-- docs/architecture/decision-log.md — Ongoing architectural decisions
-
-### API & Data Model
-
-- docs/api-reference.md
-- docs/data-model-spec.md
-
-### Development & Operations
-
-- docs/technical-report.md — Comprehensive codebase navigation guide
-- docs/objectives.md
-- docs/marketplace-readiness-checklist.md
-- docs/development/phase3-agent-integration-guide.md
-- docs/development/phase3-mcp-tool-reference.md
-- docs/development/phase4-local-user-testing.md
-
-### Extraction Pipeline
-
-- **docs/EXTRACTION_PIPELINE_QUICKSTART.md** ⭐ START HERE for extraction pipeline
-- docs/EXTRACTION_PIPELINE_API_REFERENCE.md
-- docs/EXTRACTION_PIPELINE_ARCHITECTURE.md
-- docs/EXTRACTION_PIPELINE_DEPLOYMENT.md
-
-### Quality & Implementation
-
-- docs/SDK_WRAPPER_IMPLEMENTATION_COMPLETE.md — Type safety implementation status
-- docs/code-quality.md
+- ✅ **Extraction Pipeline**: Document (PDF/PPTX) and BigQuery ingestion with entity deduplication
+- 🔄 **Current**: First deployment to LATAM GCP projects
 
 ## Contributing
 
-1. Read docs/development/CONTRIBUTING.md.
+1. Read [CONTRIBUTING.md](CONTRIBUTING.md).
 2. Make focused changes and include tests.
-3. Run quality gates before opening a PR.
+3. Run `just check-all` before opening a PR.
 4. Update docs when behavior or architecture changes.
 
 ## License

@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Memory Graph — Engineers Deep Dive</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media print {
+      @page { size: A4 landscape; margin: 0; }
+      body { margin: 0; padding: 0; }
+      .slide { page-break-after: always; page-break-inside: avoid; width: 297mm; height: 210mm; margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: center; }
+      .slide:last-child { page-break-after: auto; }
+      .no-print { display: none !important; }
+    }
+    @media screen {
+      body { background: #020617; padding: 2rem; }
+      .slide { width: 100%; max-width: 1200px; aspect-ratio: 16/9; margin: 2rem auto; border-radius: 0.75rem; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,.7); }
+    }
+    .slide { position: relative; color: #f1f5f9; }
+    .badge { position: absolute; bottom: 1.2rem; right: 1.75rem; font-size: .65rem; letter-spacing: .12em; text-transform: uppercase; opacity: .3; color: #fff; font-weight: 700; }
+    .snum { position: absolute; bottom: 1.2rem; left: 1.75rem; font-size: .65rem; opacity: .25; color: #fff; }
+    code { font-family: 'Fira Code', 'Cascadia Code', monospace; }
+    .chip { display: inline-block; background: rgba(66,87,232,.2); border: 1px solid rgba(66,87,232,.4); color: #a5b4fc; font-size: .65rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; border-radius: .25rem; padding: .15rem .5rem; }
+    .chip-red { background: rgba(237,22,80,.15); border-color: rgba(237,22,80,.4); color: #fca5a5; }
+    .chip-green { background: rgba(0,214,204,.1); border-color: rgba(0,214,204,.35); color: #5eead4; }
+  </style>
+</head>
+<body class="font-sans antialiased">
+
+<div class="no-print" style="background:#1B0088;color:#fff;padding:1rem 2rem;border-radius:.5rem;max-width:900px;margin:0 auto 2rem;text-align:center;font-size:.9rem;">
+  <strong>Engineers Deep Dive — Agent Memory Graph</strong> &nbsp;|&nbsp;
+  <kbd style="background:#4257E8;padding:.2rem .6rem;border-radius:.3rem;">Cmd+P</kbd> → <strong>Landscape</strong> orientation to export PDF.
+</div>
+
+<!-- SLIDE 1: COVER -->
+<div class="slide" style="background:linear-gradient(135deg,#020617 0%,#0F004F 50%,#1a0a4d 100%);">
+  <div style="position:absolute;top:0;right:0;bottom:0;left:60%;background:linear-gradient(180deg,rgba(66,87,232,.1) 0%,rgba(237,22,80,.05) 100%);border-left:1px solid rgba(66,87,232,.2);"></div>
+  <div class="h-full flex flex-col justify-center px-16 py-12">
+    <span class="chip chip-red" style="margin-bottom:1.25rem;">Technical Deep Dive · v0.2</span>
+    <h1 style="font-size:3rem;font-weight:800;color:#fff;line-height:1.1;margin-bottom:.75rem;">Agent Memory Graph</h1>
+    <h2 style="font-size:1.2rem;color:#94a3b8;font-weight:400;margin-bottom:2rem;">Architecture · APIs · Implementation · Operations</h2>
+    <div style="display:flex;flex-wrap:wrap;gap:.75rem;">
+      <span class="chip">Python 3.14 · FastAPI</span>
+      <span class="chip">Cloud Spanner Graph · GQL</span>
+      <span class="chip">MCP Protocol</span>
+      <span class="chip">Bayesian Weighting</span>
+      <span class="chip">basedpyright strict</span>
+      <span class="chip">843 tests</span>
+      <span class="chip">ABAC · TF IaC</span>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">01 / 14</span>
+</div>
+
+<!-- SLIDE 2: REPO STRUCTURE -->
+<div class="slide" style="background:#020617;">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <div style="border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:1rem;margin-bottom:1.25rem;display:flex;align-items:baseline;gap:1rem;">
+      <span class="chip">Codebase</span>
+      <h1 style="font-size:2rem;font-weight:700;color:#fff;margin:0;">Repository Structure</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1.4fr 1fr;gap:2rem;">
+      <div>
+        <pre style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:.5rem;padding:1.1rem;font-size:.7rem;line-height:1.6;color:#94a3b8;overflow-hidden;"><code><span style="color:#4257E8;">agent-memory-graph/</span>
+├── <span style="color:#00D6CC;">src/</span>
+│   ├── <span style="color:#a5b4fc;">api/</span>              <span style="color:#374151;"># FastAPI router handlers</span>
+│   ├── <span style="color:#a5b4fc;">memory/</span>           <span style="color:#374151;"># core pipeline &amp; retrieval</span>
+│   ├── <span style="color:#a5b4fc;">agent/</span>            <span style="color:#374151;"># orchestrator, Gemini adapter</span>
+│   ├── <span style="color:#a5b4fc;">mcp/</span>              <span style="color:#374151;"># 4 MCP tools (SEARCH, ADD, TRACE, RECALL)</span>
+│   ├── <span style="color:#a5b4fc;">storage/</span>          <span style="color:#374151;"># Spanner Graph client</span>
+│   ├── <span style="color:#a5b4fc;">security/</span>         <span style="color:#374151;"># ABAC, governance</span>
+│   ├── <span style="color:#a5b4fc;">pipelines/</span>        <span style="color:#374151;"># ingestion, extraction</span>
+│   └── <span style="color:#a5b4fc;">observability/</span>    <span style="color:#374151;"># logging, tracing, metrics</span>
+├── <span style="color:#00D6CC;">tests/</span>
+│   ├── unit/         <span style="color:#374151;"># core logic (25+ modules)</span>
+│   └── integration/   <span style="color:#374151;"># Spanner end-to-end (23 modules)</span>
+├── <span style="color:#00D6CC;">infrastructure/</span>
+│   ├── terraform/     <span style="color:#374151;"># Cloud Run, Spanner, IAM, monitoring</span>
+│   └── docker/        <span style="color:#374151;"># Container definition</span>
+└── <span style="color:#00D6CC;">migrations/</span>         <span style="color:#374151;"># 9 Spanner DDL migrations</span></code></pre>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:.8rem;">
+        <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:.9rem 1.1rem;">
+          <p style="color:#a5b4fc;font-weight:700;font-size:.8rem;margin-bottom:.35rem;">Code Quality</p>
+          <ul style="color:#64748b;font-size:.75rem;list-style:none;padding:0;margin:0;">
+            <li>→ <code>basedpyright</code> strict: 0 errors</li>
+            <li>→ <code>ruff</code> lint: 100% clean</li>
+            <li>→ 93.6% docstring coverage</li>
+            <li>→ Pydantic v2 contracts everywhere</li>
+          </ul>
+        </div>
+        <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:.9rem 1.1rem;">
+          <p style="color:#a5b4fc;font-weight:700;font-size:.8rem;margin-bottom:.35rem;">Core Dependencies</p>
+          <ul style="color:#64748b;font-size:.75rem;list-style:none;padding:0;margin:0;">
+            <li>→ <code>google-cloud-spanner</code></li>
+            <li>→ <code>fastapi</code> + <code>uvicorn</code></li>
+            <li>→ <code>vertexai</code> (Gemini)</li>
+            <li>→ <code>structlog</code> + OpenTelemetry</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">02 / 14</span>
+</div>
+
+<!-- SLIDE 3: TRIPARTITE MEMORY PIPELINE -->
+<div class="slide" style="background:linear-gradient(135deg,#020617 0%,#0F004F 50%,#1a0a4d 100%);">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <div style="border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:1rem;margin-bottom:1.5rem;display:flex;align-items:baseline;gap:1rem;">
+      <span class="chip">Architecture</span>
+      <h1 style="font-size:2rem;font-weight:700;color:#fff;margin:0;">MindMap: Mine → Aggregate → Serialize → Synthesize</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:.8rem;font-size:.75rem;">
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#4257E8;font-weight:700;margin-bottom:.75rem;">1. MINE</p>
+        <p style="color:#94a3b8;line-height:1.5;">Extract intent &amp; entities from user query using LLM</p>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#4257E8;font-weight:700;margin-bottom:.75rem;">2. AGGREGATE</p>
+        <p style="color:#94a3b8;line-height:1.5;">BFS traversal with cognitive weight filters on graph</p>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#4257E8;font-weight:700;margin-bottom:.75rem;">3. SERIALIZE</p>
+        <p style="color:#94a3b8;line-height:1.5;">Convert evidence to structured payloads with provenance</p>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#4257E8;font-weight:700;margin-bottom:.75rem;">4. SYNTHESIZE</p>
+        <p style="color:#94a3b8;line-height:1.5;">Generate response ONLY from serialized evidence</p>
+      </div>
+    </div>
+    <div style="margin-top:1.5rem;background:rgba(66,87,232,.05);border-left:3px solid #4257E8;border-radius:.25rem;padding:1rem 1.25rem;">
+      <p style="color:#cbd5e1;font-size:.8rem;margin:0;"><strong style="color:#4257E8;">Key guarantee:</strong> If evidence insufficient, pipeline fails gracefully with NO_EVIDENCE signal. Never hallucinate.</p>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">03 / 14</span>
+</div>
+
+<!-- SLIDE 4: DATABASE SCHEMA -->
+<div class="slide" style="background:#020617;">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <div style="border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:1rem;margin-bottom:1.25rem;display:flex;align-items:baseline;gap:1rem;">
+      <span class="chip chip-green">Storage</span>
+      <h1 style="font-size:2rem;font-weight:700;color:#fff;margin:0;">Spanner Graph Schema</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <div>
+        <p style="color:#94a3b8;font-size:.85rem;margin-bottom:1rem;line-height:1.5;">9 migrations applied sequentially:</p>
+        <div style="background:rgba(0,214,204,.06);border-left:3px solid #00D6CC;padding:.75rem 1rem;margin-bottom:.75rem;border-radius:.25rem;">
+          <p style="color:#5eead4;font-weight:700;font-size:.8rem;margin:0 0 .25rem 0;">MemoryNode</p>
+          <p style="color:#94a3b8;font-size:.75rem;margin:0;"><code>id, type, payload, tenant_id, cognitive_weight, last_accessed</code></p>
+        </div>
+        <div style="background:rgba(0,214,204,.06);border-left:3px solid #00D6CC;padding:.75rem 1rem;margin-bottom:.75rem;border-radius:.25rem;">
+          <p style="color:#5eead4;font-weight:700;font-size:.8rem;margin:0 0 .25rem 0;">MemoryEdge</p>
+          <p style="color:#94a3b8;font-size:.75rem;margin:0;"><code>from_id, to_id, type, weight, confidence, metadata</code></p>
+        </div>
+        <div style="background:rgba(237,22,80,.06);border-left:3px solid #ED1650;padding:.75rem 1rem;margin-bottom:.75rem;border-radius:.25rem;">
+          <p style="color:#fca5a5;font-weight:700;font-size:.8rem;margin:0 0 .25rem 0;">AUDIT_EVENTS</p>
+          <p style="color:#94a3b8;font-size:.75rem;margin:0;">Immutable: access, authorization, reasoning traces</p>
+        </div>
+        <div style="background:rgba(237,22,80,.06);border-left:3px solid #ED1650;padding:.75rem 1rem;border-radius:.25rem;">
+          <p style="color:#fca5a5;font-weight:700;font-size:.8rem;margin:0 0 .25rem 0;">ENGRAM_EVIDENCE</p>
+          <p style="color:#94a3b8;font-size:.75rem;margin:0;">Facts grounding responses + confidence tiers</p>
+        </div>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;font-family:monospace;font-size:.7rem;color:#94a3b8;line-height:1.6;overflow-x:auto;">
+<pre style="margin:0;"><code>-- Sample GQL query
+MATCH (n:MemoryNode {tenant_id: $tenant_id})
+WHERE n.cognitive_weight > $threshold
+  AND n.type IN ['ENTITY', 'RELATION']
+OPTIONAL MATCH (n)-[e:IS_RELATED_TO]→(m)
+WHERE e.confidence > 0.7
+RETURN DISTINCT
+  n.id AS entity_id,
+  n.type,
+  n.payload,
+  COLLECT(m.id) AS related_entities,
+  SUM(e.weight) AS signal_strength</code></pre>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">04 / 14</span>
+</div>
+
+<!-- SLIDE 5: COGNITIVE WEIGHTING -->
+<div class="slide" style="background:linear-gradient(135deg,#020617 0%,#0F004F 50%,#1a0a4d 100%);">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <div style="border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:1rem;margin-bottom:1.5rem;display:flex;align-items:baseline;gap:1rem;">
+      <span class="chip">Semantics</span>
+      <h1 style="font-size:2rem;font-weight:700;color:#fff;margin:0;">Bayesian Cognitive Weighting</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <div>
+        <p style="color:#cbd5e1;font-size:.85rem;margin-bottom:1rem;line-height:1.5;"><strong style="color:#4257E8;">LogOdds model</strong> — Each node &amp; edge has a weight tracking relative likelihood:</p>
+        <div style="background:rgba(66,87,232,.08);border-left:3px solid #4257E8;padding:.85rem 1rem;border-radius:.25rem;font-family:monospace;font-size:.7rem;color:#a5b4fc;margin-bottom:1rem;">
+weight = log(p / (1−p)) where p ∈ [0, 1]
+        </div>
+        <p style="color:#94a3b8;font-size:.8rem;line-height:1.5;">→ <strong style="color:#4257E8;">Higher weight</strong> = more confident in fact<br/>→ <strong style="color:#4257E8;">Lower weight</strong> = less certain, consider removing<br/>→ Decays over time (< 30 days active use)</p>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1.25rem;">
+        <p style="color:#a5b4fc;font-weight:700;font-size:.85rem;margin-bottom:1rem;">Weight Update Events</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#cbd5e1;font-size:.8rem;">
+          <li style="margin-bottom:.5rem;"><span style="color:#4257E8;">+</span> Node used in agent response → increment</li>
+          <li style="margin-bottom:.5rem;"><span style="color:#4257E8;">+</span> Referenced in next agent call → confirmed</li>
+          <li style="margin-bottom:.5rem;"><span style="color:#ED1650;">−</span> Contradicted by new evidence → decrement</li>
+          <li style="margin-bottom:.5rem;"><span style="color:#ED1650;">−</span> Aged 30+ days unused → decay to 0.3</li>
+          <li><span style="color:#ED1650;">×</span> Below threshold 0.3 → pruned</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">05 / 14</span>
+</div>
+
+<!-- SLIDE 6: MCP TOOLS -->
+<div class="slide" style="background:#020617;">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <div style="border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:1rem;margin-bottom:1.5rem;display:flex;align-items:baseline;gap:1rem;">
+      <span class="chip chip-red">API</span>
+      <h1 style="font-size:2rem;font-weight:700;color:#fff;margin:0;">Four MCP Tools (HTTP Endpoints)</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;font-size:.75rem;">
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#4257E8;font-weight:700;margin-bottom:.75rem;">MEMORY_SEARCH</p>
+        <p style="color:#cbd5e1;line-height:1.5;margin-bottom:.75rem;">Find facts matching intent. Returns ranked nodes + edges with provenance.</p>
+        <code style="color:#a5b4fc;font-size:.7rem;">POST /api/v1/mcp/invoke<br/>{tool: "MEMORY_SEARCH", query: "..."}</code>
+      </div>
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#4257E8;font-weight:700;margin-bottom:.75rem;">MEMORY_ADD_FACT</p>
+        <p style="color:#cbd5e1;line-height:1.5;margin-bottom:.75rem;">Ingest new entities &amp; relationships. Idempotent UPSERT via merkle hash.</p>
+        <code style="color:#a5b4fc;font-size:.7rem;">POST /api/v1/mcp/invoke<br/>{tool: "MEMORY_ADD_FACT", fact: {...}}</code>
+      </div>
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#4257E8;font-weight:700;margin-bottom:.75rem;">MEMORY_LOG_TRACE</p>
+        <p style="color:#cbd5e1;line-height:1.5;margin-bottom:.75rem;">Write audit events: authorization decisions, reasoning steps, errors.</p>
+        <code style="color:#a5b4fc;font-size:.7rem;">POST /api/v1/mcp/invoke<br/>{tool: "MEMORY_LOG_TRACE", event: {...}}</code>
+      </div>
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#4257E8;font-weight:700;margin-bottom:.75rem;">MEMORY_RECALL_CONTEXT</p>
+        <p style="color:#cbd5e1;line-height:1.5;margin-bottom:.75rem;">Retrieve session history + agent state. Window-based, ordered by recency.</p>
+        <code style="color:#a5b4fc;font-size:.7rem;">POST /api/v1/mcp/invoke<br/>{tool: "MEMORY_RECALL_CONTEXT", session_id: "..."}</code>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">06 / 14</span>
+</div>
+
+<!-- SLIDE 7: SECURITY - ABAC -->
+<div class="slide" style="background:linear-gradient(135deg,#020617 0%,#0F004F 50%,#1a0a4d 100%);">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <div style="border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:1rem;margin-bottom:1.5rem;display:flex;align-items:baseline;gap:1rem;">
+      <span class="chip chip-red">Security</span>
+      <h1 style="font-size:2rem;font-weight:700;color:#fff;margin:0;">ABAC Authorization Model</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <div>
+        <p style="color:#cbd5e1;font-size:.85rem;margin-bottom:1rem;line-height:1.5;"><strong style="color:#ED1650;">Deny-by-default</strong>. Every operation requires explicit GRANT.</p>
+        <div style="background:rgba(237,22,80,.08);border-left:3px solid #ED1650;padding:.85rem 1rem;border-radius:.25rem;margin-bottom:1rem;">
+          <p style="color:#fca5a5;font-weight:700;font-size:.8rem;margin:0 0 .5rem 0;">AuthorizationScope</p>
+          <ul style="list-style:none;padding:0;margin:0;color:#cbd5e1;font-size:.8rem;">
+            <li>→ agent_id (which agent acts)</li>
+            <li>→ action (search, add, trace)</li>
+            <li>→ resource (node type, edge type)</li>
+            <li>→ tenant_id (isolation)</li>
+          </ul>
+        </div>
+        <p style="color:#94a3b8;font-size:.8rem;line-height:1.5;">Both GRANTED &amp; DENIED events are logged to AUDIT_EVENTS. Immutable forever.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1.25rem;font-family:monospace;font-size:.7rem;color:#a5b4fc;line-height:1.6;">
+<pre style="margin:0;"><code>-- ABAC policy example
+Rule: "agents.search_facts"
+Condition:
+  agent.role == "analyst"
+  AND resource.type == "ENTITY"
+  AND tenant_id == request.tenant_id
+Effect: ALLOW
+
+-- Every DENY is audited
+Event:
+  timestamp: ISO8601
+  agent_id: "agent-123"
+  action: "search"
+  result: DENIED
+  reason: "insufficient_role"</code></pre>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">07 / 14</span>
+</div>
+
+<!-- SLIDE 8: TESTING & QUALITY -->
+<div class="slide" style="background:#020617;">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <div style="border-bottom:1px solid rgba(255,255,255,.08);padding-bottom:1rem;margin-bottom:1.5rem;display:flex;align-items:baseline;gap:1rem;">
+      <span class="chip chip-green">Quality</span>
+      <h1 style="font-size:2rem;font-weight:700;color:#fff;margin:0;">Production Grade: 843 Tests · 0 Type Errors</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+      <div style="background:rgba(0,214,204,.08);border:1px solid rgba(0,214,204,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#5eead4;font-weight:700;margin-bottom:.75rem;">Unit Tests</p>
+        <p style="color:#cbd5e1;font-size:.8rem;line-height:1.5;margin-bottom:.5rem;">Core logic, MindMap stages, cognitive weighting, ABAC policies</p>
+        <p style="color:#94a3b8;font-size:.75rem;"><strong style="color:#5eead4;">~25 modules</strong> covering src/</p>
+      </div>
+      <div style="background:rgba(0,214,204,.08);border:1px solid rgba(0,214,204,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#5eead4;font-weight:700;margin-bottom:.75rem;">Integration Tests</p>
+        <p style="color:#cbd5e1;font-size:.8rem;line-height:1.5;margin-bottom:.5rem;">Spanner end-to-end, auth boundaries, agent concurrency, audit trail</p>
+        <p style="color:#94a3b8;font-size:.75rem;"><strong style="color:#5eead4;">~23 modules</strong> touching database</p>
+      </div>
+      <div style="background:rgba(0,214,204,.08);border:1px solid rgba(0,214,204,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#5eead4;font-weight:700;margin-bottom:.75rem;">Type Safety</p>
+        <p style="color:#cbd5e1;font-size:.8rem;line-height:1.5;margin-bottom:.5rem;">basedpyright strict mode, SDK wrappers for GCP services</p>
+        <p style="color:#94a3b8;font-size:.75rem;"><strong style="color:#5eead4;">0 errors</strong>, 0 warnings</p>
+      </div>
+    </div>
+    <div style="margin-top:1.5rem;background:rgba(66,87,232,.05);border-left:3px solid #4257E8;border-radius:.25rem;padding:1rem 1.25rem;">
+      <p style="color:#cbd5e1;font-size:.8rem;margin:0;"><strong style="color:#4257E8;">just check-all</strong> runs all gates: lint, types, format, tests, docstrings. Zero tolerance for failures.</p>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">08 / 14</span>
+</div>
+
+<!-- SLIDE 9-14: Additional slides (abbreviated for space) -->
+<div class="slide" style="background:linear-gradient(135deg,#020617 0%,#0F004F 50%,#1a0a4d 100%);">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <span class="chip" style="margin-bottom:1.5rem;">Observability</span>
+    <h1 style="font-size:2.2rem;font-weight:700;color:#fff;margin:0 0 1.5rem 0;">Cloud Logging · Cloud Trace · Metrics</h1>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <div>
+        <p style="color:#cbd5e1;font-size:.85rem;margin-bottom:1rem;"><strong style="color:#4257E8;">Structured Logging</strong></p>
+        <ul style="color:#94a3b8;font-size:.8rem;list-style:none;padding:0;margin:0;">
+          <li style="margin-bottom:.5rem;">→ Every MindMap stage with latency breakdown</li>
+          <li style="margin-bottom:.5rem;">→ All authorization decisions (GRANT/DENY)</li>
+          <li>→ Database operations with query plans</li>
+        </ul>
+      </div>
+      <div>
+        <p style="color:#cbd5e1;font-size:.85rem;margin-bottom:1rem;"><strong style="color:#4257E8;">Distributed Tracing</strong></p>
+        <ul style="color:#94a3b8;font-size:.8rem;list-style:none;padding:0;margin:0;">
+          <li style="margin-bottom:.5rem;">→ Per-request trace spans</li>
+          <li style="margin-bottom:.5rem;">→ Child spans for Mine, Aggregate, Serialize, Synthesize</li>
+          <li>→ Cross-service correlation IDs</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">09 / 14</span>
+</div>
+
+<div class="slide" style="background:#020617;">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <span class="chip chip-green" style="margin-bottom:1.5rem;">Deployment</span>
+    <h1 style="font-size:2.2rem;font-weight:700;color:#fff;margin:0 0 1.5rem 0;">Terraform IaC · Multi-Workspace</h1>
+    <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1.25rem;font-family:monospace;font-size:.7rem;color:#a5b4fc;line-height:1.6;margin-bottom:1rem;overflow-x:auto;">
+<pre style="margin:0;"><code>infrastructure/terraform/
+├── main.tf           # Cloud Run service
+├── spanner.tf        # Spanner instance + 9 migrations
+├── iam.tf            # Service accounts, least privilege
+├── secrets.tf        # Secret Manager
+├── monitoring.tf     # Alerts (error rate, p99 latency)
+├── variables.tf      # All env-specific values
+└── workspace-aware   # dev/intg/prod via terraform.workspace</code></pre>
+    </div>
+    <p style="color:#cbd5e1;font-size:.8rem;line-height:1.5;">Each team's deployment is independent. No shared Spanner, no cross-team IAM. Terraform manages full lifecycle: create, update, destroy.</p>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">10 / 14</span>
+</div>
+
+<div class="slide" style="background:linear-gradient(135deg,#020617 0%,#0F004F 50%,#1a0a4d 100%);">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <span class="chip chip-red" style="margin-bottom:1.5rem;">Integration</span>
+    <h1 style="font-size:2.2rem;font-weight:700;color:#fff;margin:0 0 1.5rem 0;">LLM Pluggable · MCP Protocol</h1>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.85rem;margin-bottom:.75rem;">LLM Providers</p>
+        <ul style="color:#cbd5e1;font-size:.8rem;list-style:none;padding:0;margin:0;">
+          <li>→ Gemini Enterprise (default)</li>
+          <li>→ OpenAI GPT-4 (adapter ready)</li>
+          <li>→ Anthropic Claude (adapter ready)</li>
+          <li>→ Pluggable via inheritance</li>
+        </ul>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.85rem;margin-bottom:.75rem;">MCP Protocol</p>
+        <ul style="color:#cbd5e1;font-size:.8rem;list-style:none;padding:0;margin:0;">
+          <li>→ Standard tool invocation contract</li>
+          <li>→ Supports multiple agent frameworks</li>
+          <li>→ Auto-discovery endpoint ready</li>
+          <li>→ Response metadata & traceability</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">11 / 14</span>
+</div>
+
+<div class="slide" style="background:#020617;">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <span class="chip" style="margin-bottom:1.5rem;">Performance</span>
+    <h1 style="font-size:2.2rem;font-weight:700;color:#fff;margin:0 0 1.5rem 0;">SLOs &amp; Latency</h1>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <div style="background:rgba(0,214,204,.08);border:1px solid rgba(0,214,204,.2);border-radius:.5rem;padding:1.25rem;">
+        <p style="color:#5eead4;font-weight:700;font-size:.85rem;margin-bottom:1rem;">MindMap Pipeline</p>
+        <ul style="color:#cbd5e1;font-size:.8rem;list-style:none;padding:0;margin:0;">
+          <li style="margin-bottom:.5rem;">Mine: &lt; 500 ms (LLM call)</li>
+          <li style="margin-bottom:.5rem;">Aggregate: &lt; 200 ms (BFS)</li>
+          <li style="margin-bottom:.5rem;">Serialize: &lt; 100 ms (JSON)</li>
+          <li>Synthesize: &lt; 1000 ms (LLM call)</li>
+        </ul>
+      </div>
+      <div style="background:rgba(0,214,204,.08);border:1px solid rgba(0,214,204,.2);border-radius:.5rem;padding:1.25rem;">
+        <p style="color:#5eead4;font-weight:700;font-size:.85rem;margin-bottom:1rem;">Spanner Operations</p>
+        <ul style="color:#cbd5e1;font-size:.8rem;list-style:none;padding:0;margin:0;">
+          <li style="margin-bottom:.5rem;">Query p50: 50 ms (GQL)</li>
+          <li style="margin-bottom:.5rem;">Query p99: 200 ms</li>
+          <li style="margin-bottom:.5rem;">Write p50: 100 ms</li>
+          <li>Write p99: 300 ms</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">12 / 14</span>
+</div>
+
+<div class="slide" style="background:linear-gradient(135deg,#020617 0%,#0F004F 50%,#1a0a4d 100%);">
+  <div class="h-full flex flex-col justify-center px-12 py-8">
+    <span class="chip chip-red" style="margin-bottom:1.5rem;">Operations</span>
+    <h1 style="font-size:2.2rem;font-weight:700;color:#fff;margin:0 0 1.5rem 0;">Operational Runbook</h1>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;font-size:.8rem;">
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#4257E8;font-weight:700;margin-bottom:.75rem;">Daily Tasks</p>
+        <ul style="color:#cbd5e1;list-style:none;padding:0;margin:0;">
+          <li>→ Monitor error rate dashboard</li>
+          <li>→ Check p99 latency alerts</li>
+          <li>→ Review audit event logs</li>
+        </ul>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1rem;">
+        <p style="color:#4257E8;font-weight:700;margin-bottom:.75rem;">Weekly Tasks</p>
+        <ul style="color:#cbd5e1;list-style:none;padding:0;margin:0;">
+          <li>→ Prune low-weight nodes (weight &lt; 0.3)</li>
+          <li>→ Review failed authorization events</li>
+          <li>→ Backup audit trail to external storage</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">13 / 14</span>
+</div>
+
+<div class="slide" style="background:#020617;">
+  <div class="h-full flex flex-col items-center justify-center px-20 py-12 text-center">
+    <div class="mb-6">
+      <div style="width:64px;height:6px;background:#ED1650;border-radius:3px;margin:0 auto;"></div>
+    </div>
+    <h1 class="text-5xl font-extrabold text-white mb-6">Ready to integrate</h1>
+    <p class="text-lg text-blue-200 mb-8 leading-relaxed max-w-2xl">
+      100% type-safe. Fully tested. Production-ready infrastructure. MCP contract stable.
+    </p>
+    <p style="color:#94a3b8;font-size:.95rem;">All code &amp; docs at: <code style="color:#4257E8;">github.com/.../agent-memory-graph</code></p>
+  </div>
+  <span class="badge">Engineering</span><span class="snum">14 / 14</span>
+</div>
+
+</body>
+</html>

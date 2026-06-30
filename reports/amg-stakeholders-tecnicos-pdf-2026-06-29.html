@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Memory Graph — Stakeholders Técnicos</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media print {
+      @page { size: A4 landscape; margin: 0; }
+      body { margin: 0; padding: 0; }
+      .slide { page-break-after: always; page-break-inside: avoid; width: 297mm; height: 210mm; margin: 0; padding: 0; display: flex; flex-direction: column; justify-content: center; }
+      .slide:last-child { page-break-after: auto; }
+      .no-print { display: none !important; }
+    }
+    @media screen {
+      body { background: #0f172a; padding: 2rem; }
+      .slide { width: 100%; max-width: 1200px; aspect-ratio: 16/9; margin: 2rem auto; border-radius: 0.75rem; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,.5); }
+    }
+    .slide { position: relative; color: #f1f5f9; }
+    .badge { position: absolute; bottom: 1.5rem; right: 2rem; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; opacity: .4; color: #fff; font-weight: 700; }
+    .snum { position: absolute; bottom: 1.5rem; left: 2rem; font-size: .7rem; opacity: .3; color: #fff; }
+    .tag { display: inline-block; background: rgba(66,87,232,.2); border: 1px solid rgba(66,87,232,.4); color: #4257E8; font-size: .7rem; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; border-radius: .25rem; padding: .2rem .6rem; margin-bottom: .5rem; }
+    .coral-tag { background: rgba(237,22,80,.15); border-color: rgba(237,22,80,.4); color: #ED1650; }
+  </style>
+</head>
+<body class="font-sans antialiased">
+
+<div class="no-print" style="background:#1B0088;color:#fff;padding:1rem 2rem;border-radius:.5rem;max-width:900px;margin:0 auto 2rem;text-align:center;font-size:.9rem;">
+  <strong>Stakeholders Técnicos — Agent Memory Graph</strong> &nbsp;|&nbsp;
+  <kbd style="background:#4257E8;padding:.2rem .6rem;border-radius:.3rem;">Cmd+P</kbd> → orientación <strong>Horizontal</strong> para exportar PDF.
+</div>
+
+<!-- SLIDE 1: PORTADA -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#4257E8 55%,#2d1b69 100%);">
+  <div class="h-full flex flex-col items-center justify-center px-20 py-12 text-center">
+    <p style="font-size:.75rem;font-weight:700;letter-spacing:.2em;text-transform:uppercase;color:rgba(237,22,80,.9);margin-bottom:1.5rem;">Propuesta Técnica de Producto</p>
+    <h1 style="font-size:3.5rem;font-weight:800;color:#fff;line-height:1.1;margin-bottom:1rem;">Agent Memory Graph</h1>
+    <h2 style="font-size:1.3rem;color:#c7d2fe;font-weight:400;margin-bottom:2rem;">Arquitectura · Integración · Plan de Despliegue para LATAM</h2>
+    <div style="display:flex;gap:1.5rem;justify-content:center;flex-wrap:wrap;font-size:.85rem;">
+      <span style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);padding:.4rem 1.2rem;border-radius:2rem;color:#e2e8f0;">MindMap Pipeline</span>
+      <span style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);padding:.4rem 1.2rem;border-radius:2rem;color:#e2e8f0;">Cognitive Weighting</span>
+      <span style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);padding:.4rem 1.2rem;border-radius:2rem;color:#e2e8f0;">Spanner Graph · Cloud Run</span>
+      <span style="background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);padding:.4rem 1.2rem;border-radius:2rem;color:#e2e8f0;">MCP · ABAC · v0.2</span>
+    </div>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">01 / 12</span>
+</div>
+
+<!-- SLIDE 2: PROBLEMA TÉCNICO -->
+<div class="slide" style="background:#0f1729;">
+  <div class="h-full flex flex-col justify-center px-16 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <span class="tag coral-tag">Problema</span>
+      <h1 style="font-size:2.5rem;font-weight:700;color:#fff;margin:0;">Los modelos sin estado no son suficientes a escala</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.25rem;">
+      <div style="background:rgba(237,22,80,.07);border:1px solid rgba(237,22,80,.25);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">RAG Ingenuo</p>
+        <p style="color:#94a3b8;font-size:.85rem;line-height:1.5;">Inunda el contexto del LLM con chunks irrelevantes. Costo de tokens disparado. Precisión baja por similitud vectorial sin estructura.</p>
+      </div>
+      <div style="background:rgba(237,22,80,.07);border:1px solid rgba(237,22,80,.25);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">Sin Coordinación</p>
+        <p style="color:#94a3b8;font-size:.85rem;line-height:1.5;">Agentes múltiples sin contexto compartido. Consultas redundantes, decisiones contradictorias, sin resolución de conflictos.</p>
+      </div>
+      <div style="background:rgba(237,22,80,.07);border:1px solid rgba(237,22,80,.25);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">Sin Auditabilidad</p>
+        <p style="color:#94a3b8;font-size:.85rem;line-height:1.5;">Sin trazas de razonamiento. Imposible depurar, reproducir o demostrar cumplimiento para decisiones de agentes en producción.</p>
+      </div>
+    </div>
+    <div style="margin-top:1.25rem;background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.25);border-radius:.5rem;padding:1rem 1.5rem;">
+      <p style="color:#cbd5e1;font-size:.9rem;margin:0;"><strong style="color:#4257E8;">AMG resuelve los tres</strong> con un modelo de memoria tripartita, un pipeline determinista de razonamiento y pesos cognitivos bayesianos.</p>
+    </div>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">02 / 12</span>
+</div>
+
+<!-- SLIDE 3: MODELO TRIPARTITA -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
+  <div class="h-full flex flex-col justify-center px-16 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <span class="tag">Arquitectura</span>
+      <h1 style="font-size:2.5rem;font-weight:700;color:#fff;margin:0;">Modelo de Memoria Tripartita</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.5rem;">
+      <div style="background:rgba(66,87,232,.15);border:2px solid rgba(66,87,232,.5);border-radius:.75rem;padding:1.5rem;">
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;">
+          <div style="background:#4257E8;border-radius:.4rem;padding:.4rem .7rem;font-size:.7rem;font-weight:800;color:#fff;">CONTEXT</div>
+        </div>
+        <p style="color:#c7d2fe;font-size:.85rem;font-weight:600;margin-bottom:.5rem;">Alcance: Por usuario / sesión</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.8rem;">
+          <li style="margin-bottom:.4rem;">→ Turnos de conversación específicos del usuario</li>
+          <li style="margin-bottom:.4rem;">→ Estado de sesión e historial de agente</li>
+          <li style="margin-bottom:.4rem;">→ Actualizado por mensajes y eventos de sesión</li>
+          <li>→ Decaimiento: <strong style="color:#4257E8;">24–48h</strong></li>
+        </ul>
+      </div>
+      <div style="background:rgba(0,214,204,.08);border:2px solid rgba(0,214,204,.35);border-radius:.75rem;padding:1.5rem;">
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;">
+          <div style="background:#00B5AD;border-radius:.4rem;padding:.4rem .7rem;font-size:.7rem;font-weight:800;color:#fff;">SEMANTIC</div>
+        </div>
+        <p style="color:#5eead4;font-size:.85rem;font-weight:600;margin-bottom:.5rem;">Alcance: Organización completa</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.8rem;">
+          <li style="margin-bottom:.4rem;">→ Hechos duraderos y relaciones entre entidades</li>
+          <li style="margin-bottom:.4rem;">→ Conocimiento de documentos ingestados</li>
+          <li style="margin-bottom:.4rem;">→ Compartido entre todos los agentes (ABAC)</li>
+          <li>→ Retención: <strong style="color:#00D6CC;">meses–años</strong></li>
+        </ul>
+      </div>
+      <div style="background:rgba(237,22,80,.08);border:2px solid rgba(237,22,80,.35);border-radius:.75rem;padding:1.5rem;">
+        <div style="display:flex;align-items:center;gap:.75rem;margin-bottom:1rem;">
+          <div style="background:#B20F3B;border-radius:.4rem;padding:.4rem .7rem;font-size:.7rem;font-weight:800;color:#fff;">AUDIT</div>
+        </div>
+        <p style="color:#fca5a5;font-size:.85rem;font-weight:600;margin-bottom:.5rem;">Alcance: Permanente / Cumplimiento</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.8rem;">
+          <li style="margin-bottom:.4rem;">→ Cada acceso, autorización, llamada a herramienta</li>
+          <li style="margin-bottom:.4rem;">→ Solo escritura — nunca modificado ni eliminado</li>
+          <li style="margin-bottom:.4rem;">→ Indexado con códigos de razón</li>
+          <li>→ Retención: <strong style="color:#ED1650;">permanente</strong></li>
+        </ul>
+      </div>
+    </div>
+    <p style="color:#64748b;font-size:.8rem;text-align:center;margin-top:1.25rem;">Las escrituras y lecturas <strong style="color:#94a3b8;">nunca cruzan niveles</strong> en una sola transacción. Aislamiento estricto por diseño.</p>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">03 / 12</span>
+</div>
+
+<!-- SLIDE 4: MINDMAP PIPELINE -->
+<div class="slide" style="background:#0f1729;">
+  <div class="h-full flex flex-col justify-center px-16 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <span class="tag">Pipeline de Razonamiento</span>
+      <h1 style="font-size:2.3rem;font-weight:700;color:#fff;margin:0;">MindMap: Determinista de 4 etapas <span style="color:#64748b;font-size:1rem;font-weight:400;">(ACL 2024 · Wen, Wang & Sun)</span></h1>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin-bottom:1.25rem;">
+      <div style="background:rgba(66,87,232,.12);border:1px solid rgba(66,87,232,.4);border-radius:.75rem;padding:1.25rem;text-align:center;">
+        <div style="background:#4257E8;color:#fff;border-radius:.4rem;padding:.3rem .8rem;font-size:.75rem;font-weight:800;display:inline-block;margin-bottom:.75rem;">1. MINE</div>
+        <p style="color:#c7d2fe;font-size:.85rem;font-weight:600;margin-bottom:.4rem;">Extracción</p>
+        <p style="color:#64748b;font-size:.78rem;line-height:1.4;">Entidades nombradas + intención de la solicitud del agente. Anclas para traversal del grafo.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.12);border:1px solid rgba(66,87,232,.4);border-radius:.75rem;padding:1.25rem;text-align:center;">
+        <div style="background:#4257E8;color:#fff;border-radius:.4rem;padding:.3rem .8rem;font-size:.75rem;font-weight:800;display:inline-block;margin-bottom:.75rem;">2. AGGREGATE</div>
+        <p style="color:#c7d2fe;font-size:.85rem;font-weight:600;margin-bottom:.4rem;">Traversal</p>
+        <p style="color:#64748b;font-size:.78rem;line-height:1.4;">Recorre Spanner Graph con profundidad acotada. Filtra por cognitive weight y política ABAC.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.12);border:1px solid rgba(66,87,232,.4);border-radius:.75rem;padding:1.25rem;text-align:center;">
+        <div style="background:#4257E8;color:#fff;border-radius:.4rem;padding:.3rem .8rem;font-size:.75rem;font-weight:800;display:inline-block;margin-bottom:.75rem;">3. SERIALIZE</div>
+        <p style="color:#c7d2fe;font-size:.85rem;font-weight:600;margin-bottom:.4rem;">Serialización</p>
+        <p style="color:#64748b;font-size:.78rem;line-height:1.4;">Caminos del grafo → payload de hechos con IDs únicos + procedencia completa.</p>
+      </div>
+      <div style="background:rgba(237,22,80,.1);border:1px solid rgba(237,22,80,.35);border-radius:.75rem;padding:1.25rem;text-align:center;">
+        <div style="background:#ED1650;color:#fff;border-radius:.4rem;padding:.3rem .8rem;font-size:.75rem;font-weight:800;display:inline-block;margin-bottom:.75rem;">4. SYNTHESIZE</div>
+        <p style="color:#fca5a5;font-size:.85rem;font-weight:600;margin-bottom:.4rem;">Síntesis</p>
+        <p style="color:#64748b;font-size:.78rem;line-height:1.4;">LLM genera respuesta SOLO desde el payload. Sin evidencia → señal explícita de insuficiencia. Nunca supone.</p>
+      </div>
+    </div>
+    <div style="background:rgba(66,87,232,.07);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:.9rem 1.25rem;text-align:center;">
+      <p style="color:#94a3b8;font-size:.85rem;margin:0;"><strong style="color:#fff;">Validación post-síntesis:</strong> cada afirmación debe referenciar un ID de hecho en el payload. Si no → falla segura. <strong style="color:#4257E8;">Garantía de 0% alucinación.</strong></p>
+    </div>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">04 / 12</span>
+</div>
+
+<!-- SLIDE 5: COGNITIVE WEIGHTING -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
+  <div class="h-full flex flex-col justify-center px-16 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <span class="tag">Cognitive Weighting</span>
+      <h1 style="font-size:2.3rem;font-weight:700;color:#fff;margin:0;">Pesos log-odds bayesianos <span style="color:#64748b;font-size:1rem;font-weight:400;">(inspirado en Engram · 91.4% LongMemEval)</span></h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:2rem;align-items:start;">
+      <div style="display:flex;flex-direction:column;gap:.75rem;">
+        <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.5rem;padding:.9rem 1.1rem;display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;">
+          <code style="color:#ED1650;font-size:.85rem;white-space:nowrap;">W₀ = 0.5</code>
+          <p style="color:#94a3b8;font-size:.82rem;margin:0;">Peso inicial (62% de confianza). Nuevos hechos entran con confianza moderada.</p>
+        </div>
+        <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.5rem;padding:.9rem 1.1rem;display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;">
+          <code style="color:#4257E8;font-size:.85rem;white-space:nowrap;">W += ln(1.25)</code>
+          <p style="color:#94a3b8;font-size:.82rem;margin:0;">+0.22 bits por acceso exitoso. Los hechos más usados ganan confianza automáticamente.</p>
+        </div>
+        <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.5rem;padding:.9rem 1.1rem;display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;">
+          <code style="color:#00D6CC;font-size:.85rem;white-space:nowrap;">W(t) × e^-0.05t</code>
+          <p style="color:#94a3b8;font-size:.82rem;margin:0;">Decaimiento temporal. Hechos no usados se desvanecen. Olvido controlado.</p>
+        </div>
+        <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.5rem;padding:.9rem 1.1rem;display:grid;grid-template-columns:auto 1fr;gap:1rem;align-items:start;">
+          <code style="color:#94a3b8;font-size:.85rem;white-space:nowrap;">W &lt; 0.30 → prune</code>
+          <p style="color:#94a3b8;font-size:.82rem;margin:0;">Eliminación suave de evidencia de baja confianza. Sin contaminar el traversal.</p>
+        </div>
+      </div>
+      <div>
+        <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.25);border-radius:.75rem;padding:1.25rem;margin-bottom:1rem;">
+          <p style="color:#ED1650;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">Detección de Contradicciones</p>
+          <p style="color:#94a3b8;font-size:.82rem;line-height:1.5;">En ingestión, hechos conflictivos se señalan con marcador de tensión. Síntesis condicional: ambiguo, no autoritativo.</p>
+        </div>
+        <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.25);border-radius:.75rem;padding:1.25rem;">
+          <p style="color:#4257E8;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">Impacto en Negocio</p>
+          <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.82rem;">
+            <li style="margin-bottom:.4rem;">→ Contexto del LLM acotado a hechos de alta señal</li>
+            <li style="margin-bottom:.4rem;">→ &gt;30% reducción de tokens vs. RAG estándar</li>
+            <li>→ Mayor precisión de respuesta sin costo adicional</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">05 / 12</span>
+</div>
+
+<!-- SLIDE 6: INTEGRACIÓN CON ECOSISTEMA COSMOS -->
+<div class="slide" style="background:#0f1729;">
+  <div class="h-full flex flex-col justify-center px-16 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <span class="tag">Integración</span>
+      <h1 style="font-size:2.3rem;font-weight:700;color:#fff;margin:0;">Nativo en el ecosistema Cosmos · LATAM</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1.25rem;">
+      <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.9rem;margin-bottom:.75rem;">Cosmos GenAI Gateway</p>
+        <p style="color:#94a3b8;font-size:.82rem;line-height:1.5;margin-bottom:.75rem;">La etapa Synthesize llama al Gateway como backend LLM. Acceso a Claude Opus 4.8, Sonnet 4.6, GPT-5, Gemini. Control de presupuesto existente aplica.</p>
+        <code style="color:#64748b;font-size:.75rem;">genai.cosmos.appslatam.com</code>
+      </div>
+      <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.9rem;margin-bottom:.75rem;">DataHub</p>
+        <p style="color:#94a3b8;font-size:.82rem;line-height:1.5;margin-bottom:.75rem;">Pipeline de extracción ingesta metadatos de DataHub (propiedad, linaje, calidad de datasets) al nivel Semantic. Activos CUSTOMER + MAINTENANCE disponibles.</p>
+        <code style="color:#64748b;font-size:.75rem;">cus-data-prod.customer_experience.*</code>
+      </div>
+      <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.9rem;margin-bottom:.75rem;">Backstage + MCP</p>
+        <p style="color:#94a3b8;font-size:.82rem;line-height:1.5;margin-bottom:.75rem;">AMG incluye <code style="color:#4257E8;">catalog-info.yaml</code> para registro en Backstage. Expone interfaz MCP compatible con Claude Code, Codeen y GenAI Hub registry.</p>
+        <code style="color:#64748b;font-size:.75rem;">tools: memory_search · memory_add_fact</code>
+      </div>
+    </div>
+    <div style="margin-top:1.25rem;background:rgba(0,214,204,.07);border:1px solid rgba(0,214,204,.25);border-radius:.5rem;padding:.9rem 1.25rem;">
+      <p style="color:#94a3b8;font-size:.85rem;margin:0;"><strong style="color:#00D6CC;">Cosmos Feedback Engine:</strong> Los pares P/R validados del Feedback Engine pueden fluir al nivel Semantic de AMG — disponibles para todos los agentes, no solo para el chatbot original.</p>
+    </div>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">06 / 12</span>
+</div>
+
+<!-- SLIDE 7: RENDIMIENTO Y CALIDAD -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
+  <div class="h-full flex flex-col justify-center px-16 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <span class="tag">Calidad y Rendimiento</span>
+      <h1 style="font-size:2.3rem;font-weight:700;color:#fff;margin:0;">Métricas de producción validadas</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:1.5rem;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+        <div style="background:rgba(66,87,232,.15);border:1px solid rgba(66,87,232,.4);border-radius:.75rem;padding:1.25rem;text-align:center;">
+          <p style="color:#94a3b8;font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem;">Latencia P99</p>
+          <p style="color:#fff;font-size:2.2rem;font-weight:800;line-height:1;">&lt; 5ms</p>
+          <p style="color:#4257E8;font-size:.8rem;margin-top:.4rem;">SLO: &lt; 50ms</p>
+        </div>
+        <div style="background:rgba(66,87,232,.15);border:1px solid rgba(66,87,232,.4);border-radius:.75rem;padding:1.25rem;text-align:center;">
+          <p style="color:#94a3b8;font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem;">Throughput</p>
+          <p style="color:#fff;font-size:2.2rem;font-weight:800;line-height:1;">7.5k</p>
+          <p style="color:#4257E8;font-size:.8rem;margin-top:.4rem;">req/seg objetivo</p>
+        </div>
+        <div style="background:rgba(66,87,232,.15);border:1px solid rgba(66,87,232,.4);border-radius:.75rem;padding:1.25rem;text-align:center;">
+          <p style="color:#94a3b8;font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem;">Pruebas</p>
+          <p style="color:#fff;font-size:2.2rem;font-weight:800;line-height:1;">843</p>
+          <p style="color:#4257E8;font-size:.8rem;margin-top:.4rem;">100% pasando</p>
+        </div>
+        <div style="background:rgba(66,87,232,.15);border:1px solid rgba(66,87,232,.4);border-radius:.75rem;padding:1.25rem;text-align:center;">
+          <p style="color:#94a3b8;font-size:.7rem;text-transform:uppercase;letter-spacing:.1em;margin-bottom:.5rem;">Tipos errores</p>
+          <p style="color:#fff;font-size:2.2rem;font-weight:800;line-height:1;">0</p>
+          <p style="color:#4257E8;font-size:.8rem;margin-top:.4rem;">basedpyright strict</p>
+        </div>
+      </div>
+      <div>
+        <div style="display:flex;flex-direction:column;gap:.9rem;">
+          <div style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:.5rem;padding:1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Cobertura de docstrings</p>
+            <p style="color:#4257E8;font-weight:700;margin:0;">93.6%</p>
+          </div>
+          <div style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:.5rem;padding:1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Linting (ruff)</p>
+            <p style="color:#4257E8;font-weight:700;margin:0;">100% limpio</p>
+          </div>
+          <div style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:.5rem;padding:1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Tasa de fundamentación</p>
+            <p style="color:#4257E8;font-weight:700;margin:0;">100%</p>
+          </div>
+          <div style="background:rgba(237,22,80,.07);border:1px solid rgba(237,22,80,.2);border-radius:.5rem;padding:1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Ahorro tokens vs. RAG</p>
+            <p style="color:#ED1650;font-weight:700;margin:0;">&gt; 30%</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">07 / 12</span>
+</div>
+
+<!-- SLIDE 8: CASOS DE USO PERSONAL INTERNO -->
+<div class="slide" style="background:#0f1729;">
+  <div class="h-full flex flex-col justify-center px-16 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <span class="tag">Casos de Uso</span>
+      <h1 style="font-size:2.3rem;font-weight:700;color:#fff;margin:0;">Personal interno: ADO, Ops y Mantenimiento</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.25rem;">
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.25);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">Copiloto MAPIS (Mantenimiento)</p>
+        <p style="color:#94a3b8;font-size:.82rem;line-height:1.5;">Técnicos consultan la base de conocimiento MAPIS (<code style="color:#4257E8;">emx-data-prod-e6c5.raw_emx_mapis_rag.*</code>). El copiloto recuerda diagnósticos previos y cita fuentes para trazabilidad de seguridad crítica.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.25);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">Coordinación de Disrupciones</p>
+        <p style="color:#94a3b8;font-size:.82rem;line-height:1.5;">Agentes de gestión de disrupciones comparten grafo Semantic común. Hallazgo de un agente sobre causa de retraso disponible para todos inmediatamente. Sin consultas redundantes.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.25);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">Asistente de Gobernanza DataHub</p>
+        <p style="color:#94a3b8;font-size:.82rem;line-height:1.5;">Ingenieros ADO con contexto persistente sobre propiedad de datasets, linaje y estado de gobernanza a través de semanas de trabajo sin re-prompts.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.25);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">Copiloto ADO vía MCP</p>
+        <p style="color:#94a3b8;font-size:.82rem;line-height:1.5;">Registrado en GenAI Hub → accesible desde Claude Code y Codeen sin configuración adicional. Cualquier squad ADO puede descubrirlo desde el catálogo Backstage.</p>
+      </div>
+    </div>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">08 / 12</span>
+</div>
+
+<!-- SLIDE 9: CASOS DE USO PASAJEROS -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
+  <div class="h-full flex flex-col justify-center px-16 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <span class="tag coral-tag">Casos de Uso</span>
+      <h1 style="font-size:2.3rem;font-weight:700;color:#fff;margin:0;">Pasajeros y clientes: omnicanal con memoria</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:2rem;align-items:start;">
+      <div style="display:flex;flex-direction:column;gap:.9rem;">
+        <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.25);border-radius:.5rem;padding:1rem;">
+          <p style="color:#ED1650;font-weight:700;font-size:.85rem;margin-bottom:.3rem;">Continuidad de sesión</p>
+          <p style="color:#94a3b8;font-size:.8rem;margin:0;">Pasajero que abandona una consulta y regresa horas después encuentra al agente con el mismo contexto. Nivel Context: por pasajero, 24-48h.</p>
+        </div>
+        <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.25);border-radius:.5rem;padding:1rem;">
+          <p style="color:#ED1650;font-weight:700;font-size:.85rem;margin-bottom:.3rem;">Cross-canal (app → web → contact center)</p>
+          <p style="color:#94a3b8;font-size:.8rem;margin:0;">Grafo Semantic con alcance por entidad de pasajero. Sin consulta a CRM en cada turno. Consistencia garantizada.</p>
+        </div>
+        <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.25);border-radius:.5rem;padding:1rem;">
+          <p style="color:#ED1650;font-weight:700;font-size:.85rem;margin-bottom:.3rem;">Respuestas fundamentadas</p>
+          <p style="color:#94a3b8;font-size:.8rem;margin:0;">Reglas tarifarias y estados de vuelo desde evidencia del grafo. Sin alucinaciones sobre políticas de equipaje o cambios de itinerario.</p>
+        </div>
+      </div>
+      <div>
+        <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.25rem;margin-bottom:1rem;">
+          <p style="color:#4257E8;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">Integración NPS → Personalización</p>
+          <p style="color:#94a3b8;font-size:.82rem;line-height:1.5;">Tablas NPS de DataHub como señal de personalización: agentes que conocen la experiencia previa del pasajero adaptan tono y umbral de escalación.</p>
+          <code style="color:#4257E8;font-size:.75rem;">customer_experience_analysis.nps_*</code>
+        </div>
+        <div style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:.75rem;padding:1.25rem;">
+          <p style="color:#94a3b8;font-weight:700;font-size:.9rem;margin-bottom:.5rem;">Meta de calidad</p>
+          <p style="color:#fff;font-size:1.5rem;font-weight:800;margin:0;">NPS +5 pts</p>
+          <p style="color:#64748b;font-size:.8rem;margin-top:.3rem;">vs. chatbot sin memoria actual</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">09 / 12</span>
+</div>
+
+<!-- SLIDE 10: STACK Y SEGURIDAD -->
+<div class="slide" style="background:#0f1729;">
+  <div class="h-full flex flex-col justify-center px-16 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.1);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <span class="tag">Stack y Gobernanza</span>
+      <h1 style="font-size:2.3rem;font-weight:700;color:#fff;margin:0;">GCP-native · ABAC · Terraform</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <div>
+        <p style="color:#4257E8;font-weight:700;font-size:.85rem;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.08em;">Componentes Core</p>
+        <div style="display:flex;flex-direction:column;gap:.6rem;">
+          <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,.04);border-radius:.4rem;padding:.7rem 1rem;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Runtime</p><code style="color:#4257E8;font-size:.82rem;">Python 3.14 / FastAPI</code>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,.04);border-radius:.4rem;padding:.7rem 1rem;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Almacén de Memoria</p><code style="color:#4257E8;font-size:.82rem;">Cloud Spanner Graph (ISO GQL)</code>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,.04);border-radius:.4rem;padding:.7rem 1rem;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Despliegue</p><code style="color:#4257E8;font-size:.82rem;">Cloud Run · Terraform IaC</code>
+          </div>
+          <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(255,255,255,.04);border-radius:.4rem;padding:.7rem 1rem;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Observabilidad</p><code style="color:#4257E8;font-size:.82rem;">GCP Logging + OTel Tracing</code>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p style="color:#ED1650;font-weight:700;font-size:.85rem;margin-bottom:.75rem;text-transform:uppercase;letter-spacing:.08em;">Gobernanza y Seguridad</p>
+        <div style="display:flex;flex-direction:column;gap:.6rem;">
+          <div style="background:rgba(237,22,80,.07);border:1px solid rgba(237,22,80,.2);border-radius:.5rem;padding:.9rem 1rem;">
+            <p style="color:#fca5a5;font-weight:600;font-size:.85rem;margin-bottom:.3rem;">ABAC Interno (por defecto)</p>
+            <p style="color:#64748b;font-size:.78rem;margin:0;">Políticas en Spanner. Denegación por defecto. Códigos de razón para cada decisión. Sin dependencias externas.</p>
+          </div>
+          <div style="background:rgba(237,22,80,.07);border:1px solid rgba(237,22,80,.2);border-radius:.5rem;padding:.9rem 1rem;">
+            <p style="color:#fca5a5;font-weight:600;font-size:.85rem;margin-bottom:.3rem;">Delegación Externa (opcional)</p>
+            <p style="color:#64748b;font-size:.78rem;margin:0;">POST /authorize a servicio de política externo. Permite sincronización con plataforma de identidad LATAM (Okta, Auth0).</p>
+          </div>
+          <div style="background:rgba(237,22,80,.07);border:1px solid rgba(237,22,80,.2);border-radius:.5rem;padding:.9rem 1rem;">
+            <p style="color:#fca5a5;font-weight:600;font-size:.85rem;margin-bottom:.3rem;">3 entornos · Terraform</p>
+            <p style="color:#64748b;font-size:.78rem;margin:0;">dev / intg / prod. Canary 5% → 24h monitoreo → tráfico completo. Rollback &lt; 5 min.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">10 / 12</span>
+</div>
+
+<!-- SLIDE 11: PLAN DE DESPLIEGUE -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
+  <div class="h-full flex flex-col justify-center px-16 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <span class="tag">Plan de Despliegue</span>
+      <h1 style="font-size:2.3rem;font-weight:700;color:#fff;margin:0;">16 semanas · 4.5 FTE · $615–1.100/mes infra</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;">
+      <div style="background:rgba(237,22,80,.1);border:1px solid rgba(237,22,80,.3);border-radius:.75rem;padding:1.1rem;">
+        <p style="color:#ED1650;font-weight:800;font-size:.85rem;margin-bottom:.5rem;">FASE 1 · S1–4</p>
+        <p style="color:#fff;font-weight:600;font-size:.82rem;margin-bottom:.5rem;">Fundación y Piloto</p>
+        <ul style="color:#64748b;font-size:.75rem;list-style:none;padding:0;margin:0;">
+          <li style="margin-bottom:.3rem;">→ GCP dev + Spanner</li>
+          <li style="margin-bottom:.3rem;">→ GenAI Gateway conectado</li>
+          <li>→ 1er squad validado</li>
+        </ul>
+      </div>
+      <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.1rem;">
+        <p style="color:#4257E8;font-weight:800;font-size:.85rem;margin-bottom:.5rem;">FASE 2 · S5–9</p>
+        <p style="color:#fff;font-weight:600;font-size:.82rem;margin-bottom:.5rem;">Integración</p>
+        <ul style="color:#64748b;font-size:.75rem;list-style:none;padding:0;margin:0;">
+          <li style="margin-bottom:.3rem;">→ DataHub + MAPIS</li>
+          <li style="margin-bottom:.3rem;">→ Feedback Engine</li>
+          <li>→ Chatbot de pasajeros</li>
+        </ul>
+      </div>
+      <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.1rem;">
+        <p style="color:#4257E8;font-weight:800;font-size:.85rem;margin-bottom:.5rem;">FASE 3 · S10–14</p>
+        <p style="color:#fff;font-weight:600;font-size:.82rem;margin-bottom:.5rem;">Hardening + PROD</p>
+        <ul style="color:#64748b;font-size:.75rem;list-style:none;padding:0;margin:0;">
+          <li style="margin-bottom:.3rem;">→ INTG + chaos testing</li>
+          <li style="margin-bottom:.3rem;">→ Cumplimiento + ABAC</li>
+          <li>→ Canary → PROD</li>
+        </ul>
+      </div>
+      <div style="background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);border-radius:.75rem;padding:1.1rem;">
+        <p style="color:#94a3b8;font-weight:800;font-size:.85rem;margin-bottom:.5rem;">FASE 4 · S15+</p>
+        <p style="color:#fff;font-weight:600;font-size:.82rem;margin-bottom:.5rem;">Escala</p>
+        <ul style="color:#64748b;font-size:.75rem;list-style:none;padding:0;margin:0;">
+          <li style="margin-bottom:.3rem;">→ Todos los squads ADO</li>
+          <li style="margin-bottom:.3rem;">→ Omnicanal pasajeros</li>
+          <li>→ Cosmos component</li>
+        </ul>
+      </div>
+    </div>
+    <div style="margin-top:1.25rem;background:rgba(66,87,232,.07);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:.9rem 1.25rem;">
+      <p style="color:#94a3b8;font-size:.82rem;margin:0;"><strong style="color:#4257E8;">Equipo:</strong> 1 Platform Engineer (GCP) · 1–2 Backend Python · 1 Data/AI Engineer · 0.5 Seguridad/Gobernanza · 0.5 Product Lead · 0.5 QA · <strong style="color:#4257E8;">Piloto mínimo: 3 FTE en Fase 1</strong></p>
+    </div>
+  </div>
+  <span class="badge">LATAM · ADO</span><span class="snum">11 / 12</span>
+</div>
+
+<!-- SLIDE 12: CIERRE -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#4257E8 65%,#ED1650 100%);">
+  <div class="h-full flex flex-col items-center justify-center px-20 py-12 text-center">
+    <h1 style="font-size:2.8rem;font-weight:800;color:#fff;line-height:1.2;margin-bottom:1.5rem;">
+      El grafo que recuerda lo que LATAM sabe.
+    </h1>
+    <p style="color:rgba(255,255,255,.75);font-size:1.1rem;max-width:650px;line-height:1.6;margin-bottom:2rem;">
+      AMG convierte los modelos sin estado del Cosmos Gateway en una red de agentes que comparten, aprenden y confían en la misma memoria organizacional.
+    </p>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;max-width:700px;margin:0 auto;">
+      <div style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:.75rem;padding:1rem;text-align:center;">
+        <p style="color:#fff;font-weight:800;font-size:1.2rem;margin:0;">0%</p>
+        <p style="color:rgba(255,255,255,.65);font-size:.8rem;margin:.3rem 0 0;">Alucinación</p>
+      </div>
+      <div style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:.75rem;padding:1rem;text-align:center;">
+        <p style="color:#fff;font-weight:800;font-size:1.2rem;margin:0;">&gt;30%</p>
+        <p style="color:rgba(255,255,255,.65);font-size:.8rem;margin:.3rem 0 0;">Ahorro tokens</p>
+      </div>
+      <div style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:.75rem;padding:1rem;text-align:center;">
+        <p style="color:#fff;font-weight:800;font-size:1.2rem;margin:0;">16 sem.</p>
+        <p style="color:rgba(255,255,255,.65);font-size:.8rem;margin:.3rem 0 0;">A producción</p>
+      </div>
+    </div>
+    <p style="color:rgba(255,255,255,.5);font-size:.85rem;margin-top:2rem;"><strong style="color:rgba(255,255,255,.75);">Primer paso:</strong> Piloto de 4 semanas con Squad GenAI</p>
+  </div>
+  <span class="badge" style="opacity:.5;">LATAM Airlines · ADO · 2026</span><span class="snum">12 / 12</span>
+</div>
+
+</body>
+</html>
