@@ -95,3 +95,38 @@ class TestCrossTenantIsolation:
             assert not any("neighbor a" in n for n in neighbors_b), (
                 f"Tenant B must not see neighbor_a, got: {neighbors_b}"
             )
+
+    def test_spanner_client_write_node_rejects_empty_tenant_id(self) -> None:
+        """SpannerClient.write_node must reject empty or None tenant_id.
+
+        Composite PK enforcement: every MemoryNode write must include a non-empty
+        TenantId. Passing an empty or None tenant_id would silently corrupt the
+        composite primary key (TenantId, NodeId), allowing cross-tenant collisions.
+        """
+        from src.db.spanner_client import SpannerClient
+
+        with pytest.raises(ValueError, match="tenant_id is required for all writes"):
+            SpannerClient.write_node(
+                tenant_id="",
+                node_id="some-node",
+                memory_tier="SEMANTIC",
+                label="PERSON",
+                weight=0.5,
+            )
+
+    def test_spanner_client_write_node_rejects_none_tenant_id(self) -> None:
+        """SpannerClient.write_node must reject None tenant_id explicitly.
+
+        None is not a valid tenant_id for composite PK enforcement. The guard must
+        check both None and empty string to prevent all silent corruption paths.
+        """
+        from src.db.spanner_client import SpannerClient
+
+        with pytest.raises(ValueError, match="tenant_id is required for all writes"):
+            SpannerClient.write_node(
+                tenant_id=None,  # type: ignore[arg-type]
+                node_id="some-node",
+                memory_tier="SEMANTIC",
+                label="PERSON",
+                weight=0.5,
+            )

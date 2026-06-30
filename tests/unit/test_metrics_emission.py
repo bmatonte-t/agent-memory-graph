@@ -137,6 +137,31 @@ class TestOrchestratorMetricsEmission:
 class TestMCPServiceMetricsEmission:
     """Verify MCP service emits invocation and error counters."""
 
+    @pytest.fixture(autouse=True)
+    def _stub_audit_and_counter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stub audit persistence and session counter to avoid Spanner calls.
+
+        The audit write is now non-swallowed (Bug A fix); these unit tests must
+        stub it so real Spanner calls are not attempted during metrics testing.
+        """
+
+        async def fake_record_audit_event(**_: object) -> AuditResponse:
+            return AuditResponse(
+                tenant_id="tenant_m",
+                event_id="audit_stub",
+                event_type="MCP_AUTHORIZATION_GRANTED",
+                timestamp=datetime.now(UTC),
+            )
+
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI.record_audit_event",
+            fake_record_audit_event,
+        )
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count",
+            lambda *_: 1,
+        )
+
     async def test_invoke_success_emits_invocation_counter(self) -> None:
         """Successful invocations should emit to mcp_tool_invocation_counter."""
         fake_pipeline = AsyncMock()
