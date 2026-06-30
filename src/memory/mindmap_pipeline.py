@@ -524,11 +524,17 @@ class SpannerAggregationAdapter:
                 edge_weight,
             ) = row  # type: ignore[misc]
 
+            # Validate required fields before casting — str(None) == "None" is silent corruption.
+            if source_node_id is None:
+                raise ValueError(f"node_id cannot be None in row {idx}: {row!r}")
+            if memory_tier is None:
+                raise ValueError(f"memory_tier cannot be None in row {idx}: {row!r}")
+
             if source_node_id not in nodes:  # type: ignore[operator]
                 nodes[str(source_node_id)] = EvidenceNode(  # type: ignore[arg-type]
                     node_id=str(source_node_id),  # type: ignore[arg-type]
                     memory_tier=str(memory_tier),  # type: ignore[arg-type]
-                    label=str(label),  # type: ignore[arg-type]
+                    label=str(label) if label is not None else "",  # type: ignore[arg-type]
                     weight=float(source_weight) if source_weight else 0.0,  # type: ignore[arg-type]
                 )
 

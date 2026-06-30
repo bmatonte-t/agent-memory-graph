@@ -458,6 +458,27 @@ class TestMindMapPipeline:
         assert result.confidence_signal is not None
         assert result.confidence_signal.gating_applied == "hard_reject"
 
+    async def test_spanner_aggregation_adapter_rejects_none_node_id(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Row with None node_id must raise ValueError, not silently produce 'None' string.
+
+        The SpannerAggregationAdapter row-processing loop must validate that
+        source_node_id is not None before calling str() on it. Silently producing
+        the string 'None' would corrupt the graph node dictionary.
+        """
+        rows_with_none: list[tuple[object, ...]] = [
+            (None, "SEMANTIC", "person", 1.0, "edge_1", "dest_node", "KNOWS", 0.5),
+        ]
+        monkeypatch.setattr(
+            "src.memory.mindmap_pipeline.SpannerClient.execute_sql",
+            lambda *_args, **_kwargs: rows_with_none,
+        )
+        pipeline = MindMapPipeline(config=MindMapConfig(use_spanner_aggregation=True))
+
+        with pytest.raises(ValueError, match="node_id cannot be None"):
+            await pipeline.execute(query="Explain alpha dependency")
+
     async def test_vertex_synthesis_hard_rejects_low_confidence_evidence(self) -> None:
         """Vertex synthesis should short-circuit before model invocation when hard gated."""
         pipeline = MindMapPipeline(
