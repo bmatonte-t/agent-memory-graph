@@ -2,7 +2,36 @@
 
 This folder contains client-agnostic presentations of Agent Memory Graph, suitable for positioning the product to any enterprise customer. All LATAM Airlines-specific references and internal platform integrations (Cosmos, DataHub, ADO) have been removed and generalized.
 
-## Three Decks Included
+## Four Assets Included
+
+### 0. Product & Deployment Proposal (`product-proposal.html`)
+
+**Audience**: Executive sponsors, architecture leads, product decision makers
+
+**Format**: Comprehensive HTML document (printable to PDF, A4 portrait orientation)
+
+**Length**: 16+ pages | **Reading time**: 20–30 minutes
+
+**Content**:
+- Executive summary with key metrics (P99 latency, grounding rate, token cost reduction)
+- Product description (problems it solves, core capabilities)
+- Architecture brief (memory tiers, MindMap pipeline, Cognitive Weighting system, technology stack)
+- Strategic value and organizational multiplier effect
+- Use cases across domains (8 industry applications)
+- Full 16-week development & deployment plan (phases, team structure, timeline, budget estimates)
+- Success metrics and KPIs
+- Risk register and mitigation strategies
+
+**Best for**: Deep-dive proposals, procurement evaluation, cross-functional alignment, RFP responses
+
+**How to customize**:
+- Replace "enterprise customer" / "your organization" with company name
+- Update budget estimates based on actual GCP pricing in customer's region
+- Tailor use-case descriptions to match customer's industry and department structure
+- Adjust team sizing if customer has different resource availability
+- Add customer-specific deployment topology or compliance requirements to Phase 3 section
+
+---
 
 ### 1. Executive Presentation (`executive-presentation.html`)
 
@@ -62,17 +91,28 @@ This folder contains client-agnostic presentations of Agent Memory Graph, suitab
 
 - **Color scheme**: Indigo (#4257E8) and Coral (#ED1650) — professional, accessible, WCAG AA compliant
 - **Typography**: Sans-serif (Tailwind defaults)
-- **Orientation**: Landscape (A4, 16:9 aspect ratio)
+- **Product Proposal**: Portrait orientation (A4, traditional document format)
+- **Presentation Decks**: Landscape orientation (16:9 aspect ratio, slide format)
 - **Export**: Print to PDF via browser (`Cmd+P` / `Ctrl+P`)
 
 ## How to Use
 
 1. **Open in browser**: Double-click any HTML file or open via `file:///` URL
-2. **Scroll through slides**: Each presentation can be viewed sequentially
+
+2. **View presentation slides**:
+   - Scroll through each slide sequentially
+   - Design is optimized for on-screen viewing and projection
+
 3. **Print to PDF**:
-   - Press `Cmd+P` (macOS) or `Ctrl+P` (Windows/Linux)
-   - Select **Orientation: Landscape**
-   - Save as PDF
+   - **For presentations** (`executive-presentation.html`, `engineers-deep-dive.html`, `technical-stakeholders.html`):
+     - Press `Cmd+P` (macOS) or `Ctrl+P` (Windows/Linux)
+     - Select **Orientation: Landscape**
+     - Save as PDF
+   - **For proposal** (`product-proposal.html`):
+     - Press `Cmd+P` (macOS) or `Ctrl+P` (Windows/Linux)
+     - Select **Orientation: Portrait** (default)
+     - Save as PDF
+
 4. **Present online**: Open in browser, press `F11` for fullscreen, use arrow keys to navigate
 
 ## White-Labeling Guide
