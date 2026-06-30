@@ -1,5 +1,36 @@
 # Infrastructure — agent-memory-graph
 
+## Bootstrap Prerequisites (first-time only)
+
+Before the first CI pipeline run, the Artifact Registry repository must exist in each target project.
+The CI `build-image` job will fail if the repository is absent because Docker cannot push to a
+non-existent registry.
+
+Run the following commands once per environment (replace placeholder values with real project IDs and region):
+
+```bash
+# Run once per environment before the first CI pipeline
+gcloud artifacts repositories create agent-memory-graph \
+  --repository-format=docker \
+  --location=${GCP_REGION} \
+  --project=${GCP_PROJECT_ID_DEV} \
+  --description="Docker images for agent-memory-graph Cloud Run service (dev)"
+# Repeat for intg and prod projects
+gcloud artifacts repositories create agent-memory-graph \
+  --repository-format=docker \
+  --location=${GCP_REGION} \
+  --project=${GCP_PROJECT_ID_INTG} \
+  --description="Docker images for agent-memory-graph Cloud Run service (intg)"
+gcloud artifacts repositories create agent-memory-graph \
+  --repository-format=docker \
+  --location=${GCP_REGION} \
+  --project=${GCP_PROJECT_ID_PROD} \
+  --description="Docker images for agent-memory-graph Cloud Run service (prod)"
+```
+
+After first `terraform init`, commit the generated `.terraform.lock.hcl` file so that provider versions
+are pinned for reproducible CI runs. TODO: commit `.terraform.lock.hcl` after initial bootstrap.
+
 ## GitLab CI/CD Variables
 
 Set these in GitLab → Settings → CI/CD → Variables (project level, masked):
@@ -12,6 +43,7 @@ Set these in GitLab → Settings → CI/CD → Variables (project level, masked)
 | `GCP_PROJECT_ID_PROD` | Yes | `my-project-prod-xxxx` | Cloud Run project, prod environment |
 | `GCP_REGION` | Yes | `us-east1` | GCP region for Cloud Run and Artifact Registry |
 | `GOOGLE_CREDENTIALS` | Yes | `{...}` | Service account JSON key for CI runner; must have roles listed below |
+| `COMPANY_ID` | Yes | `latam-airlines` | Company identifier injected into terraform.tfvars; used for single-company auth mode |
 
 ## CI Service Account Roles
 

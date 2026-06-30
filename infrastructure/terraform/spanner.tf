@@ -67,10 +67,11 @@ resource "google_spanner_database_iam_member" "spanner_sa_user" {
 # ---------------------------------------------------------------------------
 
 resource "null_resource" "run_migrations" {
-  # Re-run whenever the list of migration files changes
+  # Re-run whenever the list or content of migration files changes
   triggers = {
     migrations_hash = sha256(join(",", [
-      for f in sort(fileset("${path.module}/../../migrations", "*.sql")) : f
+      for f in sort(fileset("${path.module}/../../migrations", "*.sql")) :
+      "${f}:${filesha256("${path.module}/../../migrations/${f}")}"
     ]))
     database = google_spanner_database.memory_graph.name
   }

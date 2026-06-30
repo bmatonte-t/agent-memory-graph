@@ -67,16 +67,23 @@ build-image:
       echo "Building image: $IMAGE_TAG"
       docker build -t "$IMAGE_TAG" -t "$IMAGE_LATEST" .
 
-      echo "Pushing image..."
-      docker push "$IMAGE_TAG"
+      echo "Pushing SHA-tagged image..."
+      # Capture digest directly from push output (more reliable than inspect)
+      PUSH_OUTPUT=$(docker push "$IMAGE_TAG" 2>&1)
+      echo "$PUSH_OUTPUT"
+      DIGEST=$(echo "$PUSH_OUTPUT" | grep "digest:" | awk '{print $3}')
+      if [ -z "$DIGEST" ]; then
+        echo "ERROR: could not capture image digest from push output"
+        exit 1
+      fi
+      IMAGE_WITH_DIGEST="${REGISTRY}/api@${DIGEST}"
+      echo "Image digest: $IMAGE_WITH_DIGEST"
+
+      echo "Pushing latest tag..."
       docker push "$IMAGE_LATEST"
 
-      # Resolve the SHA digest for Terraform (pins Cloud Run to this exact image)
-      DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_TAG")
-      echo "Image digest: $DIGEST"
-
       # Export for downstream Terraform stages
-      echo "TF_VAR_container_image=${DIGEST}" >> build.env
+      echo "TF_VAR_container_image=${IMAGE_WITH_DIGEST}" >> build.env
   artifacts:
     reports:
       dotenv: build.env
@@ -90,43 +97,52 @@ build-image:
 # This keeps project IDs out of the repository while making them available
 # to Terraform at runtime.
 #
-# Note: The terraform-pipeline.yml base template may already provide
-# before_script hooks. This anchor must be invoked in the before_script of
-# the plan/apply jobs. If the base template does not expose hooks for this,
-# create explicit plan-dev and apply-dev jobs that extend the base template
-# and add this before_script step. Check the Cosmos CI/CD template
-# documentation for the correct extension mechanism.
+# This job runs in .pre stage (after build-image) and exposes terraform.tfvars
+# as an artifact consumed by downstream Terraform plan/apply jobs.
 # ---------------------------------------------------------------------------
 
-.write-tfvars: &write-tfvars |
-  cat > "${TF_WORKING_DIR}/terraform.tfvars" <<EOF
-  project_id = {
-    dev  = "${GCP_PROJECT_ID_DEV}"
-    intg = "${GCP_PROJECT_ID_INTG}"
-    prod = "${GCP_PROJECT_ID_PROD}"
-  }
-  spanner_project_id = {
-    dev  = "${GCP_PROJECT_ID_DEV}"
-    intg = "${GCP_PROJECT_ID_INTG}"
-    prod = "${GCP_PROJECT_ID_PROD}"
-  }
-  spanner_instance_id = {
-    dev  = "agent-memory-graph-dev"
-    intg = "agent-memory-graph-intg"
-    prod = "agent-memory-graph-prod"
-  }
-  region = {
-    dev  = "${GCP_REGION}"
-    intg = "${GCP_REGION}"
-    prod = "${GCP_REGION}"
-  }
-  company_id    = "latam-airlines"
-  auth_mode     = "internal"
-  container_image = "${TF_VAR_container_image}"
-  cicd_sa_email = {
-    dev  = "cosmos-cicd-sa@${GCP_PROJECT_ID_DEV}.iam.gserviceaccount.com"
-    intg = "cosmos-cicd-sa@${GCP_PROJECT_ID_INTG}.iam.gserviceaccount.com"
-    prod = "cosmos-cicd-sa@${GCP_PROJECT_ID_PROD}.iam.gserviceaccount.com"
-  }
-  agents_group_email = ""
-  EOF
+write-tfvars:
+  stage: .pre
+  image: alpine:3
+  script:
+    - |
+      mkdir -p "${TF_WORKING_DIR}"
+      cat > "${TF_WORKING_DIR}/terraform.tfvars" <<EOF
+      project_id = {
+        dev  = "${GCP_PROJECT_ID_DEV}"
+        intg = "${GCP_PROJECT_ID_INTG}"
+        prod = "${GCP_PROJECT_ID_PROD}"
+      }
+      spanner_project_id = {
+        dev  = "${GCP_PROJECT_ID_DEV}"
+        intg = "${GCP_PROJECT_ID_INTG}"
+        prod = "${GCP_PROJECT_ID_PROD}"
+      }
+      spanner_instance_id = {
+        dev  = "agent-memory-graph-dev"
+        intg = "agent-memory-graph-intg"
+        prod = "agent-memory-graph-prod"
+      }
+      region = {
+        dev  = "${GCP_REGION}"
+        intg = "${GCP_REGION}"
+        prod = "${GCP_REGION}"
+      }
+      company_id      = "${COMPANY_ID}"
+      auth_mode       = "internal"
+      container_image = "${TF_VAR_container_image}"
+      cicd_sa_email = {
+        dev  = "cosmos-cicd-sa@${GCP_PROJECT_ID_DEV}.iam.gserviceaccount.com"
+        intg = "cosmos-cicd-sa@${GCP_PROJECT_ID_INTG}.iam.gserviceaccount.com"
+        prod = "cosmos-cicd-sa@${GCP_PROJECT_ID_PROD}.iam.gserviceaccount.com"
+      }
+      agents_group_email = ""
+      EOF
+  artifacts:
+    paths:
+      - ${TF_WORKING_DIR}/terraform.tfvars
+    expire_in: 1 hour
+  rules:
+    - if: '$CI_COMMIT_BRANCH'
+  needs:
+    - build-image
