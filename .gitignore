@@ -136,3 +136,6 @@ cython_debug/
 *.local*
 # Git worktrees
 worktrees/
+
+# Terraform — adopter-specific config (stored in CI variables)
+infrastructure/terraform/terraform.tfvars

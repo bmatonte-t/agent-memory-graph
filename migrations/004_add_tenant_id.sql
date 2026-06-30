@@ -4,7 +4,7 @@
 -- Critical: tenant_id becomes part of composite primary key to enforce tenant isolation at schema level
 
 -- Step 1: Add tenant_id column to MemoryNode
-ALTER TABLE MemoryNode ADD COLUMN TenantId STRING(256) NOT NULL DEFAULT ('default-tenant');
+ALTER TABLE MemoryNode ADD COLUMN IF NOT EXISTS TenantId STRING(256) NOT NULL DEFAULT ('default-tenant');
 
 -- Step 2: Update PRIMARY KEY constraint to include TenantId
 -- Note: In Spanner, we must drop and recreate the primary key
@@ -13,25 +13,25 @@ ALTER TABLE MemoryNode ADD COLUMN TenantId STRING(256) NOT NULL DEFAULT ('defaul
 -- all new inserts include tenant_id. Existing rows will have 'default-tenant'.
 
 -- Step 3: Add index for tenant_id filtering
-CREATE INDEX idx_MemoryNode_TenantId ON MemoryNode (TenantId);
+CREATE INDEX IF NOT EXISTS idx_MemoryNode_TenantId ON MemoryNode (TenantId);
 
 -- Step 4: Add combined index for tier and tenant (common query pattern)
-CREATE INDEX idx_MemoryNode_TenantId_Tier ON MemoryNode (TenantId, MemoryTier);
+CREATE INDEX IF NOT EXISTS idx_MemoryNode_TenantId_Tier ON MemoryNode (TenantId, MemoryTier);
 
 -- Step 5: Add combined index for tenant and weight filtering (semantic retrieval pattern)
-CREATE INDEX idx_MemoryNode_TenantId_Weight ON MemoryNode (TenantId, LogOddsWeight DESC);
+CREATE INDEX IF NOT EXISTS idx_MemoryNode_TenantId_Weight ON MemoryNode (TenantId, LogOddsWeight DESC);
 
 -- Step 6: Add tenant_id column to MemoryEdge
-ALTER TABLE MemoryEdge ADD COLUMN TenantId STRING(256) NOT NULL DEFAULT ('default-tenant');
+ALTER TABLE MemoryEdge ADD COLUMN IF NOT EXISTS TenantId STRING(256) NOT NULL DEFAULT ('default-tenant');
 
 -- Step 7: Add indexes for tenant_id filtering on edges
-CREATE INDEX idx_MemoryEdge_TenantId ON MemoryEdge (TenantId);
+CREATE INDEX IF NOT EXISTS idx_MemoryEdge_TenantId ON MemoryEdge (TenantId);
 
 -- Step 8: Add combined index for tenant and relationship type
-CREATE INDEX idx_MemoryEdge_TenantId_RelType ON MemoryEdge (TenantId, RelType);
+CREATE INDEX IF NOT EXISTS idx_MemoryEdge_TenantId_RelType ON MemoryEdge (TenantId, RelType);
 
 -- Step 9: Add AUDIT_EVENTS table (append-only audit log)
-CREATE TABLE AUDIT_EVENTS (
+CREATE TABLE IF NOT EXISTS AUDIT_EVENTS (
   EventId STRING(256) NOT NULL,
   TenantId STRING(256) NOT NULL,
   SourceNodeId STRING(256) NOT NULL,
@@ -42,9 +42,9 @@ CREATE TABLE AUDIT_EVENTS (
 );
 
 -- Step 10: Add indexes for audit queries
-CREATE INDEX idx_AUDIT_EVENTS_TenantId ON AUDIT_EVENTS (TenantId);
-CREATE INDEX idx_AUDIT_EVENTS_TenantId_Type ON AUDIT_EVENTS (TenantId, EventType);
-CREATE INDEX idx_AUDIT_EVENTS_CreatedAt ON AUDIT_EVENTS (CreatedAt DESC);
+CREATE INDEX IF NOT EXISTS idx_AUDIT_EVENTS_TenantId ON AUDIT_EVENTS (TenantId);
+CREATE INDEX IF NOT EXISTS idx_AUDIT_EVENTS_TenantId_Type ON AUDIT_EVENTS (TenantId, EventType);
+CREATE INDEX IF NOT EXISTS idx_AUDIT_EVENTS_CreatedAt ON AUDIT_EVENTS (CreatedAt DESC);
 
 -- Note for Phase 4 Implementation:
 -- The composite primary key (TenantId, NodeId) must be enforced in application logic:
