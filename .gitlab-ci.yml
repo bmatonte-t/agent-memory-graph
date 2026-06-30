@@ -137,6 +137,7 @@ write-tfvars:
         prod = "cosmos-cicd-sa@${GCP_PROJECT_ID_PROD}.iam.gserviceaccount.com"
       }
       agents_group_email = ""
+      notification_channels = ${NOTIFICATION_CHANNEL_IDS:-[]}
       EOF
   artifacts:
     paths:

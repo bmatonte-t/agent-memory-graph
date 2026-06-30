@@ -183,3 +183,13 @@ variable "labels" {
   type        = map(string)
   default     = {}
 }
+
+variable "notification_channels" {
+  description = <<-EOT
+    List of Cloud Monitoring notification channel resource IDs to attach to alert policies.
+    Example: ["projects/my-project/notificationChannels/12345"]
+    Leave empty to receive alerts in Cloud Monitoring console only.
+  EOT
+  type    = list(string)
+  default = []
+}

@@ -28,7 +28,6 @@ resource "google_service_account" "product_sa" {
 # Roles granted on the Cloud Run project
 resource "google_project_iam_member" "product_sa_roles" {
   for_each = toset([
-    "roles/run.invoker",
     "roles/logging.logWriter",
     "roles/cloudtrace.agent",
     "roles/monitoring.metricWriter",
@@ -68,13 +67,6 @@ resource "google_service_account" "spanner_sa" {
   display_name = "Agent Memory Graph Spanner — ${local.environment}"
   description  = "Cross-project Spanner access for agent-memory-graph."
   project      = local.spanner_project_id
-}
-
-# Grant Spanner data read/write in the Spanner project
-resource "google_project_iam_member" "spanner_sa_database_role" {
-  project = local.spanner_project_id
-  role    = "roles/spanner.databaseUser"
-  member  = "serviceAccount:${google_service_account.spanner_sa.email}"
 }
 
 # Let the product SA impersonate the Spanner SA for cross-project calls

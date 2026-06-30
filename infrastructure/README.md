@@ -44,6 +44,7 @@ Set these in GitLab → Settings → CI/CD → Variables (project level, masked)
 | `GCP_REGION` | Yes | `us-east1` | GCP region for Cloud Run and Artifact Registry |
 | `GOOGLE_CREDENTIALS` | Yes | `{...}` | Service account JSON key for CI runner; must have roles listed below |
 | `COMPANY_ID` | Yes | `latam-airlines` | Company identifier injected into terraform.tfvars; used for single-company auth mode |
+| `NOTIFICATION_CHANNEL_IDS` | No | `[]` | JSON list of Cloud Monitoring channel resource IDs for alert routing |
 
 ## CI Service Account Roles
 

@@ -4,7 +4,7 @@
 
 -- Create ENGRAM_EVIDENCE node type for explicit evidence tracking
 -- Immutable: Only INSERT allowed, no UPDATE/DELETE (enforced via constraints + audit)
-CREATE TABLE ENGRAM_EVIDENCE (
+CREATE TABLE IF NOT EXISTS ENGRAM_EVIDENCE (
   -- Primary identifier and tenant isolation
   EvidenceId STRING(36) NOT NULL,
   TenantId STRING(128) NOT NULL,
@@ -48,13 +48,13 @@ CREATE TABLE ENGRAM_EVIDENCE (
 ) PRIMARY KEY (TenantId, EvidenceId);
 
 -- Index for efficient lookup of evidence by tenant + source type + timestamp
-CREATE INDEX idx_ENGRAM_EVIDENCE_TenantId_SourceType_AccessTimestamp
+CREATE INDEX IF NOT EXISTS idx_ENGRAM_EVIDENCE_TenantId_SourceType_AccessTimestamp
 ON ENGRAM_EVIDENCE (TenantId, SourceType, AccessTimestamp DESC);
 
 -- Index for temporal analysis: find recent evidence for a tenant
-CREATE INDEX idx_ENGRAM_EVIDENCE_TenantId_CreatedAt
+CREATE INDEX IF NOT EXISTS idx_ENGRAM_EVIDENCE_TenantId_CreatedAt
 ON ENGRAM_EVIDENCE (TenantId, CreatedAt DESC);
 
 -- Index for cognitive weight analysis: find high-weight evidence (Phase 1 + Phase 5)
-CREATE INDEX idx_ENGRAM_EVIDENCE_CognitiveWeight
+CREATE INDEX IF NOT EXISTS idx_ENGRAM_EVIDENCE_CognitiveWeight
 ON ENGRAM_EVIDENCE (TenantId, CognitiveWeight DESC, CreatedAt DESC);

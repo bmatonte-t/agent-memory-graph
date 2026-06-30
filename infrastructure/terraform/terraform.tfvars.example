@@ -105,3 +105,7 @@ cloud_run_max_instances = {
   intg = 10
   prod = 20
 }
+
+# Notification channels for alert policies (leave empty to use Cloud Monitoring console only)
+# Create channels via: gcloud alpha monitoring channels create
+notification_channels = []

@@ -3,7 +3,7 @@
 -- Status: Phase 1B - Schema Foundation
 -- Critical: Interleaving co-locates edges with source nodes to minimize RPC calls during GQL traversals
 
-CREATE TABLE MemoryEdge (
+CREATE TABLE IF NOT EXISTS MemoryEdge (
   SourceNodeId STRING(256) NOT NULL,
   EdgeId STRING(256) NOT NULL,
   DestNodeId STRING(256) NOT NULL,
@@ -16,6 +16,6 @@ CREATE TABLE MemoryEdge (
 ) PRIMARY KEY (SourceNodeId, EdgeId);
 
 -- Indexes for common query patterns
-CREATE INDEX idx_MemoryEdge_SourceType ON MemoryEdge (SourceNodeId, RelType);
-CREATE INDEX idx_MemoryEdge_DestType ON MemoryEdge (DestNodeId, RelType);
-CREATE INDEX idx_MemoryEdge_RelType_Weight ON MemoryEdge (RelType, LogOddsWeight DESC);
+CREATE INDEX IF NOT EXISTS idx_MemoryEdge_SourceType ON MemoryEdge (SourceNodeId, RelType);
+CREATE INDEX IF NOT EXISTS idx_MemoryEdge_DestType ON MemoryEdge (DestNodeId, RelType);
+CREATE INDEX IF NOT EXISTS idx_MemoryEdge_RelType_Weight ON MemoryEdge (RelType, LogOddsWeight DESC);

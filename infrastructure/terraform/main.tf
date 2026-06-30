@@ -150,5 +150,11 @@ resource "google_cloud_run_v2_service" "app" {
   ]
 }
 
-# Note: roles/run.invoker is granted at the project level in iam.tf via
-# google_project_iam_member.product_sa_roles. No service-level duplicate binding needed.
+# roles/run.invoker scoped to this service only (not project-wide)
+resource "google_cloud_run_v2_service_iam_member" "product_sa_invoker" {
+  project  = local.project_id
+  location = local.region
+  name     = google_cloud_run_v2_service.app.name
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.product_sa.email}"
+}

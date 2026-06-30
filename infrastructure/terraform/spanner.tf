@@ -45,7 +45,6 @@ resource "google_spanner_database" "memory_graph" {
   depends_on = [
     google_spanner_instance.main,
     google_service_account.spanner_sa,
-    google_project_iam_member.spanner_sa_database_role,
   ]
 }
 

@@ -76,9 +76,10 @@ resource "google_logging_metric" "error_count" {
 # ---------------------------------------------------------------------------
 
 resource "google_monitoring_alert_policy" "high_error_rate" {
-  display_name = "Agent Memory Graph — High Error Rate (${local.environment})"
-  project      = local.project_id
-  combiner     = "OR"
+  display_name          = "Agent Memory Graph — High Error Rate (${local.environment})"
+  project               = local.project_id
+  combiner              = "OR"
+  notification_channels = var.notification_channels
 
   conditions {
     display_name = "Error rate > 1% for 5 minutes"
@@ -119,9 +120,10 @@ resource "google_monitoring_alert_policy" "high_error_rate" {
 }
 
 resource "google_monitoring_alert_policy" "high_latency" {
-  display_name = "Agent Memory Graph — High Latency p99 (${local.environment})"
-  project      = local.project_id
-  combiner     = "OR"
+  display_name          = "Agent Memory Graph — High Latency p99 (${local.environment})"
+  project               = local.project_id
+  combiner              = "OR"
+  notification_channels = var.notification_channels
 
   conditions {
     display_name = "p99 request latency > 500ms for 10 minutes"
