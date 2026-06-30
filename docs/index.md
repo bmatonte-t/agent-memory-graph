@@ -1,83 +1,46 @@
 # Agent Memory Graph
 
-**Enterprise-grade AI agent coordination platform for single organizations.**
+Agent Memory Graph (AMG) is an enterprise-grade persistent memory layer for AI agents. It gives agents access to a shared, organization-wide knowledge graph that survives across sessions, prevents hallucination by grounding every response in verifiable evidence, and provides immutable audit trails for compliance.
 
-Agent Memory Graph is a deterministic, grounding-first memory system for coordinating multiple AI agents within an enterprise. It eliminates hallucination by ensuring every response is grounded in organizational data, preserves context across sessions, and provides immutable audit trails for compliance.
+## What it does
 
-## Key Features
+- **Eliminates hallucination** — responses are generated only from facts retrieved from the graph; unsupported claims are rejected with an evidence-insufficiency signal
+- **Preserves context across sessions** — agents pick up where they left off without receiving prior conversation history in the prompt
+- **Coordinates agents** — all agents in the organization share the same graph, enabling multi-agent workflows without a shared message bus
+- **Reads your data** — ingests from documents (PDF, PPTX) and BigQuery tables; deduplicates entities with fuzzy matching
+- **Provides compliance** — every access, authorization decision, and reasoning step is written to an immutable audit log
 
-<div class="grid cards" markdown>
+## Documentation
 
-- :material-brain:{ .lg .middle } __Tripartite Memory Model__
+| Section | Contents |
+|---|---|
+| [Concepts](concepts/tripartite-memory.md) | Tripartite memory model, MindMap pipeline, cognitive weighting |
+| [Architecture](architecture.md) | System components, data flows, tech stack |
+| [User Guide — MCP Tools](user-guide/mcp-tools.md) | The four MCP tools with request/response examples |
+| [User Guide — REST API](user-guide/api-reference.md) | Every HTTP endpoint with examples |
+| [User Guide — Extraction Pipeline](user-guide/extraction-pipeline.md) | Document and BigQuery ingestion |
+| [Deployment](deployment.md) | LATAM adoption model, project-by-project rollout, manual steps |
+| [Infrastructure](infrastructure.md) | Terraform resources, CI/CD pipeline, GCP configuration |
+| [Backlog](backlog.md) | Current state, open work, known limitations |
 
-    ---
+## Quick orientation
 
-    Context (session history), Semantic (organizational facts), and Audit (immutable traces) tiers—strictly isolated for security and compliance.
+The product exposes two surfaces:
 
-- :material-chart-line:{ .lg .middle } __Evidence-Grounded Responses__
+1. **MCP tools** (`POST /api/v1/mcp/invoke`) — the primary interface for AI agents. Agents call one of four tools: `MEMORY_SEARCH`, `MEMORY_ADD_FACT`, `MEMORY_LOG_TRACE`, `MEMORY_RECALL_CONTEXT`.
+2. **REST API** — management and orchestration endpoints used by orchestrators and internal maintenance jobs.
 
-    ---
+Underneath both surfaces, the same graph database (Cloud Spanner) and the same four-stage MindMap pipeline power all responses.
 
-    Every agent response is grounded in retrieved organizational data. Unsupported claims are rejected with explicit insufficiency—no hallucination.
+## Technology
 
-- :material-lock:{ .lg .middle } __Enterprise Security__
-
-    ---
-
-    Strict tenant isolation, pluggable governance (internal ABAC or external delegation), immutable audit trails, and IAM-aligned access controls.
-
-- :material-database-check:{ .lg .middle } __Production-Ready Infrastructure__
-
-    ---
-
-    Built on Google Cloud Spanner for scale, with comprehensive observability, deterministic performance, and enterprise-grade reliability.
-
-- :material-network:{ .lg .middle } __Multi-Agent Coordination__
-
-    ---
-
-    All agents share organizational memory via a common graph. Enables coordinated decision-making and eliminates context loss across agent boundaries.
-
-- :material-book-check:{ .lg .middle } __Compliance & Auditability__
-
-    ---
-
-    Every memory access, reasoning step, and agent decision is logged in immutable audit trails. Built for regulated industries.
-
-</div>
-
-- :material-github:{ .lg .middle } __GitHub Actions__
-
-    ---
-
-    GitHub Actions that run formatting, linting, testing and type checking.
-
-- :material-robot:{ .lg .middle } __Dependabot__
-
-    ---
-
-    Dependabot for keeping your dependencies up to date.
-
-- :material-hook:{ .lg .middle } __Pre-commit Hooks__
-
-    ---
-
-    Pre-commit Hooks that run formatting, detect secrets, and other useful tooling.
-
-- :material-chart-line:{ .lg .middle } __Code Metrics Analysis__
-
-    ---
-
-    Code Metrics Analysis that monitors complexity and maintainability on PRs.
-
-</div>
-
-Any of these configurations and features can be disabled/modified freely after set up if the team chooses to.
-
-## Why?
-
-You're 10 and it's Christmas. You rush to unwrap the presents Santa's left under the tree. You face flames as you spot the inconspicuous car-looking red and green abomination. You tear through the paper. There it is! Finally! Your very own TERRENEITOR, the MOST POWERFUL CAR UNDER THE SUN, complete with its 2 turbomotors! You flip the switch, grab the remote and hit the gas button at the scream of excitement and... nothing. Zero. Zip. Zilch. Nada.
-
-Dang it! Don't you hate it when new toys come without batteries? We do too! At Tryolabs we believe tooling should enhance the developer's experience and help guarantee good quality code, but hate it when people lose countless hours configuring the stack for this.
-
-That's why we built the repo template: configuration at your service.
+| Component | Technology |
+|---|---|
+| Runtime | Python 3.14, FastAPI |
+| Database | Cloud Spanner (with property graph / GQL) |
+| Compute | Cloud Run gen2 (2 vCPU / 4 Gi) |
+| Secrets | Secret Manager |
+| Observability | Cloud Logging, Cloud Trace, Cloud Monitoring |
+| Package manager | uv |
+| Infrastructure | Terraform (workspace-per-environment) |
+| CI/CD | GitLab CI (Cosmos shared templates) |
