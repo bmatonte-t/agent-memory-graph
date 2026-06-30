@@ -1,14 +1,23 @@
 ###############################################################################
-# GitLab CI pipeline — agent-memory-graph (single-tenant-variant)
+# GitLab CI pipeline — agent-memory-graph
 #
-# Inherits the Cosmos shared Terraform pipeline template, matching the
-# pattern used across all data products (emx-magic-supply-infrastructure etc.)
+# Stages:
+#   1. build    → Docker build + push to Artifact Registry (on all branches)
+#   2. plan     → terraform plan (on all branches, dev workspace)
+#   3. apply    → terraform apply (on develop → dev, intg branch → intg,
+#                 main → prod with human approval)
 #
-# Usage:
-#   - Push to any branch → terraform plan (dev workspace)
-#   - Merge to develop  → terraform apply (dev workspace)
-#   - Merge to main     → terraform plan (intg) → human approval → apply (intg)
-#                         → human approval → apply (prod)
+# Required GitLab CI/CD variables (set in project Settings → CI/CD → Variables):
+#   TF_STATE_BUCKET         — GCS bucket name for Terraform state
+#   GCP_PROJECT_ID_DEV      — GCP project ID for dev workspace
+#   GCP_PROJECT_ID_INTG     — GCP project ID for intg workspace
+#   GCP_PROJECT_ID_PROD     — GCP project ID for prod workspace
+#   GCP_REGION              — Default GCP region (e.g. us-east1)
+#   GOOGLE_CREDENTIALS      — Service account JSON key for CI runner
+#                             (or use Workload Identity Federation)
+#
+# The terraform.tfvars is written from CI variables at plan/apply time;
+# it is NOT committed to the repository.
 ###############################################################################
 
 include:
@@ -17,31 +26,107 @@ include:
     file: "/templates/terraform-pipeline.yml"
 
 variables:
-  # Product name follows the Cosmos naming convention
   PRODUCT_NAME: "agent-memory-graph"
-
-  # State bucket is supplied as a CI variable in the platform settings;
-  # do not hardcode a bucket name here.
-  # TF_STATE_BUCKET: supplied by platform
-
-  # Integration test workflow run before prod gate
+  TF_WORKING_DIR: "infrastructure/terraform"
   intg_workflow: advana
-
-  # Require human approval before applying to prod
+  intg_environment: "intg"
   approval_on_prod: "true"
 
-  # Trigger on Terraform file changes and the container image tag file
-  TF_WORKING_DIR: "infrastructure/terraform"
-
 # ---------------------------------------------------------------------------
-# Workspace-per-environment override
+# Docker build and push
 #
-# The base template runs `terraform workspace select $CI_ENVIRONMENT_SLUG`
-# which maps branch names to workspaces:
-#   develop  → dev
-#   intg     → intg
-#   main     → prod
+# Runs before Terraform so the container_image variable is available.
+# The image tag uses the commit SHA for traceability + `:latest` for local use.
 # ---------------------------------------------------------------------------
 
-# Any additional product-specific jobs can be added below using the
-# `extends` keyword to inherit from the base template stages.
+build-image:
+  stage: .pre
+  image: docker:24
+  services:
+    - docker:24-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - echo "$GOOGLE_CREDENTIALS" | docker login -u _json_key --password-stdin
+        "https://${GCP_REGION}-docker.pkg.dev"
+  script:
+    - |
+      # Determine project ID based on branch
+      if [ "$CI_COMMIT_BRANCH" = "main" ]; then
+        PROJECT_ID="$GCP_PROJECT_ID_PROD"
+      elif [ "$CI_COMMIT_BRANCH" = "intg" ]; then
+        PROJECT_ID="$GCP_PROJECT_ID_INTG"
+      else
+        PROJECT_ID="$GCP_PROJECT_ID_DEV"
+      fi
+
+      REGISTRY="${GCP_REGION}-docker.pkg.dev/${PROJECT_ID}/agent-memory-graph"
+      IMAGE_TAG="${REGISTRY}/api:${CI_COMMIT_SHA}"
+      IMAGE_LATEST="${REGISTRY}/api:latest"
+
+      echo "Building image: $IMAGE_TAG"
+      docker build -t "$IMAGE_TAG" -t "$IMAGE_LATEST" .
+
+      echo "Pushing image..."
+      docker push "$IMAGE_TAG"
+      docker push "$IMAGE_LATEST"
+
+      # Resolve the SHA digest for Terraform (pins Cloud Run to this exact image)
+      DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE_TAG")
+      echo "Image digest: $DIGEST"
+
+      # Export for downstream Terraform stages
+      echo "TF_VAR_container_image=${DIGEST}" >> build.env
+  artifacts:
+    reports:
+      dotenv: build.env
+  rules:
+    - if: '$CI_COMMIT_BRANCH'   # Run on all branches
+
+# ---------------------------------------------------------------------------
+# Terraform tfvars generation
+#
+# Writes terraform.tfvars from CI variables before terraform plan/apply.
+# This keeps project IDs out of the repository while making them available
+# to Terraform at runtime.
+#
+# Note: The terraform-pipeline.yml base template may already provide
+# before_script hooks. This anchor must be invoked in the before_script of
+# the plan/apply jobs. If the base template does not expose hooks for this,
+# create explicit plan-dev and apply-dev jobs that extend the base template
+# and add this before_script step. Check the Cosmos CI/CD template
+# documentation for the correct extension mechanism.
+# ---------------------------------------------------------------------------
+
+.write-tfvars: &write-tfvars |
+  cat > "${TF_WORKING_DIR}/terraform.tfvars" <<EOF
+  project_id = {
+    dev  = "${GCP_PROJECT_ID_DEV}"
+    intg = "${GCP_PROJECT_ID_INTG}"
+    prod = "${GCP_PROJECT_ID_PROD}"
+  }
+  spanner_project_id = {
+    dev  = "${GCP_PROJECT_ID_DEV}"
+    intg = "${GCP_PROJECT_ID_INTG}"
+    prod = "${GCP_PROJECT_ID_PROD}"
+  }
+  spanner_instance_id = {
+    dev  = "agent-memory-graph-dev"
+    intg = "agent-memory-graph-intg"
+    prod = "agent-memory-graph-prod"
+  }
+  region = {
+    dev  = "${GCP_REGION}"
+    intg = "${GCP_REGION}"
+    prod = "${GCP_REGION}"
+  }
+  company_id    = "latam-airlines"
+  auth_mode     = "internal"
+  container_image = "${TF_VAR_container_image}"
+  cicd_sa_email = {
+    dev  = "cosmos-cicd-sa@${GCP_PROJECT_ID_DEV}.iam.gserviceaccount.com"
+    intg = "cosmos-cicd-sa@${GCP_PROJECT_ID_INTG}.iam.gserviceaccount.com"
+    prod = "cosmos-cicd-sa@${GCP_PROJECT_ID_PROD}.iam.gserviceaccount.com"
+  }
+  agents_group_email = ""
+  EOF
