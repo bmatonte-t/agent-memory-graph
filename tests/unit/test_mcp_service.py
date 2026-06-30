@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
+
+import pytest
 
 if TYPE_CHECKING:
-    import pytest
+    pass
 
 from src.mcp.service import MCPToolService
 from src.models.mcp import MCPInvokeRequest, MCPToolName
@@ -19,6 +21,27 @@ EXPECTED_AUDIT_CALLS_WITH_AUTH = 2  # 1 for authorization granted + 1 for operat
 
 class TestMCPToolService:
     """Contract tests for tenant propagation through MCP tools."""
+
+    @pytest.fixture(autouse=True)
+    def _stub_record_audit_event(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stub audit persistence for tests that do not explicitly patch it.
+
+        This prevents real Spanner calls during unit tests. Tests that need
+        to control audit behavior should patch record_audit_event directly.
+        """
+
+        async def fake_record_audit_event(**_: object) -> AuditResponse:
+            return AuditResponse(
+                tenant_id="tenant_a",
+                event_id="audit_stub",
+                event_type="MCP_AUTHORIZATION_GRANTED",
+                timestamp=datetime.now(UTC),
+            )
+
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI.record_audit_event",
+            fake_record_audit_event,
+        )
 
     async def test_memory_search_passes_tenant_to_pipeline(
         self,
@@ -201,6 +224,41 @@ class TestMCPToolService:
             window_size=5,
             authorization_scope=None,
         )
+
+    async def test_audit_write_failure_raises_not_silently_swallowed(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Audit write failure must propagate, not be silently absorbed.
+
+        When MemoryAPI.record_audit_event raises, the exception must surface
+        to the caller so that security-critical failures are never masked.
+        """
+        fake_pipeline = AsyncMock()
+        fake_pipeline.execute.return_value = self._build_mindmap_response()
+        service = MCPToolService(mindmap_pipeline=fake_pipeline)
+
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count",
+            lambda *_: 1,
+        )
+
+        with (
+            patch(
+                "src.mcp.service.MemoryAPI.record_audit_event",
+                side_effect=RuntimeError("spanner down"),
+            ),
+            pytest.raises(RuntimeError, match="spanner down"),
+        ):
+            await service.invoke(
+                MCPInvokeRequest(
+                    tenant_id="tenant_a",
+                    session_id="sess_1",
+                    tool_name=MCPToolName.MEMORY_SEARCH,
+                    arguments={"query": "what happened?", "session_id": "sess_1"},
+                    request_id="req_audit_test",
+                )
+            )
 
     @staticmethod
     def _build_mindmap_response() -> MindMapResponse:
