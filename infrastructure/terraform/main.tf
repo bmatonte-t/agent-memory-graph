@@ -150,12 +150,8 @@ resource "google_cloud_run_v2_service" "app" {
   ]
 }
 
-# ---------------------------------------------------------------------------
-# Allow unauthenticated traffic within the org's VPC (internal Cloud Run)
-# For public-facing deployments, replace with an IAP-protected load balancer.
-# ---------------------------------------------------------------------------
-
-resource "google_cloud_run_v2_service_iam_member" "invoker" {
+# roles/run.invoker scoped to this service only (not project-wide)
+resource "google_cloud_run_v2_service_iam_member" "product_sa_invoker" {
   project  = local.project_id
   location = local.region
   name     = google_cloud_run_v2_service.app.name

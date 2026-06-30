@@ -1,0 +1,111 @@
+###############################################################################
+# terraform.tfvars — agent-memory-graph
+#
+# Replace <PROJECT_ID_*> tokens with actual GCP project IDs before running
+# terraform plan. These project IDs correspond to the three workspaces:
+#   dev  → used for development and testing of the service itself
+#   intg → integration environment, runs advana workflow before prod gate
+#   prod → first production adopter (or shared prod infra)
+#
+# For each new adopting project, copy this file to a separate location and
+# replace the project IDs with that project's dev/intg/prod IDs.
+###############################################################################
+
+# ---------------------------------------------------------------------------
+# GCP project IDs — Cloud Run lives here
+# ---------------------------------------------------------------------------
+
+project_id = {
+  dev  = "<PROJECT_ID_DEV>"
+  intg = "<PROJECT_ID_INTG>"
+  prod = "<PROJECT_ID_PROD>"
+}
+
+# ---------------------------------------------------------------------------
+# Spanner project — may be the same as project_id or a central data project
+# For the initial deployment, Spanner lives in the same project as Cloud Run.
+# ---------------------------------------------------------------------------
+
+spanner_project_id = {
+  dev  = "<PROJECT_ID_DEV>"
+  intg = "<PROJECT_ID_INTG>"
+  prod = "<PROJECT_ID_PROD>"
+}
+
+# ---------------------------------------------------------------------------
+# Spanner instance IDs — provisory names; instances are created by Task 3.
+# ---------------------------------------------------------------------------
+
+spanner_instance_id = {
+  dev  = "agent-memory-graph-dev"
+  intg = "agent-memory-graph-intg"
+  prod = "agent-memory-graph-prod"
+}
+
+# ---------------------------------------------------------------------------
+# Region
+# ---------------------------------------------------------------------------
+
+region = {
+  dev  = "us-east1"
+  intg = "us-east1"
+  prod = "us-east1"
+}
+
+# ---------------------------------------------------------------------------
+# Tenant identifier — fixed for the entire deployment.
+# Must be a non-empty string; used as TenantId in all Spanner tables.
+# ---------------------------------------------------------------------------
+
+company_id = "latam-airlines"
+
+# ---------------------------------------------------------------------------
+# Auth mode
+# ---------------------------------------------------------------------------
+
+auth_mode = "internal"
+
+# ---------------------------------------------------------------------------
+# Container image — updated by CI on each build (see Task 5).
+# Set to a valid image URI before running terraform apply manually.
+# Format: {region}-docker.pkg.dev/{project_id}/agent-memory-graph/api:{tag}
+# ---------------------------------------------------------------------------
+
+container_image = "us-docker.pkg.dev/<PROJECT_ID_DEV>/agent-memory-graph/api:latest"
+
+# ---------------------------------------------------------------------------
+# CI/CD service accounts — cosmos-cicd-sa must exist in each project.
+# ---------------------------------------------------------------------------
+
+cicd_sa_email = {
+  dev  = "cosmos-cicd-sa@<PROJECT_ID_DEV>.iam.gserviceaccount.com"
+  intg = "cosmos-cicd-sa@<PROJECT_ID_INTG>.iam.gserviceaccount.com"
+  prod = "cosmos-cicd-sa@<PROJECT_ID_PROD>.iam.gserviceaccount.com"
+}
+
+# ---------------------------------------------------------------------------
+# Optional: Google group for agent impersonation of the product SA
+# Set to "" to disable.
+# ---------------------------------------------------------------------------
+
+agents_group_email = ""
+
+# ---------------------------------------------------------------------------
+# Scaling (defaults from variables.tf are usually fine; override if needed)
+# ---------------------------------------------------------------------------
+
+cloud_run_min_instances = {
+  dev  = 1
+  intg = 1
+  prod = 2
+}
+
+cloud_run_max_instances = {
+  dev  = 5
+  intg = 10
+  prod = 20
+}
+
+# Notification channels for alert policies (leave empty to use Cloud Monitoring console only)
+# Create channels via: gcloud alpha monitoring channels create
+notification_channels = []
