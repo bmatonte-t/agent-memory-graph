@@ -227,41 +227,6 @@ class SpannerClient:
         """
         return validate_tenant_id(tenant_id)
 
-    @classmethod
-    def write_node(
-        cls,
-        *,
-        tenant_id: str | None,
-        node_id: str,
-        memory_tier: str,
-        label: str,
-        weight: float,
-    ) -> None:
-        """Write a MemoryNode row, enforcing composite PK guard on entry.
-
-        This is the canonical entry point for node writes. All callers must pass
-        a non-empty tenant_id to uphold the composite primary key (TenantId, NodeId).
-        Writing without a tenant_id would allow cross-tenant node collisions.
-
-        Args:
-            tenant_id: Tenant identifier — must be non-empty (composite PK guard).
-            node_id: Unique node identifier within the tenant.
-            memory_tier: Memory tier (e.g. SEMANTIC, CONTEXT).
-            label: Node label (entity type or classification).
-            weight: Initial cognitive weight.
-
-        Raises:
-            ValueError: If tenant_id is None or empty — composite PK enforcement.
-        """
-        if tenant_id is None or not tenant_id.strip():
-            msg = "tenant_id is required for all writes — composite PK enforcement"
-            raise ValueError(msg)
-        validate_tenant_id(tenant_id)
-        # The actual Spanner write is delegated to the caller's batch context;
-        # this method exists as an explicit application-layer gate for the guard.
-        # Internal callers that use raw batch/DML paths must pass validated tenant_id.
-        del node_id, memory_tier, label, weight  # consumed by caller's batch write
-
     @staticmethod
     def _validate_audit_mutation_forbidden(table_name: str, operation: str) -> None:
         """Enforce audit table immutability by rejecting mutations.

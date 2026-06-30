@@ -402,8 +402,12 @@ class MemoryAPI:
             created_at: Creation timestamp.
 
         Raises:
+            ValueError: If tenant_id is None or empty — composite PK enforcement.
             Exception: If database write fails (may be retried by caller).
         """
+        if not tenant_id or not tenant_id.strip():
+            msg = "tenant_id is required for all MemoryNode writes"
+            raise ValueError(msg)
         database = SpannerClient.get_database()
         node_sql = """
                 INSERT INTO MemoryNode (
@@ -609,8 +613,12 @@ class MemoryAPI:
             created_at: Creation timestamp.
 
         Raises:
+            ValueError: If tenant_id is None or empty — composite PK enforcement.
             Exception: If database write fails (may be retried by caller).
         """
+        if not tenant_id or not tenant_id.strip():
+            msg = "tenant_id is required for all MemoryNode writes"
+            raise ValueError(msg)
         database = SpannerClient.get_database()
         node_sql = """
                 INSERT INTO MemoryNode (

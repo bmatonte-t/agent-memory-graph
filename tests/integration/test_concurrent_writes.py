@@ -187,6 +187,69 @@ class TestConcurrentWrites:
                 assert len(results) == MIXED_TASKS
                 assert all(isinstance(r, FactResponse) for r in results)
 
+    @pytest.mark.asyncio
+    async def test_concurrent_session_action_increments_not_lost(self) -> None:
+        """100 concurrent async increments must each call execute_update exactly once.
+
+        A read-modify-write implementation would race: two concurrent callers could
+        both read the same count, both write count+1, and silently drop one increment.
+        The atomic UPDATE (SET count = count + 1) avoids the read entirely, so each
+        of N concurrent callers invokes execute_update exactly once — no SELECT, no race.
+        This test verifies that behavior under mock-concurrent asyncio.gather load.
+        """
+        num_increments = 100
+        call_count = 0
+
+        mock_db = MagicMock()
+        mock_transaction = MagicMock()
+
+        def fake_execute_update(sql: str, params: dict) -> int:
+            """Record the call and confirm no SELECT read preceded it."""
+            nonlocal call_count
+            call_count += 1
+            return 1
+
+        mock_transaction.execute_update.side_effect = fake_execute_update
+        mock_transaction.execute_sql = MagicMock(
+            side_effect=AssertionError(
+                "execute_sql (read path) must NOT be called — atomic UPDATE only"
+            )
+        )
+
+        def fake_run_in_transaction(fn: object) -> int:
+            """Execute the transaction callable with a fresh mock transaction.
+
+            Args:
+                fn: The transaction callable passed by the caller.
+
+            Returns:
+                Simulated rows-affected count.
+            """
+            return fn(mock_transaction)  # type: ignore[operator]
+
+        mock_db.run_in_transaction.side_effect = fake_run_in_transaction
+
+        with patch("src.memory.api.SpannerClient.get_database", return_value=mock_db):
+            tasks = [
+                asyncio.get_event_loop().run_in_executor(
+                    None,
+                    MemoryAPI._increment_session_action_count,
+                    "tenant_concurrent",
+                    "sess_concurrent",
+                )
+                for _ in range(num_increments)
+            ]
+            results = await asyncio.gather(*tasks)
+
+        # Every concurrent call must have invoked execute_update exactly once.
+        assert call_count == num_increments, (
+            f"Expected {num_increments} execute_update calls, got {call_count}"
+        )
+        # All calls must return 1 (rows affected).
+        assert all(r == 1 for r in results), f"Some increments returned unexpected value: {results}"
+        # execute_sql (read path) must never have been called.
+        mock_transaction.execute_sql.assert_not_called()
+
     def test_session_action_count_uses_atomic_update_not_read_modify_write(self) -> None:
         """Session action counter must use a single atomic SQL UPDATE with no prior SELECT.
 
