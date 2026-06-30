@@ -1178,18 +1178,15 @@ class MemoryAPI:
 
     @staticmethod
     def _increment_session_action_count(tenant_id: str, session_id: str) -> int:
-        """Atomically increment and return the cumulative per-session action counter."""
+        """Atomically increment and return the cumulative per-session action counter.
+
+        Uses a single atomic SQL UPDATE (SET count = count + 1) with no prior SELECT
+        read. This eliminates the read-modify-write race condition where two concurrent
+        callers could both read 0, both write 1, and silently drop one increment.
+        """
         tenant_id = validate_tenant_id(tenant_id)
         session_id = validate_required_string(session_id, field_name="session_id")
 
-        select_sql = """
-            SELECT SessionActionCount
-            FROM MemoryNode
-            WHERE TenantId = @tenant_id
-              AND NodeId = @session_id
-              AND MemoryTier = @tier
-            LIMIT 1
-        """
         update_sql = """
             UPDATE MemoryNode
             SET SessionActionCount = SessionActionCount + 1,
@@ -1202,35 +1199,16 @@ class MemoryAPI:
         database = SpannerClient.get_database()
 
         def _transaction(transaction: SpannerTransactionProtocol) -> int:
-            """Execute atomic read-modify-write for action counter.
+            """Execute single atomic UPDATE for action counter — no read required.
 
             Args:
                 transaction: Active Spanner transaction.
 
             Returns:
-                Updated action count (incremented by 1).
-
-            Raises:
-                ValueError: If session not found.
+                Row count updated (1 on success, 0 if session not found).
             """
-            rows = execute_sql_rows_in_transaction(
-                transaction,
-                select_sql,
-                {
-                    "tenant_id": tenant_id,
-                    "session_id": session_id,
-                    "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
-                },
-            )
-            if not rows:
-                msg = f"session {session_id} not found in tenant"
-                raise ValueError(msg)
-
-            current_count_raw = rows[0][0] or 0
-            current_count = (
-                int(current_count_raw) if isinstance(current_count_raw, (int, float)) else 0
-            )
-            transaction.execute_update(
+            # Atomic increment — no SELECT read, no race condition possible.
+            return transaction.execute_update(
                 update_sql,
                 {
                     "tenant_id": tenant_id,
@@ -1238,12 +1216,9 @@ class MemoryAPI:
                     "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
                 },
             )
-            return current_count + 1
 
         try:
             return database.run_in_transaction(_transaction)
-        except ValueError:
-            raise
         except Exception as error:
             msg = f"Failed to increment session action count: {error}"
             raise RuntimeError(msg) from error

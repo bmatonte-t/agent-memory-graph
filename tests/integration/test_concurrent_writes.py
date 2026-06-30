@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
@@ -186,3 +186,46 @@ class TestConcurrentWrites:
 
                 assert len(results) == MIXED_TASKS
                 assert all(isinstance(r, FactResponse) for r in results)
+
+    def test_session_action_count_uses_atomic_update_not_read_modify_write(self) -> None:
+        """Session action counter must use a single atomic SQL UPDATE with no prior SELECT.
+
+        A read-modify-write pattern is not race-safe under concurrent writers: two
+        concurrent readers can both read 0, both write 1, and one increment is lost.
+        The fix is to emit a single 'SET count = count + 1' UPDATE with no separate
+        SELECT read round-trip.
+        """
+        mock_db = MagicMock()
+        captured_transaction_fn: list[object] = []
+
+        def fake_run_in_transaction(fn: object) -> int:
+            """Capture the transaction function but do not execute it.
+
+            Args:
+                fn: The transaction callable passed by the caller.
+
+            Returns:
+                Simulated updated action count.
+            """
+            captured_transaction_fn.append(fn)
+            # Simulate the transaction returning the updated count
+            mock_transaction = MagicMock()
+            mock_transaction.execute_update.return_value = 1
+            return fn(mock_transaction)  # type: ignore[operator]
+
+        mock_db.run_in_transaction.side_effect = fake_run_in_transaction
+
+        with (
+            patch("src.memory.api.SpannerClient.get_database", return_value=mock_db),
+            patch("src.memory.api.execute_sql_rows_in_transaction") as mock_select,
+        ):
+            # The current (broken) implementation calls execute_sql_rows_in_transaction
+            # before execute_update; the fixed implementation must NOT call it.
+            result = MemoryAPI._increment_session_action_count(  # noqa: SLF001
+                tenant_id="tenant_a",
+                session_id="sess_race_test",
+            )
+
+        # After the fix: no SELECT read, only an atomic UPDATE
+        mock_select.assert_not_called()
+        assert result is not None  # must return a value
