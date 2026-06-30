@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.db.spanner_client import SpannerClient
 from src.memory.retrieval import NeighborEnricher
 
 
@@ -103,8 +104,6 @@ class TestCrossTenantIsolation:
         TenantId. Passing an empty or None tenant_id would silently corrupt the
         composite primary key (TenantId, NodeId), allowing cross-tenant collisions.
         """
-        from src.db.spanner_client import SpannerClient
-
         with pytest.raises(ValueError, match="tenant_id is required for all writes"):
             SpannerClient.write_node(
                 tenant_id="",
@@ -120,8 +119,6 @@ class TestCrossTenantIsolation:
         None is not a valid tenant_id for composite PK enforcement. The guard must
         check both None and empty string to prevent all silent corruption paths.
         """
-        from src.db.spanner_client import SpannerClient
-
         with pytest.raises(ValueError, match="tenant_id is required for all writes"):
             SpannerClient.write_node(
                 tenant_id=None,  # type: ignore[arg-type]

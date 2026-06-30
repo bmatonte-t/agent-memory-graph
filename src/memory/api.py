@@ -19,7 +19,6 @@ from src.integrations.google_sdk_wrappers import (
     SpannerDatabaseProtocol,
     SpannerTransactionProtocol,
     execute_sql_rows,
-    execute_sql_rows_in_transaction,
 )
 from src.memory.exceptions import WeightUpdateFailedError
 from src.models.schemas import (

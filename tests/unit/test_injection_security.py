@@ -139,8 +139,12 @@ class TestRequestValidationBoundary:
 
         # Arguments defaults to empty dict, so Pydantic validation passes (422 not expected).
         # With Spanner unavailable, audit write raises RuntimeError → 500.
-        # With Spanner available, service validates query is missing → 200 (MCPToolServiceError).
-        assert response.status_code in {HTTP_UNPROCESSABLE_ENTITY, HTTP_OK, HTTP_INTERNAL_SERVER_ERROR}
+        # With Spanner available, service validates query is missing → 200.
+        assert response.status_code in {
+            HTTP_UNPROCESSABLE_ENTITY,
+            HTTP_OK,
+            HTTP_INTERNAL_SERVER_ERROR,
+        }
 
     def test_null_tool_name_rejected(self) -> None:
         """Null tool_name should be rejected."""

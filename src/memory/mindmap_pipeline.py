@@ -526,9 +526,11 @@ class SpannerAggregationAdapter:
 
             # Validate required fields before casting — str(None) == "None" is silent corruption.
             if source_node_id is None:
-                raise ValueError(f"node_id cannot be None in row {idx}: {row!r}")
+                msg = f"node_id cannot be None in row {idx}: {row!r}"
+                raise ValueError(msg)
             if memory_tier is None:
-                raise ValueError(f"memory_tier cannot be None in row {idx}: {row!r}")
+                msg = f"memory_tier cannot be None in row {idx}: {row!r}"
+                raise ValueError(msg)
 
             if source_node_id not in nodes:  # type: ignore[operator]
                 nodes[str(source_node_id)] = EvidenceNode(  # type: ignore[arg-type]
