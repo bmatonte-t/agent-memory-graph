@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
+import threading
 from typing import Any, Self, cast
 
 from src.integrations.google_sdk_wrappers import (
@@ -48,6 +49,7 @@ class SpannerClient:
     _client: object | None = None
     _instance_ref: object | None = None
     _database: object | None = None
+    _lock: threading.Lock = threading.Lock()
 
     def __new__(cls) -> Self:
         """Ensure only one instance exists."""
@@ -73,15 +75,16 @@ class SpannerClient:
             SpannerClient singleton instance
         """
         instance = cls()
-        if cls._client is None:
-            from google.cloud import spanner  # type: ignore[import-untyped]  # noqa: PLC0415
+        with cls._lock:
+            if cls._client is None:
+                from google.cloud import spanner  # type: ignore[import-untyped]  # noqa: PLC0415
 
-            raw_client: Any = spanner.Client(project=project_id)
-            raw_instance: Any = raw_client.instance(instance_id)
-            raw_database: Any = raw_instance.database(database_id)
-            cls._client = raw_client
-            cls._instance_ref = raw_instance
-            cls._database = raw_database
+                raw_client: Any = spanner.Client(project=project_id)
+                raw_instance: Any = raw_client.instance(instance_id)
+                raw_database: Any = raw_instance.database(database_id)
+                cls._client = raw_client
+                cls._instance_ref = raw_instance
+                cls._database = raw_database
         return instance
 
     @classmethod
