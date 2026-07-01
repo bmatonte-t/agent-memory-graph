@@ -161,3 +161,42 @@ resource "google_monitoring_alert_policy" "high_latency" {
 
   severity = local.environment == "prod" ? "ERROR" : "WARNING"
 }
+
+resource "google_monitoring_alert_policy" "high_authorization_denial_rate" {
+  display_name          = "Agent Memory Graph — High Authorization Denial Rate (${local.environment})"
+  project               = local.project_id
+  combiner              = "OR"
+  notification_channels = var.notification_channels
+
+  conditions {
+    display_name = "Authorization denial rate > 10/min"
+
+    condition_threshold {
+      filter          = "metric.type=\"custom.googleapis.com/authorization.denied\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 10
+      duration        = "60s"
+
+      aggregations {
+        alignment_period     = "60s"
+        per_series_aligner   = "ALIGN_RATE"
+        cross_series_reducer = "REDUCE_SUM"
+      }
+
+      trigger {
+        count = 1
+      }
+    }
+  }
+
+  alert_strategy {
+    auto_close = "1800s"
+  }
+
+  documentation {
+    content   = "Authorization denial rate exceeded 10 denials/min. This may indicate a misconfigured agent scope or an attempted privilege escalation. Check Cloud Run logs for AUTHZ_DENY events."
+    mime_type = "text/markdown"
+  }
+
+  severity = local.environment == "prod" ? "ERROR" : "WARNING"
+}
