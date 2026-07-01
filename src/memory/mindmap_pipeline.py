@@ -23,7 +23,7 @@ from src.models.confidence import (
     ContradictionWarning,
     SynthesisConfidenceSignal,
 )
-from src.models.evidence import EvidenceContext, EvidenceSummary
+from src.models.evidence import ContradictionFlag, EvidenceContext, EvidenceSummary
 from src.models.mindmap import (
     AggregationResult,
     EvidenceEdge,
@@ -1090,12 +1090,14 @@ class MindMapPipeline:
 
         for item in evidence_context.items:
             for flag_str in item.contradiction_flags:
-                if ":" in flag_str:
-                    severity, node_id = flag_str.split(":", 1)
-                    if severity in contradictions_by_severity:
-                        contradictions_by_severity[severity].add(node_id)
-                else:
-                    contradictions_by_severity["medium"].add(flag_str)
+                try:
+                    flag = ContradictionFlag.from_string(flag_str)
+                except ValueError:
+                    logger.warning(
+                        "Skipping malformed contradiction flag", extra={"flag": flag_str}
+                    )
+                    continue
+                contradictions_by_severity[flag.severity.lower()].add(flag.node_id)
 
         warnings: list[ContradictionWarning] = []
         for severity in ["high", "medium", "low"]:

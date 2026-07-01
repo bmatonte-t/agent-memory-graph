@@ -16,7 +16,13 @@ from src.memory.mindmap_pipeline import (
     SpannerAggregationAdapter,
     VertexMiningAdapter,
 )
-from src.models.evidence import EvidenceContext, EvidenceItem, EvidenceSourceType
+from src.models.evidence import (
+    ContradictionFlag,
+    ContradictionSeverity,
+    EvidenceContext,
+    EvidenceItem,
+    EvidenceSourceType,
+)
 from src.models.mindmap import (
     AggregationResult,
     EvidenceEdge,
@@ -572,3 +578,46 @@ class TestMindMapPipeline:
         assert result.claim_fact_ids == []
         assert result.confidence_signal is not None
         assert result.confidence_signal.gating_applied == "hard_reject"
+
+
+class TestContradictionFlag:
+    """Tests for the ContradictionFlag dataclass and parsing."""
+
+    def test_contradiction_flag_from_string_valid(self) -> None:
+        """Standard format parses correctly into severity and node_id."""
+        flag = ContradictionFlag.from_string("HIGH:node-123")
+        assert flag.severity == ContradictionSeverity.HIGH
+        assert flag.node_id == "node-123"
+
+    def test_contradiction_flag_from_string_node_id_with_colon(self) -> None:
+        """node_id containing ':' is captured fully in second split part."""
+        flag = ContradictionFlag.from_string("LOW:node:with:colons")
+        assert flag.severity == ContradictionSeverity.LOW
+        assert flag.node_id == "node:with:colons"
+
+    def test_contradiction_flag_from_string_invalid_severity(self) -> None:
+        """Invalid severity raises ValueError with a descriptive message."""
+        with pytest.raises(ValueError):
+            ContradictionFlag.from_string("CRITICAL:node-123")
+
+    def test_contradiction_flag_from_string_missing_separator(self) -> None:
+        """Missing ':' separator raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid contradiction flag format"):
+            ContradictionFlag.from_string("HIGH-node-123")
+
+    def test_contradiction_flag_from_string_empty_node_id(self) -> None:
+        """Empty node_id after ':' raises ValueError."""
+        with pytest.raises(ValueError, match="node_id cannot be empty"):
+            ContradictionFlag.from_string("HIGH:")
+
+    def test_contradiction_flag_case_insensitive_severity(self) -> None:
+        """Severity is uppercased before enum lookup, so lowercase input also works."""
+        flag = ContradictionFlag.from_string("medium:node-456")
+        assert flag.severity == ContradictionSeverity.MEDIUM
+        assert flag.node_id == "node-456"
+
+    def test_contradiction_flag_is_frozen(self) -> None:
+        """ContradictionFlag is immutable (frozen dataclass)."""
+        flag = ContradictionFlag.from_string("LOW:node-789")
+        with pytest.raises(Exception):  # FrozenInstanceError
+            flag.node_id = "other"  # type: ignore[misc]

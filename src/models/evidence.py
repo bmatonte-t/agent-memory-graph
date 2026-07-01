@@ -10,6 +10,7 @@ synthesis pipeline and link to ENGRAM_EVIDENCE nodes.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime  # noqa: TC003
 from enum import StrEnum
 from typing import Any
@@ -56,6 +57,48 @@ class EvidenceInsufficientReason(StrEnum):
 
     UNKNOWN = "unknown"
     """Insufficient evidence reason not determined."""
+
+
+class ContradictionSeverity(StrEnum):
+    """Severity level for a contradiction flag on an evidence item."""
+
+    LOW = "LOW"
+    MEDIUM = "MEDIUM"
+    HIGH = "HIGH"
+
+
+@dataclass(frozen=True)
+class ContradictionFlag:
+    """Typed representation of a contradiction flag attached to an evidence item.
+
+    Replaces the fragile ``"SEVERITY:node_id"`` string format with a validated
+    dataclass that handles node IDs containing colons.
+    """
+
+    severity: ContradictionSeverity
+    node_id: str
+
+    @classmethod
+    def from_string(cls, flag_str: str) -> "ContradictionFlag":
+        """Parse legacy ``'SEVERITY:node_id'`` format with validation.
+
+        Args:
+            flag_str: Raw contradiction flag string (e.g. ``"HIGH:node-123"``).
+
+        Returns:
+            Parsed :class:`ContradictionFlag` instance.
+
+        Raises:
+            ValueError: If the format is invalid, severity is unknown, or
+                node_id is empty.
+        """
+        parts = flag_str.split(":", 1)
+        if len(parts) != 2:
+            raise ValueError(f"Invalid contradiction flag format: {flag_str!r}")
+        severity_str, node_id = parts
+        if not node_id:
+            raise ValueError(f"node_id cannot be empty in contradiction flag: {flag_str!r}")
+        return cls(severity=ContradictionSeverity(severity_str.upper()), node_id=node_id)
 
 
 class EvidenceItem(BaseModel):
