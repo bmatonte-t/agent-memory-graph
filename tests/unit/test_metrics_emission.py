@@ -27,11 +27,14 @@ from src.models.mcp import (
 from src.models.schemas import AuditResponse
 from src.observability.metrics import (
     configure_metrics,
+    emit_counter,
     mcp_tool_error_counter,
     mcp_tool_invocation_counter,
     orchestrator_request_counter,
     pipeline_execution_histogram,
     pipeline_fact_counter,
+    record_authorization_denial,
+    record_high_severity_contradiction,
 )
 
 
@@ -86,6 +89,18 @@ class TestMetricInstruments:
         """configure_metrics with no args should complete without error."""
         provider = configure_metrics()
         assert provider is not None
+
+    def test_emit_counter_increments_without_error(self) -> None:
+        """emit_counter should create a counter and increment it by 1 without raising."""
+        emit_counter("test.counter", labels={"key": "value"})
+
+    def test_record_authorization_denial_emits_without_error(self) -> None:
+        """record_authorization_denial should emit the authorization.denied counter once."""
+        record_authorization_denial("tenant_abc", "Session")
+
+    def test_record_high_severity_contradiction_emits_without_error(self) -> None:
+        """record_high_severity_contradiction should emit the memory.contradiction.high counter."""
+        record_high_severity_contradiction("tenant_abc", "node_xyz")
 
 
 class TestOrchestratorMetricsEmission:
