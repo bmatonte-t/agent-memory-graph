@@ -597,7 +597,7 @@ class TestContradictionFlag:
 
     def test_contradiction_flag_from_string_invalid_severity(self) -> None:
         """Invalid severity raises ValueError with a descriptive message."""
-        with pytest.raises(ValueError, match="CRITICAL"):
+        with pytest.raises(ValueError, match="critical"):
             ContradictionFlag.from_string("CRITICAL:node-123")
 
     def test_contradiction_flag_from_string_missing_separator(self) -> None:

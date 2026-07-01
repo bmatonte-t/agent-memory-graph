@@ -1097,7 +1097,7 @@ class MindMapPipeline:
                         "Skipping malformed contradiction flag", extra={"flag": flag_str}
                     )
                     continue
-                contradictions_by_severity[flag.severity.lower()].add(flag.node_id)
+                contradictions_by_severity[flag.severity].add(flag.node_id)
 
         warnings: list[ContradictionWarning] = []
         for severity in ["high", "medium", "low"]:

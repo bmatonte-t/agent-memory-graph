@@ -17,9 +17,15 @@ class TestTemporalDecay:
 
     @pytest.mark.asyncio
     async def test_decay_weights_temporal_success(self) -> None:
-        """Test successful temporal decay execution."""
+        """Test successful temporal decay execution returns the pre-DML COUNT."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
+            # Snapshot returns a row indicating N nodes will be affected
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = iter([[EXPECTED_DECAY_AFFECTED_COUNT]])
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
+            # Batch context manager for the DML UPDATE
             mock_batch = MagicMock()
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
@@ -28,7 +34,7 @@ class TestTemporalDecay:
 
             result = await CognitiveWeighting.decay_weights_temporal()
 
-            assert result == 0
+            assert result == EXPECTED_DECAY_AFFECTED_COUNT
             mock_batch.execute_update.assert_called_once()
 
     @pytest.mark.asyncio

@@ -17,6 +17,8 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from src.models.confidence import ContradictionSeverity
+
 
 class EvidenceSourceType(StrEnum):
     """Classification of evidence retrieval strategy."""
@@ -59,14 +61,6 @@ class EvidenceInsufficientReason(StrEnum):
     """Insufficient evidence reason not determined."""
 
 
-class ContradictionSeverity(StrEnum):
-    """Severity level for a contradiction flag on an evidence item."""
-
-    LOW = "LOW"
-    MEDIUM = "MEDIUM"
-    HIGH = "HIGH"
-
-
 @dataclass(frozen=True)
 class ContradictionFlag:
     """Typed representation of a contradiction flag attached to an evidence item.
@@ -100,7 +94,7 @@ class ContradictionFlag:
         if not node_id:
             msg = f"node_id cannot be empty in contradiction flag: {flag_str!r}"
             raise ValueError(msg)
-        return cls(severity=ContradictionSeverity(severity_str.upper()), node_id=node_id)
+        return cls(severity=ContradictionSeverity(severity_str.lower()), node_id=node_id)
 
 
 class EvidenceItem(BaseModel):
