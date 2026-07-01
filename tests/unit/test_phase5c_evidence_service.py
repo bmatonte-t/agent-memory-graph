@@ -550,3 +550,41 @@ class TestOperationalEvidenceQueries:
             pytest.raises(RuntimeError, match="get_evidence_context_for_tenant failed"),
         ):
             await service.get_evidence_context_for_tenant("tenant_a")
+
+
+class TestFreshnessScoreValidation:
+    """Validate that FreshnessScore enforces decay_lambda bounds."""
+
+    def test_freshness_score_rejects_decay_lambda_above_one(self) -> None:
+        """decay_lambda > 1.0 must raise ValidationError."""
+        from pydantic import ValidationError
+
+        from src.models.confidence import FreshnessScore
+
+        with pytest.raises(ValidationError):
+            FreshnessScore(decay_lambda=5.0, hours_old=10, current_score=0.5)
+
+    def test_freshness_score_rejects_decay_lambda_below_minimum(self) -> None:
+        """decay_lambda < 0.01 must raise ValidationError."""
+        from pydantic import ValidationError
+
+        from src.models.confidence import FreshnessScore
+
+        with pytest.raises(ValidationError):
+            FreshnessScore(decay_lambda=0.0, hours_old=10, current_score=0.5)
+
+    def test_freshness_score_accepts_valid_decay_lambda(self) -> None:
+        """decay_lambda within [0.01, 1.0] must not raise."""
+        from src.models.confidence import FreshnessScore
+
+        score = FreshnessScore(decay_lambda=0.1, hours_old=7.0, current_score=0.5)
+        assert score.decay_lambda == 0.1
+
+    def test_freshness_score_accepts_boundary_values(self) -> None:
+        """Boundary values 0.01 and 1.0 must both be accepted."""
+        from src.models.confidence import FreshnessScore
+
+        low = FreshnessScore(decay_lambda=0.01, hours_old=0.0, current_score=1.0)
+        high = FreshnessScore(decay_lambda=1.0, hours_old=0.0, current_score=1.0)
+        assert low.decay_lambda == 0.01
+        assert high.decay_lambda == 1.0

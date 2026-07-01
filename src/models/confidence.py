@@ -92,8 +92,11 @@ class FreshnessScore(BaseModel):
     """
 
     hours_old: float = Field(..., ge=0.0, description="Time elapsed since last access (hours).")
-    decay_factor: float = Field(
-        ..., ge=0.0, le=1.0, description="Decay parameter (λ); default 0.1."
+    decay_lambda: float = Field(
+        ...,
+        ge=0.01,
+        le=1.0,
+        description="Decay rate (λ); must be in [0.01, 1.0]. Default 0.1.",
     )
     current_score: float = Field(
         ..., ge=0.0, le=1.0, description="Computed freshness score (0.0-1.0)."
@@ -109,7 +112,7 @@ class FreshnessScore(BaseModel):
 
         Args:
             access_timestamp: Timestamp when evidence was last accessed.
-            decay_lambda: Decay rate (default 0.1). Higher = faster decay.
+            decay_lambda: Decay rate in [0.01, 1.0] (default 0.1). Higher = faster decay.
 
         Returns:
             FreshnessScore with computed score and gating decision.
@@ -123,7 +126,7 @@ class FreshnessScore(BaseModel):
         current_score = math.exp(-decay_lambda * hours_old)
 
         return FreshnessScore(
-            hours_old=hours_old, decay_factor=decay_lambda, current_score=current_score
+            hours_old=hours_old, decay_lambda=decay_lambda, current_score=current_score
         )
 
 
