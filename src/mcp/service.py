@@ -113,24 +113,22 @@ class MCPToolService:
                     error_msg = f"authorization denied: {auth_decision.reason_code}"
                     raise PermissionError(error_msg)  # noqa: TRY301
 
-                # Audit log: authorization granted
-                try:
-                    await MemoryAPI.record_audit_event(
-                        tenant_id=request.tenant_id,
-                        event_type="MCP_AUTHORIZATION_GRANTED",
-                        source_node_id=request.authorization_scope.agent_id
-                        if request.authorization_scope
-                        else "unknown",
-                        context={
-                            "tool_name": str(request.tool_name),
-                            "reason_code": auth_decision.reason_code,
-                            "details": auth_decision.details or "",
-                            "session_id": request.session_id or "",
-                            "request_id": request.request_id or "",
-                        },
-                    )
-                except Exception as e:  # noqa: BLE001
-                    logger.warning("Failed to audit MCP_AUTHORIZATION_GRANTED: %s", e)
+                # Audit log: authorization granted — must not be silently swallowed;
+                # a write failure here indicates a security-critical storage problem.
+                await MemoryAPI.record_audit_event(
+                    tenant_id=request.tenant_id,
+                    event_type="MCP_AUTHORIZATION_GRANTED",
+                    source_node_id=request.authorization_scope.agent_id
+                    if request.authorization_scope
+                    else "unknown",
+                    context={
+                        "tool_name": str(request.tool_name),
+                        "reason_code": auth_decision.reason_code,
+                        "details": auth_decision.details or "",
+                        "session_id": request.session_id or "",
+                        "request_id": request.request_id or "",
+                    },
+                )
 
                 if request.tool_name == MCPToolName.MEMORY_SEARCH:
                     result = await self._memory_search(request)

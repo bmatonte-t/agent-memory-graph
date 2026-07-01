@@ -270,12 +270,16 @@ class TestMemoryAPI:
             )
 
     async def test_increment_session_action_count_returns_next_value(self) -> None:
-        """Session action counts should be persisted and incremented transactionally."""
+        """Session action count uses a single atomic UPDATE with no prior SELECT.
+
+        The implementation must not perform a read-modify-write (which is racy).
+        It must use a single atomic 'SET count = count + 1' UPDATE and return
+        the rows-affected count from the transaction.
+        """
         with patch("src.memory.api.SpannerClient") as mock_client:
             mock_db = MagicMock()
             mock_transaction = MagicMock()
-            mock_transaction.execute_sql.return_value = [(2,)]
-            mock_db.run_in_transaction.return_value = 3
+            mock_transaction.execute_update.return_value = 1  # rows affected
             mock_client.get_database.return_value = mock_db
             mock_client.validate_tenant_id.return_value = "tenant_a"
 
@@ -284,11 +288,12 @@ class TestMemoryAPI:
 
             mock_db.run_in_transaction.side_effect = _run_in_transaction
 
-            next_count = MemoryAPI._increment_session_action_count("tenant_a", "session_123")
+            result = MemoryAPI._increment_session_action_count("tenant_a", "session_123")
 
-        expected_next_count = 3
-        assert next_count == expected_next_count
+        # Atomic path: only execute_update called, no execute_sql read
         mock_transaction.execute_update.assert_called_once()
+        assert "execute_sql_rows_in_transaction" not in str(mock_transaction.mock_calls)
+        assert result == 1  # rows affected by the atomic UPDATE
 
     async def test_update_weight_skips_below_threshold_when_enabled(
         self,

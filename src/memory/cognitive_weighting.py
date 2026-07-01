@@ -26,7 +26,9 @@ class CognitiveWeighting:
             decay_rate: Decay rate per hour (default: 0.05 from SchemaConfig)
 
         Returns:
-            Number of nodes updated
+            Number of nodes updated. Note: the COUNT query and the DML UPDATE run
+            in separate Spanner operations (not atomic), so the returned count may
+            be slightly stale under concurrent writes.
 
         Raises:
             ValueError: If decay_rate is invalid
@@ -38,7 +40,12 @@ class CognitiveWeighting:
 
         # GQL/SQL to calculate hours since last access and apply decay
         # Only applies to SEMANTIC and CONTEXT tiers (AUDIT is immutable)
-        sql = """
+        count_sql = """
+            SELECT COUNT(*) FROM MemoryNode
+            WHERE MemoryTier IN (@tier_semantic, @tier_context)
+              AND LastAccessed < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)
+        """
+        update_sql = """
             UPDATE MemoryNode
             SET LogOddsWeight = LogOddsWeight * EXP(-@decay_rate *
                 CAST(TIMESTAMP_DIFF(CURRENT_TIMESTAMP(), LastAccessed, HOUR) AS FLOAT64)),
@@ -46,16 +53,23 @@ class CognitiveWeighting:
             WHERE MemoryTier IN (@tier_semantic, @tier_context)
               AND LastAccessed < TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 1 HOUR)
         """
+        tier_params = {
+            "tier_semantic": SchemaConfig.MEMORY_TIER_SEMANTIC,
+            "tier_context": SchemaConfig.MEMORY_TIER_CONTEXT,
+        }
 
         try:
             database = SpannerClient.get_database()  # type: ignore[return-value]
+            # Query affected count before DML (Spanner batch DML doesn't return rowcount)
+            count_rows = execute_sql_rows(database, count_sql, tier_params)
+            raw_count = count_rows[0][0] if count_rows else 0
+            affected_count = int(raw_count) if isinstance(raw_count, (int, float)) else 0
             execute_dml(
                 database,
-                sql,
+                update_sql,
                 {
+                    **tier_params,
                     "decay_rate": decay_rate,
-                    "tier_semantic": SchemaConfig.MEMORY_TIER_SEMANTIC,
-                    "tier_context": SchemaConfig.MEMORY_TIER_CONTEXT,
                 },
             )
         except Exception as e:
@@ -63,7 +77,7 @@ class CognitiveWeighting:
             raise RuntimeError(msg) from e
         else:
             logger.info(f"Applied temporal decay with rate={decay_rate}")
-            return 0  # Spanner batch doesn't return row count, return 0
+            return affected_count
 
     @staticmethod
     async def prune_weights_below_threshold(

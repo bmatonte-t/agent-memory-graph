@@ -9,6 +9,7 @@ from src.memory.cognitive_weighting import CloudSchedulerJob, CognitiveWeighting
 EXPECTED_CONTEXT_COUNT = 10
 EXPECTED_CONTEXT_MEAN_WEIGHT = 0.55
 EXPECTED_SEMANTIC_COUNT = 50
+EXPECTED_DECAY_AFFECTED_COUNT = 7
 
 
 class TestTemporalDecay:
@@ -16,9 +17,15 @@ class TestTemporalDecay:
 
     @pytest.mark.asyncio
     async def test_decay_weights_temporal_success(self) -> None:
-        """Test successful temporal decay execution."""
+        """Test successful temporal decay execution returns the pre-DML COUNT."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
+            # Snapshot returns a row indicating N nodes will be affected
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = iter([[EXPECTED_DECAY_AFFECTED_COUNT]])
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
+            # Batch context manager for the DML UPDATE
             mock_batch = MagicMock()
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
@@ -27,14 +34,20 @@ class TestTemporalDecay:
 
             result = await CognitiveWeighting.decay_weights_temporal()
 
-            assert result == 0
+            assert result == EXPECTED_DECAY_AFFECTED_COUNT
             mock_batch.execute_update.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_decay_weights_with_custom_rate(self) -> None:
         """Test decay with custom decay rate."""
+        expected_count = 3
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
+            # Snapshot returns a row indicating N nodes will be affected
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = iter([[expected_count]])
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             mock_batch = MagicMock()
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
@@ -42,12 +55,13 @@ class TestTemporalDecay:
             mock_client.get_database.return_value = mock_db
 
             custom_rate = 0.10
-            await CognitiveWeighting.decay_weights_temporal(decay_rate=custom_rate)
+            result = await CognitiveWeighting.decay_weights_temporal(decay_rate=custom_rate)
 
             # Verify custom rate was passed
             call_args = mock_batch.execute_update.call_args
             params = call_args[0][1]
             assert params["decay_rate"] == custom_rate
+            assert result == expected_count
 
     @pytest.mark.asyncio
     async def test_decay_weights_invalid_rate_too_low(self) -> None:
@@ -66,6 +80,10 @@ class TestTemporalDecay:
         """Test decay with zero rate (no decay)."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = iter([[0]])
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             mock_batch = MagicMock()
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
@@ -74,6 +92,48 @@ class TestTemporalDecay:
 
             await CognitiveWeighting.decay_weights_temporal(decay_rate=0.0)
             mock_batch.execute_update.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_decay_weights_temporal_returns_actual_affected_count(self) -> None:
+        """Returns count of affected nodes, not hardcoded 0, via pre-DML COUNT query."""
+        with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
+            mock_db = MagicMock()
+            # Snapshot returns EXPECTED_DECAY_AFFECTED_COUNT rows
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = iter([[EXPECTED_DECAY_AFFECTED_COUNT]])
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
+            # Batch for DML
+            mock_batch = MagicMock()
+            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
+            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+
+            mock_client.get_database.return_value = mock_db
+
+            count = await CognitiveWeighting.decay_weights_temporal()
+
+            assert count == EXPECTED_DECAY_AFFECTED_COUNT, (
+                f"Expected {EXPECTED_DECAY_AFFECTED_COUNT} affected nodes, got {count}"
+            )
+
+    @pytest.mark.asyncio
+    async def test_decay_weights_temporal_returns_zero_when_no_nodes_match(self) -> None:
+        """Returns 0 when no nodes qualify for temporal decay."""
+        with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
+            mock_db = MagicMock()
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = iter([[0]])
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
+            mock_batch = MagicMock()
+            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
+            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+
+            mock_client.get_database.return_value = mock_db
+
+            count = await CognitiveWeighting.decay_weights_temporal()
+
+            assert count == 0
 
 
 class TestWeightPruning:

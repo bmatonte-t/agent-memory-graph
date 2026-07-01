@@ -23,7 +23,7 @@ from src.models.confidence import (
     ContradictionWarning,
     SynthesisConfidenceSignal,
 )
-from src.models.evidence import EvidenceContext, EvidenceSummary
+from src.models.evidence import ContradictionFlag, EvidenceContext, EvidenceSummary
 from src.models.mindmap import (
     AggregationResult,
     EvidenceEdge,
@@ -524,11 +524,22 @@ class SpannerAggregationAdapter:
                 edge_weight,
             ) = row  # type: ignore[misc]
 
+            # Validate required fields before casting — str(None) == "None" is silent corruption.
+            if source_node_id is None:
+                msg = f"node_id cannot be None in row {idx}: {row!r}"
+                raise ValueError(msg)
+            if destination_node_id is None:
+                msg = f"destination_node_id cannot be None in row {idx}: {row!r}"
+                raise ValueError(msg)
+            if memory_tier is None:
+                msg = f"memory_tier cannot be None in row {idx}: {row!r}"
+                raise ValueError(msg)
+
             if source_node_id not in nodes:  # type: ignore[operator]
                 nodes[str(source_node_id)] = EvidenceNode(  # type: ignore[arg-type]
                     node_id=str(source_node_id),  # type: ignore[arg-type]
                     memory_tier=str(memory_tier),  # type: ignore[arg-type]
-                    label=str(label),  # type: ignore[arg-type]
+                    label=str(label) if label is not None else "",  # type: ignore[arg-type]
                     weight=float(source_weight) if source_weight else 0.0,  # type: ignore[arg-type]
                 )
 
@@ -1079,12 +1090,14 @@ class MindMapPipeline:
 
         for item in evidence_context.items:
             for flag_str in item.contradiction_flags:
-                if ":" in flag_str:
-                    severity, node_id = flag_str.split(":", 1)
-                    if severity in contradictions_by_severity:
-                        contradictions_by_severity[severity].add(node_id)
-                else:
-                    contradictions_by_severity["medium"].add(flag_str)
+                try:
+                    flag = ContradictionFlag.from_string(flag_str)
+                except ValueError:
+                    logger.warning(
+                        "Skipping malformed contradiction flag", extra={"flag": flag_str}
+                    )
+                    continue
+                contradictions_by_severity[flag.severity].add(flag.node_id)
 
         warnings: list[ContradictionWarning] = []
         for severity in ["high", "medium", "low"]:

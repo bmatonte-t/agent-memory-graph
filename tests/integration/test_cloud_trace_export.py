@@ -156,9 +156,23 @@ class TestMCPServiceTracing:
         )
         service = MCPToolService(mindmap_pipeline=fake_pipeline)
 
+        # Stub audit event write — now propagates (Bug A fix), must be stubbed in unit tests.
+        async def fake_record_audit_event(**_: object) -> AuditResponse:
+            return AuditResponse(
+                tenant_id="tenant_mcp",
+                event_id="audit_stub",
+                event_type="MCP_AUTHORIZATION_GRANTED",
+                timestamp=datetime.now(UTC),
+            )
+
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI.record_audit_event",
+            fake_record_audit_event,
+        )
+
         # Mock the session action counter to avoid SpannerClient initialization
         monkeypatch.setattr(
-            "src.memory.api.MemoryAPI._increment_session_action_count",
+            "src.mcp.service.MemoryAPI._increment_session_action_count",
             lambda *_: None,
         )
 

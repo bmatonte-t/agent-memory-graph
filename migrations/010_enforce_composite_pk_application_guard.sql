@@ -1,0 +1,36 @@
+-- Migration 010: Enforce Composite PK via Application-Layer Guard
+-- Purpose: Document and anchor the application-layer enforcement of the composite
+--          primary key (TenantId, NodeId) on MemoryNode writes.
+-- Design: No DDL is needed in this migration because the composite PK
+--          (TenantId, NodeId) already exists from the initial schema
+--          (migration 001_memory_node_table.sql). Spanner enforces this at
+--          write time automatically. This migration file exists to:
+--            1. Explicitly record where the application-layer guard lives.
+--            2. Serve as a searchable anchor for audit and compliance purposes.
+--            3. Satisfy the migration sequencing contract for Phase 4 readiness.
+
+-- APPLICATION-LAYER ENFORCEMENT
+-- The composite PK guard is enforced in two methods of MemoryAPI:
+--
+--   src/memory/api.py  MemoryAPI._do_add_semantic_fact_batch
+--     Guard (line ~619):
+--       if not tenant_id or not tenant_id.strip():
+--           raise ValueError("tenant_id is required for all MemoryNode writes")
+--
+--   src/memory/api.py  MemoryAPI._do_create_session_batch
+--     Guard (line ~408):
+--       if not tenant_id or not tenant_id.strip():
+--           raise ValueError("tenant_id is required for all MemoryNode writes")
+--
+-- WHY NO DDL IS NEEDED
+-- The composite PK (TenantId, NodeId) is already defined in the CREATE TABLE
+-- statement from migration 001. Spanner's DDL does not support IF NOT EXISTS on
+-- PRIMARY KEY clauses or re-adding an existing PK. Any attempt to re-define the
+-- PK would be rejected by Spanner. The application-layer guard provides defence-
+-- in-depth: it catches empty/null tenant_id values *before* they reach Spanner,
+-- preventing silent composite-key corruption that would otherwise produce rows with
+-- TenantId = '' which, while not a PK violation, would break tenant isolation.
+
+-- No DDL statements are emitted by this migration.
+-- Spanner schema state is unchanged. Application behaviour is governed by the
+-- application-layer guards documented above.
