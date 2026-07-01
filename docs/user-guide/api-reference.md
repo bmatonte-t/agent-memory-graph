@@ -12,6 +12,12 @@ All requests accept and return `application/json`. Error responses use a stable 
 
 Liveness and readiness probe. Returns `200 OK` once the Spanner database is initialized and reachable.
 
+**Example:**
+
+```bash
+curl http://localhost:8000/health
+```
+
 **Response:**
 
 ```json
@@ -36,6 +42,29 @@ Invoke one MCP tool. This is the primary interface for AI agents.
 
 See [MCP Tools](mcp-tools.md) for full documentation of each tool, request envelopes, and response contracts.
 
+**Example:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/mcp/invoke \
+  -H "Content-Type: application/json" \
+  -d '{
+    "tenant_id": "acme",
+    "tool_name": "memory_search",
+    "arguments": {
+      "query": "Who owns the payments dataset?",
+      "session_id": "session_abc123"
+    },
+    "agent_id": "agent_xyz",
+    "request_id": "req_001",
+    "authorization_scope": {
+      "agent_id": "agent_xyz",
+      "allowed_labels": ["PERSON", "DATASET"],
+      "allowed_memory_tiers": ["SEMANTIC"],
+      "allowed_relationship_types": ["DATA_OWNER_OF"]
+    }
+  }'
+```
+
 **Request body:** `MCPInvokeRequest`
 **Response body:** `MCPInvokeResponse`
 
@@ -54,6 +83,14 @@ See [MCP Tools](mcp-tools.md) for full documentation of each tool, request envel
 ### `POST /api/v1/mindmap/execute`
 
 Execute the MindMap reasoning pipeline directly. For orchestrators that want to call the pipeline without going through MCP authorization.
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/mindmap/execute \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Who approved the merger?", "session_id": "session_abc123"}'
+```
 
 **Request body:**
 
@@ -105,6 +142,25 @@ Execute the MindMap reasoning pipeline directly. For orchestrators that want to 
 ### `POST /api/v1/agent/respond`
 
 Execute one full agent cycle: receives a prompt, runs tool calls through the MCP service, and returns a synthesized response. Supports three execution modes.
+
+**Example:**
+
+```bash
+curl -X POST http://localhost:8000/api/v1/agent/respond \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Who owns the revenue dataset and what is their email?",
+    "session_id": "session_abc123",
+    "tenant_id": "acme",
+    "mode": "SINGLE",
+    "authorization_scope": {
+      "agent_id": "agent_xyz",
+      "allowed_labels": ["PERSON", "DATASET"],
+      "allowed_memory_tiers": ["SEMANTIC"],
+      "allowed_relationship_types": ["DATA_OWNER_OF"]
+    }
+  }'
+```
 
 **Request body:**
 
@@ -167,16 +223,24 @@ These endpoints are not exposed to agents. They are called by Cloud Scheduler jo
 
 Apply temporal decay to all node and edge weights in the tenant graph. Intended to run on a daily schedule.
 
-**Request body:** empty `{}`
+**Example:**
+
+```bash
+curl -X POST http://localhost:8000/internal/decay-weights \
+  -H "Content-Type: application/json" \
+  -d '{"decay_rate": 0.05}'
+```
+
+**Request body:** empty `{}` (or pass `decay_rate` float 0.0–1.0, default `0.05`)
 
 **Response:**
 
 ```json
 {
-  "nodes_updated": 1842,
-  "edges_updated": 3104,
-  "tenant_id": "latam-airlines",
-  "duration_ms": 2341
+  "status": "ok",
+  "operation": "decay_weights",
+  "decay_rate": 0.05,
+  "updated_nodes": 1842
 }
 ```
 
@@ -184,15 +248,24 @@ Apply temporal decay to all node and edge weights in the tenant graph. Intended 
 
 Remove nodes whose `LogOddsWeight` has fallen below the configured pruning threshold. Only SEMANTIC nodes without active edges are removed.
 
-**Request body:** empty `{}`
+**Example:**
+
+```bash
+curl -X POST http://localhost:8000/internal/prune-weights \
+  -H "Content-Type: application/json" \
+  -d '{"threshold": 0.30}'
+```
+
+**Request body:** empty `{}` (or pass `threshold` float 0.0–1.0, default `0.30`)
 
 **Response:**
 
 ```json
 {
-  "nodes_pruned": 47,
-  "tenant_id": "latam-airlines",
-  "duration_ms": 892
+  "status": "ok",
+  "operation": "prune_weights",
+  "threshold": 0.3,
+  "updated_nodes": 47
 }
 ```
 
