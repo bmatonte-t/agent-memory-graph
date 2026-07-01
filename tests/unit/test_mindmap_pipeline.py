@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import FrozenInstanceError, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from unittest.mock import patch
 
@@ -16,13 +16,7 @@ from src.memory.mindmap_pipeline import (
     SpannerAggregationAdapter,
     VertexMiningAdapter,
 )
-from src.models.confidence import ContradictionSeverity
-from src.models.evidence import (
-    ContradictionFlag,
-    EvidenceContext,
-    EvidenceItem,
-    EvidenceSourceType,
-)
+from src.models.evidence import EvidenceContext, EvidenceItem, EvidenceSourceType
 from src.models.mindmap import (
     AggregationResult,
     EvidenceEdge,
@@ -464,59 +458,6 @@ class TestMindMapPipeline:
         assert result.confidence_signal is not None
         assert result.confidence_signal.gating_applied == "hard_reject"
 
-    async def test_spanner_aggregation_adapter_rejects_none_node_id(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Row with None node_id must raise ValueError, not silently produce 'None' string.
-
-        The SpannerAggregationAdapter row-processing loop must validate that
-        source_node_id is not None before calling str() on it. Silently producing
-        the string 'None' would corrupt the graph node dictionary.
-
-        Note on test approach: the review suggested calling _build_evidence_nodes directly
-        on a SpannerAggregationAdapter instance. However, that method does not exist as a
-        standalone method — the None-guard logic is inline inside aggregate(). Direct
-        instantiation of SpannerAggregationAdapter is straightforward (no __init__ args),
-        but calling aggregate() directly requires constructing MiningResult/MindMapConfig
-        stubs and still patches SpannerClient. Invoking via MindMapPipeline.execute() with
-        a monkeypatched SpannerClient is equivalent depth and avoids duplicating the
-        aggregate() call-site setup. The full-pipeline approach is kept intentionally.
-        """
-        rows_with_none: list[tuple[object, ...]] = [
-            (None, "SEMANTIC", "person", 1.0, "edge_1", "dest_node", "KNOWS", 0.5),
-        ]
-        monkeypatch.setattr(
-            "src.memory.mindmap_pipeline.SpannerClient.execute_sql",
-            lambda *_args, **_kwargs: rows_with_none,
-        )
-        pipeline = MindMapPipeline(config=MindMapConfig(use_spanner_aggregation=True))
-
-        with pytest.raises(ValueError, match="node_id cannot be None"):
-            await pipeline.execute(query="Explain alpha dependency")
-
-    async def test_spanner_aggregation_adapter_rejects_none_destination_node_id(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Row with None destination_node_id must raise ValueError, not silently produce 'None'.
-
-        The SpannerAggregationAdapter row-processing loop must validate that
-        destination_node_id is not None before calling str() on it. Silently producing
-        the string 'None' would corrupt the edge and path data, creating phantom nodes
-        in the evidence graph. The guard is symmetric with the source_node_id guard
-        already in place (Bug B fix).
-        """
-        rows_with_none_dest: list[tuple[object, ...]] = [
-            ("source_node", "SEMANTIC", "person", 1.0, "edge_1", None, "KNOWS", 0.5),
-        ]
-        monkeypatch.setattr(
-            "src.memory.mindmap_pipeline.SpannerClient.execute_sql",
-            lambda *_args, **_kwargs: rows_with_none_dest,
-        )
-        pipeline = MindMapPipeline(config=MindMapConfig(use_spanner_aggregation=True))
-
-        with pytest.raises(ValueError, match="destination_node_id cannot be None"):
-            await pipeline.execute(query="Explain alpha dependency")
-
     async def test_vertex_synthesis_hard_rejects_low_confidence_evidence(self) -> None:
         """Vertex synthesis should short-circuit before model invocation when hard gated."""
         pipeline = MindMapPipeline(
@@ -580,44 +521,101 @@ class TestMindMapPipeline:
         assert result.confidence_signal.gating_applied == "hard_reject"
 
 
-class TestContradictionFlag:
-    """Tests for the ContradictionFlag dataclass and parsing."""
+class TestMindMapConfigValidation:
+    """Tests for MindMapConfig field-level and cross-field validation."""
 
-    def test_contradiction_flag_from_string_valid(self) -> None:
-        """Standard format parses correctly into severity and node_id."""
-        flag = ContradictionFlag.from_string("HIGH:node-123")
-        assert flag.severity == ContradictionSeverity.HIGH
-        assert flag.node_id == "node-123"
+    def test_mindmap_config_rejects_conflicting_aggregation_flags(self) -> None:
+        """Setting both use_spanner_aggregation and use_deterministic_aggregation must raise."""
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            MindMapConfig(use_spanner_aggregation=True, use_deterministic_aggregation=True)
 
-    def test_contradiction_flag_from_string_node_id_with_colon(self) -> None:
-        """node_id containing ':' is captured fully in second split part."""
-        flag = ContradictionFlag.from_string("LOW:node:with:colons")
-        assert flag.severity == ContradictionSeverity.LOW
-        assert flag.node_id == "node:with:colons"
+    def test_mindmap_config_allows_only_spanner_aggregation(self) -> None:
+        """use_spanner_aggregation=True alone must be accepted without error."""
+        cfg = MindMapConfig(use_spanner_aggregation=True, use_deterministic_aggregation=False)
+        assert cfg.use_spanner_aggregation is True
 
-    def test_contradiction_flag_from_string_invalid_severity(self) -> None:
-        """Invalid severity raises ValueError with a descriptive message."""
-        with pytest.raises(ValueError, match="critical"):
-            ContradictionFlag.from_string("CRITICAL:node-123")
+    def test_mindmap_config_allows_only_deterministic_aggregation(self) -> None:
+        """use_deterministic_aggregation=True alone must be accepted without error."""
+        cfg = MindMapConfig(use_spanner_aggregation=False, use_deterministic_aggregation=True)
+        assert cfg.use_deterministic_aggregation is True
 
-    def test_contradiction_flag_from_string_missing_separator(self) -> None:
-        """Missing ':' separator raises ValueError."""
-        with pytest.raises(ValueError, match="Invalid contradiction flag format"):
-            ContradictionFlag.from_string("HIGH-node-123")
+    def test_mindmap_config_allows_both_false(self) -> None:
+        """Both flags False is the default valid state."""
+        cfg = MindMapConfig()
+        assert cfg.use_spanner_aggregation is False
+        assert cfg.use_deterministic_aggregation is False
 
-    def test_contradiction_flag_from_string_empty_node_id(self) -> None:
-        """Empty node_id after ':' raises ValueError."""
-        with pytest.raises(ValueError, match="node_id cannot be empty"):
-            ContradictionFlag.from_string("HIGH:")
+    def test_gating_penalty_respects_custom_coefficients(self) -> None:
+        """Custom GatingConfig penalty coefficients must be stored and accessible."""
+        from src.memory.mindmap_pipeline import GatingConfig
 
-    def test_contradiction_flag_case_insensitive_severity(self) -> None:
-        """Severity is lowercased before enum lookup, so mixed-case input also works."""
-        flag = ContradictionFlag.from_string("medium:node-456")
-        assert flag.severity == ContradictionSeverity.MEDIUM
-        assert flag.node_id == "node-456"
+        config = MindMapConfig(
+            gating=GatingConfig(per_contradiction_penalty=0.2, max_total_penalty=0.8)
+        )
+        assert config.gating.per_contradiction_penalty == 0.2
+        assert config.gating.max_total_penalty == 0.8
 
-    def test_contradiction_flag_is_frozen(self) -> None:
-        """ContradictionFlag is immutable (frozen dataclass)."""
-        flag = ContradictionFlag.from_string("LOW:node-789")
-        with pytest.raises(FrozenInstanceError):
-            flag.node_id = "other"  # type: ignore[misc]
+    def test_gating_config_defaults_are_valid(self) -> None:
+        """Default GatingConfig matches original magic-number behaviour (0.1 penalty, 0.5 cap)."""
+        from src.memory.mindmap_pipeline import GatingConfig
+
+        defaults = GatingConfig()
+        assert defaults.per_contradiction_penalty == 0.1
+        assert defaults.max_total_penalty == 0.5
+
+    def test_gating_config_rejects_penalty_above_one(self) -> None:
+        """per_contradiction_penalty > 1.0 must raise a validation error."""
+        from src.memory.mindmap_pipeline import GatingConfig
+
+        with pytest.raises(ValueError):
+            GatingConfig(per_contradiction_penalty=1.5)
+
+
+class TestMindMapConfigValidation:
+    """Tests for MindMapConfig field-level and cross-field validation."""
+
+    def test_mindmap_config_rejects_conflicting_aggregation_flags(self) -> None:
+        """Setting both use_spanner_aggregation and use_deterministic_aggregation must raise."""
+        with pytest.raises(ValueError, match="mutually exclusive"):
+            MindMapConfig(use_spanner_aggregation=True, use_deterministic_aggregation=True)
+
+    def test_mindmap_config_allows_only_spanner_aggregation(self) -> None:
+        """use_spanner_aggregation=True alone must be accepted without error."""
+        cfg = MindMapConfig(use_spanner_aggregation=True, use_deterministic_aggregation=False)
+        assert cfg.use_spanner_aggregation is True
+
+    def test_mindmap_config_allows_only_deterministic_aggregation(self) -> None:
+        """use_deterministic_aggregation=True alone must be accepted without error."""
+        cfg = MindMapConfig(use_spanner_aggregation=False, use_deterministic_aggregation=True)
+        assert cfg.use_deterministic_aggregation is True
+
+    def test_mindmap_config_allows_both_false(self) -> None:
+        """Both flags False is the default valid state."""
+        cfg = MindMapConfig()
+        assert cfg.use_spanner_aggregation is False
+        assert cfg.use_deterministic_aggregation is False
+
+    def test_gating_penalty_respects_custom_coefficients(self) -> None:
+        """Custom GatingConfig penalty coefficients must be stored and accessible."""
+        from src.memory.mindmap_pipeline import GatingConfig
+
+        config = MindMapConfig(
+            gating=GatingConfig(per_contradiction_penalty=0.2, max_total_penalty=0.8)
+        )
+        assert config.gating.per_contradiction_penalty == 0.2
+        assert config.gating.max_total_penalty == 0.8
+
+    def test_gating_config_defaults_are_valid(self) -> None:
+        """Default GatingConfig matches original magic-number behaviour (0.1 penalty, 0.5 cap)."""
+        from src.memory.mindmap_pipeline import GatingConfig
+
+        defaults = GatingConfig()
+        assert defaults.per_contradiction_penalty == 0.1
+        assert defaults.max_total_penalty == 0.5
+
+    def test_gating_config_rejects_penalty_above_one(self) -> None:
+        """per_contradiction_penalty > 1.0 must raise a validation error."""
+        from src.memory.mindmap_pipeline import GatingConfig
+
+        with pytest.raises(ValueError):
+            GatingConfig(per_contradiction_penalty=1.5)

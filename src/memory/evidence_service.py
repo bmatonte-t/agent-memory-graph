@@ -184,12 +184,12 @@ class EvidenceService:
             evidence_number = 1
             for i, start_entity in enumerate(entity_ids):
                 for end_entity in entity_ids[i + 1 :]:
-                    paths, _path_chars = await path_finder.find_paths(
+                    path_result = await path_finder.find_paths(
                         tenant_id=tenant_id,
                         start_entity_id=start_entity,
                         end_entity_id=end_entity,
                     )
-                    for path in paths:
+                    for path in path_result.paths:
                         evidence_items.append(
                             EvidenceItem(
                                 evidence_id=f"evid_{evidence_number}",
