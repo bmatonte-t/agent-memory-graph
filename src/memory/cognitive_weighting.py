@@ -60,7 +60,8 @@ class CognitiveWeighting:
             database = SpannerClient.get_database()  # type: ignore[return-value]
             # Query affected count before DML (Spanner batch DML doesn't return rowcount)
             count_rows = execute_sql_rows(database, count_sql, tier_params)
-            affected_count = int(count_rows[0][0]) if count_rows else 0
+            raw_count = count_rows[0][0] if count_rows else 0
+            affected_count = int(raw_count) if isinstance(raw_count, (int, float)) else 0
             execute_dml(
                 database,
                 update_sql,

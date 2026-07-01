@@ -79,7 +79,7 @@ class ContradictionFlag:
     node_id: str
 
     @classmethod
-    def from_string(cls, flag_str: str) -> "ContradictionFlag":
+    def from_string(cls, flag_str: str) -> ContradictionFlag:
         """Parse legacy ``'SEVERITY:node_id'`` format with validation.
 
         Args:
@@ -93,11 +93,13 @@ class ContradictionFlag:
                 node_id is empty.
         """
         parts = flag_str.split(":", 1)
-        if len(parts) != 2:
-            raise ValueError(f"Invalid contradiction flag format: {flag_str!r}")
+        if len(parts) != 2:  # noqa: PLR2004
+            msg = f"Invalid contradiction flag format: {flag_str!r}"
+            raise ValueError(msg)
         severity_str, node_id = parts
         if not node_id:
-            raise ValueError(f"node_id cannot be empty in contradiction flag: {flag_str!r}")
+            msg = f"node_id cannot be empty in contradiction flag: {flag_str!r}"
+            raise ValueError(msg)
         return cls(severity=ContradictionSeverity(severity_str.upper()), node_id=node_id)
 
 

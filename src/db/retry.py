@@ -44,7 +44,7 @@ def is_transient_error(exception: Exception) -> bool:
         if hasattr(exception, "code") and exception.code is not None:
             error_code_name = str(exception.code).split(".")[-1]
             error_code = error_code_name
-    except (AttributeError, IndexError, TypeError):
+    except AttributeError, IndexError, TypeError:
         pass
 
     # Check if it's a known transient error code

@@ -86,10 +86,51 @@
     </div>
   </div>
   <span class="latam-badge">LATAM Airlines · ADO</span>
-  <span class="slide-num">01 / 10</span>
+  <span class="slide-num">01 / 12</span>
 </div>
 
-<!-- SLIDE 2: EL PROBLEMA -->
+<!-- SLIDE 2: STORYTELLING — EL LUNES DE MARTÍN DÍAZ -->
+<div class="slide" style="background:linear-gradient(135deg,#0a0618 0%,#180d35 100%);">
+  <div class="h-full flex flex-col justify-center px-20 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#ED1650;margin-bottom:.5rem;">Historia Real · Cold Start Problem</p>
+      <h1 class="text-3xl font-bold text-white">El lunes de Martín Díaz, Data Engineer del squad ADO</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1.05fr 1fr;gap:2rem;align-items:start;">
+      <div style="background:rgba(237,22,80,.07);border:1px solid rgba(237,22,80,.28);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:.88rem;margin-bottom:.6rem;">Sin AMG — cada sesión comienza desde cero</p>
+        <p style="color:#cbd5e1;font-size:.85rem;line-height:1.5;margin-bottom:.75rem;">Martín construye un agente de gobernanza sobre DataHub para responder: ¿quién es dueño de cada dataset? Para usarlo, abre una nueva sesión con el Cosmos GenAI Gateway.</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.82rem;">
+          <li style="margin-bottom:.45rem;display:flex;gap:.6rem;"><span style="color:#ED1650;flex-shrink:0;">→</span>Nueva sesión: el agente no recuerda nada del squad</li>
+          <li style="margin-bottom:.45rem;display:flex;gap:.6rem;"><span style="color:#ED1650;flex-shrink:0;">→</span>3 intercambios · 4.200 tokens · 45 min solo para re-establecer contexto</li>
+          <li style="margin-bottom:.45rem;display:flex;gap:.6rem;"><span style="color:#ED1650;flex-shrink:0;">→</span>El agente responde: <em style="color:#fca5a5;">"owner: Squad de Plataforma"</em> — interpoló de un dataset con nombre similar</li>
+          <li style="display:flex;gap:.6rem;"><span style="color:#ED1650;flex-shrink:0;">→</span>Martín provisiona el acceso. Seguridad revierte: el owner real era Squad de Pricing</li>
+        </ul>
+        <div style="margin-top:.9rem;background:rgba(237,22,80,.15);border-radius:.4rem;padding:.55rem .9rem;font-size:.78rem;color:#ED1650;font-weight:600;text-align:center;">45 min · 4.200 tokens · 1 decisión incorrecta · rollback de seguridad</div>
+      </div>
+      <div>
+        <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.35);border-radius:.75rem;padding:1.25rem;margin-bottom:1rem;">
+          <p style="color:#4257E8;font-weight:700;font-size:.88rem;margin-bottom:.6rem;">Con AMG — contexto desde el primer mensaje</p>
+          <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.82rem;">
+            <li style="margin-bottom:.45rem;display:flex;gap:.6rem;"><span style="color:#4257E8;flex-shrink:0;">✓</span>El grafo recuerda 12 hechos de alta señal del squad: datasets, owners, linaje</li>
+            <li style="margin-bottom:.45rem;display:flex;gap:.6rem;"><span style="color:#4257E8;flex-shrink:0;">✓</span>Respuesta directa y verificada: <em style="color:#a5b4fc;">"owner: Squad de Pricing — fact_id #f-2291"</em></li>
+            <li style="margin-bottom:.45rem;display:flex;gap:.6rem;"><span style="color:#4257E8;flex-shrink:0;">✓</span>1.200 tokens · audit trail completo · 0 rollbacks</li>
+            <li style="display:flex;gap:.6rem;"><span style="color:#4257E8;flex-shrink:0;">✓</span>Martín provisiona el acceso correcto desde el primer intento</li>
+          </ul>
+          <div style="margin-top:.9rem;background:rgba(66,87,232,.18);border-radius:.4rem;padding:.55rem .9rem;font-size:.78rem;color:#4257E8;font-weight:600;text-align:center;">71% menos tokens · owner correcto · decisión trazable · sin rollback</div>
+        </div>
+        <div style="background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.09);border-radius:.5rem;padding:.85rem 1.1rem;font-size:.8rem;color:#64748b;text-align:center;">
+          El cold start ocurre en cada sesión de cada agente en LATAM hoy.<br/>
+          <strong style="color:#94a3b8;">AMG lo elimina con un grafo de memoria persistente.</strong>
+        </div>
+      </div>
+    </div>
+  </div>
+  <span class="latam-badge">LATAM Airlines · ADO</span>
+  <span class="slide-num">02 / 12</span>
+</div>
+
+<!-- SLIDE 3: EL PROBLEMA -->
 <div class="slide" style="background:#0f1729;">
   <div class="h-full flex flex-col justify-center px-20 py-12">
     <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
@@ -116,10 +157,10 @@
     </div>
   </div>
   <span class="latam-badge">LATAM Airlines · ADO</span>
-  <span class="slide-num">02 / 10</span>
+  <span class="slide-num">03 / 12</span>
 </div>
 
-<!-- SLIDE 3: LA SOLUCIÓN -->
+<!-- SLIDE 4: LA SOLUCIÓN -->
 <div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
   <div class="h-full flex flex-col justify-center px-20 py-12">
     <div style="border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:1.5rem;margin-bottom:2.5rem;">
@@ -151,10 +192,10 @@
     </div>
   </div>
   <span class="latam-badge">LATAM Airlines · ADO</span>
-  <span class="slide-num">03 / 10</span>
+  <span class="slide-num">04 / 12</span>
 </div>
 
-<!-- SLIDE 4: MÉTRICAS CLAVE -->
+<!-- SLIDE 5: MÉTRICAS CLAVE -->
 <div class="slide" style="background:#0f1729;">
   <div class="h-full flex flex-col justify-center px-20 py-12">
     <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2.5rem;">
@@ -188,10 +229,10 @@
     </div>
   </div>
   <span class="latam-badge">LATAM Airlines · ADO</span>
-  <span class="slide-num">04 / 10</span>
+  <span class="slide-num">05 / 12</span>
 </div>
 
-<!-- SLIDE 5: POR QUÉ LATAM NECESITA ESTO HOY -->
+<!-- SLIDE 6: POR QUÉ LATAM NECESITA ESTO HOY -->
 <div class="slide" style="background:#0f1729;">
   <div class="h-full flex flex-col justify-center px-20 py-12">
     <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
@@ -201,7 +242,7 @@
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start;">
       <div>
         <p style="color:#4257E8;font-weight:700;font-size:1rem;margin-bottom:1rem;text-transform:uppercase;letter-spacing:.08em;">Hoy — Inversión existente</p>
-        <ul style="list-style:none;padding:0;margin:0;space-y:0.75rem;">
+        <ul style="list-style:none;padding:0;margin:0;">
           <li style="display:flex;align-items:start;gap:.75rem;margin-bottom:.9rem;color:#cbd5e1;font-size:1rem;">
             <span style="color:#4257E8;margin-top:.15rem;">✓</span> Cosmos GenAI Gateway (Claude, GPT-5, Gemini, Llama)
           </li>
@@ -228,10 +269,10 @@
     </div>
   </div>
   <span class="latam-badge">LATAM Airlines · ADO</span>
-  <span class="slide-num">05 / 10</span>
+  <span class="slide-num">06 / 12</span>
 </div>
 
-<!-- SLIDE 6: CASOS DE USO -->
+<!-- SLIDE 7: CASOS DE USO -->
 <div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
   <div class="h-full flex flex-col justify-center px-20 py-12">
     <div style="border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:1.5rem;margin-bottom:2rem;">
@@ -261,57 +302,131 @@
     </div>
   </div>
   <span class="latam-badge">LATAM Airlines · ADO</span>
-  <span class="slide-num">06 / 10</span>
+  <span class="slide-num">07 / 12</span>
 </div>
 
-<!-- SLIDE 7: EL EFECTO MULTIPLICADOR -->
+<!-- SLIDE 8: ROI Y TCO EN USD -->
 <div class="slide" style="background:#0f1729;">
-  <div class="h-full flex flex-col justify-center px-20 py-12">
-    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
-      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#4257E8;margin-bottom:.5rem;">Valor Compuesto</p>
-      <h1 class="text-4xl font-bold text-white">Cada agente mejora el conocimiento de todos</h1>
+  <div class="h-full flex flex-col justify-center px-20 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#4257E8;margin-bottom:.5rem;">Retorno sobre la Inversión</p>
+      <h1 class="text-3xl font-bold text-white">ROI estimado: &gt;400% a 3 años · Break-even en mes 8</h1>
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1.5fr;gap:3rem;align-items:center;">
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;">
       <div>
-        <div style="display:flex;flex-direction:column;gap:1rem;">
-          <div style="display:flex;align-items:center;gap:1rem;background:rgba(66,87,232,.1);border-radius:.5rem;padding:1rem;">
-            <span style="font-size:1.5rem;">🛠</span>
-            <div><p style="color:#fff;font-weight:600;margin:0;">Mantenimiento</p><p style="color:#94a3b8;font-size:.85rem;margin:0;">MAPIS + histórico de fallas</p></div>
+        <p style="color:#ED1650;font-weight:700;font-size:.85rem;margin-bottom:.9rem;text-transform:uppercase;letter-spacing:.08em;">TCO Año 1 — Inversión Inicial</p>
+        <div style="display:flex;flex-direction:column;gap:.6rem;">
+          <div style="background:rgba(237,22,80,.07);border:1px solid rgba(237,22,80,.2);border-radius:.5rem;padding:.85rem 1.1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#cbd5e1;font-size:.88rem;margin:0;">Ingeniería interna (4.5 FTE · 16 sem.)</p>
+            <p style="color:#fff;font-weight:700;font-size:.95rem;margin:0;">~$150.000</p>
           </div>
-          <div style="display:flex;align-items:center;gap:1rem;background:rgba(66,87,232,.1);border-radius:.5rem;padding:1rem;">
-            <span style="font-size:1.5rem;">✈️</span>
-            <div><p style="color:#fff;font-weight:600;margin:0;">Operaciones</p><p style="color:#94a3b8;font-size:.85rem;margin:0;">Disrupciones coordinadas</p></div>
+          <div style="background:rgba(237,22,80,.07);border:1px solid rgba(237,22,80,.2);border-radius:.5rem;padding:.85rem 1.1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#cbd5e1;font-size:.88rem;margin:0;">Infraestructura GCP año 1 (~$850/mes)</p>
+            <p style="color:#fff;font-weight:700;font-size:.95rem;margin:0;">~$10.200</p>
           </div>
-          <div style="display:flex;align-items:center;gap:1rem;background:rgba(66,87,232,.1);border-radius:.5rem;padding:1rem;">
-            <span style="font-size:1.5rem;">💬</span>
-            <div><p style="color:#fff;font-weight:600;margin:0;">Experiencia Cliente</p><p style="color:#94a3b8;font-size:.85rem;margin:0;">Chatbots omnicanal</p></div>
-          </div>
-          <div style="display:flex;align-items:center;gap:1rem;background:rgba(66,87,232,.1);border-radius:.5rem;padding:1rem;">
-            <span style="font-size:1.5rem;">📊</span>
-            <div><p style="color:#fff;font-weight:600;margin:0;">Gobernanza de Datos</p><p style="color:#94a3b8;font-size:.85rem;margin:0;">DataHub integrado</p></div>
+          <div style="background:rgba(237,22,80,.12);border:1px solid rgba(237,22,80,.35);border-radius:.5rem;padding:.85rem 1.1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#ED1650;font-size:.88rem;font-weight:700;margin:0;">Total TCO Año 1</p>
+            <p style="color:#ED1650;font-weight:800;font-size:1.1rem;margin:0;">~$160.000</p>
           </div>
         </div>
       </div>
-      <div style="text-align:center;">
-        <div style="background:rgba(66,87,232,.15);border:2px solid #4257E8;border-radius:50%;width:160px;height:160px;display:flex;flex-direction:column;align-items:center;justify-content:center;margin:0 auto 1.5rem;">
-          <p style="color:#4257E8;font-size:1rem;font-weight:700;margin:0;text-transform:uppercase;letter-spacing:.05em;">Grafo</p>
-          <p style="color:#4257E8;font-size:1rem;font-weight:700;margin:0;text-transform:uppercase;letter-spacing:.05em;">Semántico</p>
-          <p style="color:#fff;font-size:.8rem;margin:.5rem 0 0;opacity:.6;">Compartido · ABAC</p>
+      <div>
+        <p style="color:#4257E8;font-weight:700;font-size:.85rem;margin-bottom:.9rem;text-transform:uppercase;letter-spacing:.08em;">Beneficios Anuales (Año 2+)</p>
+        <div style="display:flex;flex-direction:column;gap:.6rem;">
+          <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.22);border-radius:.5rem;padding:.75rem 1.1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Ahorro tokens LLM (&gt;30%)</p>
+            <p style="color:#4257E8;font-weight:700;margin:0;">~$45.000/año</p>
+          </div>
+          <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.22);border-radius:.5rem;padding:.75rem 1.1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Productividad ingenieros (5 squads)</p>
+            <p style="color:#4257E8;font-weight:700;margin:0;">~$75.000/año</p>
+          </div>
+          <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.22);border-radius:.5rem;padding:.75rem 1.1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Calidad decisiones (0% alucinación)</p>
+            <p style="color:#4257E8;font-weight:700;margin:0;">~$100.000/año</p>
+          </div>
+          <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.22);border-radius:.5rem;padding:.75rem 1.1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#cbd5e1;font-size:.85rem;margin:0;">Retención clientes (NPS +5 pts)</p>
+            <p style="color:#4257E8;font-weight:700;margin:0;">~$200.000/año</p>
+          </div>
+          <div style="background:rgba(66,87,232,.15);border:1px solid rgba(66,87,232,.4);border-radius:.5rem;padding:.85rem 1.1rem;display:flex;justify-content:space-between;align-items:center;">
+            <p style="color:#fff;font-size:.88rem;font-weight:700;margin:0;">Total retorno anual</p>
+            <p style="color:#fff;font-weight:800;font-size:1.1rem;margin:0;">~$420.000/año</p>
+          </div>
         </div>
-        <p style="color:#cbd5e1;font-size:.95rem;line-height:1.6;max-width:300px;margin:0 auto;">
-          El conocimiento de un squad <strong style="color:#fff;">inmediatamente beneficia</strong> a todos los demás. El Cognitive Weighting hace que los hechos más útiles suban solos.
-        </p>
+      </div>
+    </div>
+    <div style="margin-top:1.25rem;display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+      <div style="background:rgba(0,214,204,.07);border:1px solid rgba(0,214,204,.25);border-radius:.5rem;padding:.75rem;text-align:center;">
+        <p style="color:#00D6CC;font-weight:800;font-size:1.25rem;margin:0;">Mes 8</p>
+        <p style="color:#64748b;font-size:.78rem;margin:.25rem 0 0;">Break-even (conservador)</p>
+      </div>
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.25);border-radius:.5rem;padding:.75rem;text-align:center;">
+        <p style="color:#4257E8;font-weight:800;font-size:1.25rem;margin:0;">&gt;400%</p>
+        <p style="color:#64748b;font-size:.78rem;margin:.25rem 0 0;">ROI a 3 años</p>
+      </div>
+      <div style="background:rgba(237,22,80,.06);border:1px solid rgba(237,22,80,.2);border-radius:.5rem;padding:.75rem;text-align:center;">
+        <p style="color:#ED1650;font-weight:800;font-size:1.25rem;margin:0;">$0</p>
+        <p style="color:#64748b;font-size:.78rem;margin:.25rem 0 0;">Licencias de software adicionales</p>
       </div>
     </div>
   </div>
   <span class="latam-badge">LATAM Airlines · ADO</span>
-  <span class="slide-num">07 / 10</span>
+  <span class="slide-num">08 / 12</span>
 </div>
 
-<!-- SLIDE 8: PLAN DE INVERSIÓN -->
+<!-- SLIDE 9: QUÉ NECESITAMOS DEL EQUIPO LATAM -->
 <div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
+  <div class="h-full flex flex-col justify-center px-20 py-10">
+    <div style="border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:1.25rem;margin-bottom:1.75rem;">
+      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#ED1650;margin-bottom:.5rem;">Requerimientos</p>
+      <h1 class="text-3xl font-bold text-white">Qué necesitamos del equipo LATAM para arrancar</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1.5rem;">
+      <div style="background:rgba(66,87,232,.1);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.9rem;margin-bottom:.75rem;">Equipo — 4.5 FTE</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.8rem;">
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#4257E8;">▸</span> 1 Platform Engineer (GCP/Terraform)</li>
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#4257E8;">▸</span> 1–2 Backend Python (APIs, conectores)</li>
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#4257E8;">▸</span> 1 Data/AI Engineer (grafo, DataHub)</li>
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#4257E8;">▸</span> 0.5 Seguridad/Gobernanza (ABAC)</li>
+          <li style="display:flex;gap:.5rem;"><span style="color:#4257E8;">▸</span> 0.5 Product Lead (piloto, KPIs)</li>
+        </ul>
+        <div style="margin-top:.9rem;background:rgba(66,87,232,.15);border-radius:.35rem;padding:.5rem .75rem;font-size:.75rem;color:#4257E8;font-weight:600;">Piloto Fase 1: mínimo 3 FTE</div>
+      </div>
+      <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.25);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:.9rem;margin-bottom:.75rem;">Tiempo de Otros Equipos</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.8rem;">
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#ED1650;">▸</span> Cosmos GenAI Gateway: <strong style="color:#fff;">1h</strong> (API key + budget)</li>
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#ED1650;">▸</span> DataHub: <strong style="color:#fff;">2h</strong> (token de lectura + schema)</li>
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#ED1650;">▸</span> Network/Cloud Platform: <strong style="color:#fff;">1 día</strong> (VPC connector)</li>
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#ED1650;">▸</span> Seguridad/CISO: <strong style="color:#fff;">2 días</strong> (semanas 11–12)</li>
+          <li style="display:flex;gap:.5rem;"><span style="color:#ED1650;">▸</span> Legal/Compliance: <strong style="color:#fff;">1 sem.</strong> (solo si uso externo)</li>
+        </ul>
+      </div>
+      <div style="background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#94a3b8;font-weight:700;font-size:.9rem;margin-bottom:.75rem;">Accesos y Recursos GCP</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#64748b;font-size:.78rem;">
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#94a3b8;">▸</span> Proyecto GCP con Spanner · Cloud Run · Cloud Tasks · Cloud Build APIs</li>
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#94a3b8;">▸</span> Service account: <code style="color:#4257E8;">spanner.databaseAdmin · run.admin · iam.serviceAccountAdmin</code></li>
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#94a3b8;">▸</span> Cosmos GenAI Gateway API key + límite de presupuesto</li>
+          <li style="margin-bottom:.4rem;display:flex;gap:.5rem;"><span style="color:#94a3b8;">▸</span> DataHub read token · MAPIS BigQuery read</li>
+          <li style="display:flex;gap:.5rem;"><span style="color:#94a3b8;">▸</span> GitLab write + Backstage catalog write</li>
+        </ul>
+      </div>
+    </div>
+    <div style="margin-top:1.25rem;background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:.85rem 1.5rem;text-align:center;">
+      <p style="color:#94a3b8;font-size:.85rem;margin:0;">AMG v0.2 ya está construido. <strong style="color:#fff;">No hay I+D pendiente</strong> — solo integración, configuración y despliegue en tu GCP.</p>
+    </div>
+  </div>
+  <span class="latam-badge">LATAM Airlines · ADO</span>
+  <span class="slide-num">09 / 12</span>
+</div>
+
+<!-- SLIDE 10: PLAN DE INVERSIÓN -->
+<div class="slide" style="background:#0f1729;">
   <div class="h-full flex flex-col justify-center px-20 py-12">
-    <div style="border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:1.5rem;margin-bottom:2rem;">
+    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
       <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#ED1650;margin-bottom:.5rem;">Inversión</p>
       <h1 class="text-4xl font-bold text-white">16 semanas · 4.5 FTE · Infraestructura predecible</h1>
     </div>
@@ -361,13 +476,13 @@
     </div>
   </div>
   <span class="latam-badge">LATAM Airlines · ADO</span>
-  <span class="slide-num">08 / 10</span>
+  <span class="slide-num">10 / 12</span>
 </div>
 
-<!-- SLIDE 9: PRÓXIMOS PASOS -->
-<div class="slide" style="background:#0f1729;">
+<!-- SLIDE 11: PRÓXIMOS PASOS -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
   <div class="h-full flex flex-col justify-center px-20 py-12">
-    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2.5rem;">
+    <div style="border-bottom:1px solid rgba(255,255,255,.15);padding-bottom:1.5rem;margin-bottom:2.5rem;">
       <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#4257E8;margin-bottom:.5rem;">Plan de Acción</p>
       <h1 class="text-4xl font-bold text-white">Piloto de 4 semanas para validar el valor</h1>
     </div>
@@ -398,10 +513,10 @@
     </div>
   </div>
   <span class="latam-badge">LATAM Airlines · ADO</span>
-  <span class="slide-num">09 / 10</span>
+  <span class="slide-num">11 / 12</span>
 </div>
 
-<!-- SLIDE 10: CIERRE -->
+<!-- SLIDE 12: CIERRE -->
 <div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#4257E8 70%,#ED1650 100%);">
   <div class="h-full flex flex-col items-center justify-center px-20 py-12 text-center">
     <div style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:.5rem;padding:.5rem 1.5rem;font-size:.75rem;letter-spacing:.15em;text-transform:uppercase;color:#e2e8f0;margin-bottom:2rem;display:inline-block;">
@@ -416,12 +531,12 @@
     <div style="display:flex;gap:1.5rem;justify-content:center;flex-wrap:wrap;">
       <div style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:2rem;padding:.75rem 2rem;color:#fff;font-weight:600;">0% Alucinación</div>
       <div style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:2rem;padding:.75rem 2rem;color:#fff;font-weight:600;">&gt;30% ahorro en tokens</div>
-      <div style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:2rem;padding:.75rem 2rem;color:#fff;font-weight:600;">P99 &lt; 5ms</div>
+      <div style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:2rem;padding:.75rem 2rem;color:#fff;font-weight:600;">ROI &gt;400% a 3 años</div>
       <div style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);border-radius:2rem;padding:.75rem 2rem;color:#fff;font-weight:600;">100% auditable</div>
     </div>
   </div>
   <span class="latam-badge" style="opacity:.6;">LATAM Airlines · ADO · 2026</span>
-  <span class="slide-num">10 / 10</span>
+  <span class="slide-num">12 / 12</span>
 </div>
 
 </body>

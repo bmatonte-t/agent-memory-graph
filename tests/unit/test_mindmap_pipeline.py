@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import FrozenInstanceError, dataclass
 from datetime import UTC, datetime
 from unittest.mock import patch
 
@@ -597,7 +597,7 @@ class TestContradictionFlag:
 
     def test_contradiction_flag_from_string_invalid_severity(self) -> None:
         """Invalid severity raises ValueError with a descriptive message."""
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="CRITICAL"):
             ContradictionFlag.from_string("CRITICAL:node-123")
 
     def test_contradiction_flag_from_string_missing_separator(self) -> None:
@@ -619,5 +619,5 @@ class TestContradictionFlag:
     def test_contradiction_flag_is_frozen(self) -> None:
         """ContradictionFlag is immutable (frozen dataclass)."""
         flag = ContradictionFlag.from_string("LOW:node-789")
-        with pytest.raises(Exception):  # FrozenInstanceError
+        with pytest.raises(FrozenInstanceError):
             flag.node_id = "other"  # type: ignore[misc]

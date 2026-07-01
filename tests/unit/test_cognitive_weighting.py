@@ -9,6 +9,7 @@ from src.memory.cognitive_weighting import CloudSchedulerJob, CognitiveWeighting
 EXPECTED_CONTEXT_COUNT = 10
 EXPECTED_CONTEXT_MEAN_WEIGHT = 0.55
 EXPECTED_SEMANTIC_COUNT = 50
+EXPECTED_DECAY_AFFECTED_COUNT = 7
 
 
 class TestTemporalDecay:
@@ -75,15 +76,14 @@ class TestTemporalDecay:
             await CognitiveWeighting.decay_weights_temporal(decay_rate=0.0)
             mock_batch.execute_update.assert_called_once()
 
-
     @pytest.mark.asyncio
     async def test_decay_weights_temporal_returns_actual_affected_count(self) -> None:
         """Returns count of affected nodes, not hardcoded 0, via pre-DML COUNT query."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
-            # Snapshot returns 7 rows affected
+            # Snapshot returns EXPECTED_DECAY_AFFECTED_COUNT rows
             mock_snapshot = MagicMock()
-            mock_snapshot.execute_sql.return_value = iter([[7]])
+            mock_snapshot.execute_sql.return_value = iter([[EXPECTED_DECAY_AFFECTED_COUNT]])
             mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
             mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             # Batch for DML
@@ -95,7 +95,9 @@ class TestTemporalDecay:
 
             count = await CognitiveWeighting.decay_weights_temporal()
 
-            assert count == 7, f"Expected 7 affected nodes, got {count}"
+            assert count == EXPECTED_DECAY_AFFECTED_COUNT, (
+                f"Expected {EXPECTED_DECAY_AFFECTED_COUNT} affected nodes, got {count}"
+            )
 
     @pytest.mark.asyncio
     async def test_decay_weights_temporal_returns_zero_when_no_nodes_match(self) -> None:

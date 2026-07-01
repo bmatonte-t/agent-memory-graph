@@ -80,3 +80,14 @@ These are questions the team has not yet resolved. They block certain work items
 | Should the Synthesize stage use a fixed model (e.g., Claude Haiku 4.5) or pass through to the caller's model preference? | Affects cost, latency, and the request/response contract |
 | Should `AUDIT_EVENTS` ever be exported to BigQuery for compliance reporting? | Affects the retention policy and audit tooling |
 | Should `weight_pruning_threshold` be configurable per tenant or global? | Affects the governance config surface area |
+
+## Notes
+
+- **Meet con Nacho Esmite y Tito Vazquez**
+  - ¿cómo incorporar conocimiento de context a semantic? threads no tienen por qué no cerrarse
+  - cuidado con solución general, sale mal la gobernanza de datos
+  - gente para hablar:
+    - claudio urbina
+    - mati jesus
+    - mati navarrete
+    - CDP
