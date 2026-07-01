@@ -16,9 +16,9 @@ from src.memory.mindmap_pipeline import (
     SpannerAggregationAdapter,
     VertexMiningAdapter,
 )
+from src.models.confidence import ContradictionSeverity
 from src.models.evidence import (
     ContradictionFlag,
-    ContradictionSeverity,
     EvidenceContext,
     EvidenceItem,
     EvidenceSourceType,
@@ -611,7 +611,7 @@ class TestContradictionFlag:
             ContradictionFlag.from_string("HIGH:")
 
     def test_contradiction_flag_case_insensitive_severity(self) -> None:
-        """Severity is uppercased before enum lookup, so lowercase input also works."""
+        """Severity is lowercased before enum lookup, so mixed-case input also works."""
         flag = ContradictionFlag.from_string("medium:node-456")
         assert flag.severity == ContradictionSeverity.MEDIUM
         assert flag.node_id == "node-456"

@@ -26,7 +26,9 @@ class CognitiveWeighting:
             decay_rate: Decay rate per hour (default: 0.05 from SchemaConfig)
 
         Returns:
-            Number of nodes updated
+            Number of nodes updated. Note: the COUNT query and the DML UPDATE run
+            in separate Spanner operations (not atomic), so the returned count may
+            be slightly stale under concurrent writes.
 
         Raises:
             ValueError: If decay_rate is invalid

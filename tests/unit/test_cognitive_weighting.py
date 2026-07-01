@@ -40,8 +40,14 @@ class TestTemporalDecay:
     @pytest.mark.asyncio
     async def test_decay_weights_with_custom_rate(self) -> None:
         """Test decay with custom decay rate."""
+        expected_count = 3
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
+            # Snapshot returns a row indicating N nodes will be affected
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = iter([[expected_count]])
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             mock_batch = MagicMock()
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
@@ -49,12 +55,13 @@ class TestTemporalDecay:
             mock_client.get_database.return_value = mock_db
 
             custom_rate = 0.10
-            await CognitiveWeighting.decay_weights_temporal(decay_rate=custom_rate)
+            result = await CognitiveWeighting.decay_weights_temporal(decay_rate=custom_rate)
 
             # Verify custom rate was passed
             call_args = mock_batch.execute_update.call_args
             params = call_args[0][1]
             assert params["decay_rate"] == custom_rate
+            assert result == expected_count
 
     @pytest.mark.asyncio
     async def test_decay_weights_invalid_rate_too_low(self) -> None:
@@ -73,6 +80,10 @@ class TestTemporalDecay:
         """Test decay with zero rate (no decay)."""
         with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
             mock_db = MagicMock()
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = iter([[0]])
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
             mock_batch = MagicMock()
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
             mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
