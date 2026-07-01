@@ -238,7 +238,7 @@ class TestConcurrentWrites:
 
         with patch("src.memory.api.SpannerClient.get_database", return_value=mock_db):
             tasks = [
-                asyncio.get_event_loop().run_in_executor(
+                asyncio.get_running_loop().run_in_executor(
                     None,
                     MemoryAPI._increment_session_action_count,
                     "tenant_concurrent",

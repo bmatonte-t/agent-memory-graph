@@ -528,6 +528,9 @@ class SpannerAggregationAdapter:
             if source_node_id is None:
                 msg = f"node_id cannot be None in row {idx}: {row!r}"
                 raise ValueError(msg)
+            if destination_node_id is None:
+                msg = f"destination_node_id cannot be None in row {idx}: {row!r}"
+                raise ValueError(msg)
             if memory_tier is None:
                 msg = f"memory_tier cannot be None in row {idx}: {row!r}"
                 raise ValueError(msg)
