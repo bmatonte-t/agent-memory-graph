@@ -76,6 +76,47 @@ class TestTemporalDecay:
             mock_batch.execute_update.assert_called_once()
 
 
+    @pytest.mark.asyncio
+    async def test_decay_weights_temporal_returns_actual_affected_count(self) -> None:
+        """Returns count of affected nodes, not hardcoded 0, via pre-DML COUNT query."""
+        with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
+            mock_db = MagicMock()
+            # Snapshot returns 7 rows affected
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = iter([[7]])
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
+            # Batch for DML
+            mock_batch = MagicMock()
+            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
+            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+
+            mock_client.get_database.return_value = mock_db
+
+            count = await CognitiveWeighting.decay_weights_temporal()
+
+            assert count == 7, f"Expected 7 affected nodes, got {count}"
+
+    @pytest.mark.asyncio
+    async def test_decay_weights_temporal_returns_zero_when_no_nodes_match(self) -> None:
+        """Returns 0 when no nodes qualify for temporal decay."""
+        with patch("src.memory.cognitive_weighting.SpannerClient") as mock_client:
+            mock_db = MagicMock()
+            mock_snapshot = MagicMock()
+            mock_snapshot.execute_sql.return_value = iter([[0]])
+            mock_db.snapshot.return_value.__enter__ = MagicMock(return_value=mock_snapshot)
+            mock_db.snapshot.return_value.__exit__ = MagicMock(return_value=None)
+            mock_batch = MagicMock()
+            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
+            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+
+            mock_client.get_database.return_value = mock_db
+
+            count = await CognitiveWeighting.decay_weights_temporal()
+
+            assert count == 0
+
+
 class TestWeightPruning:
     """Tests for weight-based pruning."""
 
