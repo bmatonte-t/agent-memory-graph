@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -199,14 +200,20 @@ class TestConcurrentWrites:
         """
         num_increments = 100
         call_count = 0
+        call_count_lock = threading.Lock()
 
         mock_db = MagicMock()
         mock_transaction = MagicMock()
 
         def fake_execute_update(sql: str, params: dict) -> int:
-            """Record the call and confirm no SELECT read preceded it."""
+            """Record the call and confirm no SELECT read preceded it.
+
+            Uses a threading.Lock to safely increment the shared call_count
+            from multiple real OS threads spawned by run_in_executor.
+            """
             nonlocal call_count
-            call_count += 1
+            with call_count_lock:
+                call_count += 1
             return 1
 
         mock_transaction.execute_update.side_effect = fake_execute_update

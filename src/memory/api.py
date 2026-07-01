@@ -1059,8 +1059,12 @@ class MemoryAPI:
             bayes_factor_ln: Log-odds delta (ln(BF)).
 
         Raises:
+            ValueError: If tenant_id is None or empty — composite PK enforcement.
             Exception: Any exception from Spanner (to be retried).
         """
+        if not tenant_id or not tenant_id.strip():
+            msg = "tenant_id is required for all MemoryNode writes"
+            raise ValueError(msg)
         sql = """
             UPDATE MemoryNode
             SET LogOddsWeight = LogOddsWeight + @delta,
@@ -1190,7 +1194,14 @@ class MemoryAPI:
         Uses a single atomic SQL UPDATE (SET count = count + 1) with no prior SELECT
         read. This eliminates the read-modify-write race condition where two concurrent
         callers could both read 0, both write 1, and silently drop one increment.
+
+        Raises:
+            ValueError: If tenant_id is None or empty — composite PK enforcement.
+            RuntimeError: If the database update fails.
         """
+        if not tenant_id or not tenant_id.strip():
+            msg = "tenant_id is required for all MemoryNode writes"
+            raise ValueError(msg)
         tenant_id = validate_tenant_id(tenant_id)
         session_id = validate_required_string(session_id, field_name="session_id")
 

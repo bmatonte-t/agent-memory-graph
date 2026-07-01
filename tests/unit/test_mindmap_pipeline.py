@@ -466,6 +466,15 @@ class TestMindMapPipeline:
         The SpannerAggregationAdapter row-processing loop must validate that
         source_node_id is not None before calling str() on it. Silently producing
         the string 'None' would corrupt the graph node dictionary.
+
+        Note on test approach: the review suggested calling _build_evidence_nodes directly
+        on a SpannerAggregationAdapter instance. However, that method does not exist as a
+        standalone method — the None-guard logic is inline inside aggregate(). Direct
+        instantiation of SpannerAggregationAdapter is straightforward (no __init__ args),
+        but calling aggregate() directly requires constructing MiningResult/MindMapConfig
+        stubs and still patches SpannerClient. Invoking via MindMapPipeline.execute() with
+        a monkeypatched SpannerClient is equivalent depth and avoids duplicating the
+        aggregate() call-site setup. The full-pipeline approach is kept intentionally.
         """
         rows_with_none: list[tuple[object, ...]] = [
             (None, "SEMANTIC", "person", 1.0, "edge_1", "dest_node", "KNOWS", 0.5),

@@ -129,7 +129,7 @@ class TestCrossTenantIsolation:
 
             mock_batch.execute_update.side_effect = fake_execute_update
             mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
-            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
+            mock_db.batch.return_value.__exit__ = MagicMock(return_value=False)
             return mock_db
 
         with (
