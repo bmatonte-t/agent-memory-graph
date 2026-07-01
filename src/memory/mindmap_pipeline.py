@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.db.spanner_client import SpannerClient
 from src.integrations.google_sdk_wrappers import generate_generative_ai_text
@@ -89,6 +89,33 @@ class MindMapPipelineError(RuntimeError):
         self.code = code
 
 
+class GatingConfig(BaseModel):
+    """Configurable penalty coefficients for synthesis confidence gating.
+
+    Replaces magic numbers in the contradiction penalty calculation so that
+    callers can tune penalty sensitivity without touching pipeline internals.
+    """
+
+    per_contradiction_penalty: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Confidence penalty applied per contradiction warning.",
+    )
+    high_severity_bonus_penalty: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Additional penalty when any contradiction has HIGH severity.",
+    )
+    max_total_penalty: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Upper bound on total confidence penalty from contradictions.",
+    )
+
+
 class MindMapConfig(BaseModel):
     """Runtime configuration for MindMap execution."""
 
@@ -135,6 +162,19 @@ class MindMapConfig(BaseModel):
             "'hard_reject' (filter low-confidence evidence) (Phase 5)."
         ),
     )
+    gating: GatingConfig = Field(
+        default_factory=GatingConfig,
+        description="Configurable penalty coefficients for contradiction-based gating.",
+    )
+
+    @model_validator(mode="after")
+    def aggregation_flags_mutually_exclusive(self) -> "MindMapConfig":
+        """Enforce that use_spanner_aggregation and use_deterministic_aggregation cannot both be True."""
+        if self.use_spanner_aggregation and self.use_deterministic_aggregation:
+            raise ValueError(
+                "use_spanner_aggregation and use_deterministic_aggregation are mutually exclusive"
+            )
+        return self
 
 
 class MiningAdapter(Protocol):
@@ -1009,11 +1049,18 @@ class MindMapPipeline:
 
         response_confidence_score = breakdown.average_confidence
         if contradiction_warnings and self.config.enable_contradiction_detection:
-            penalty = min(0.5, 0.1 * len(contradiction_warnings))
+            gating_cfg = self.config.gating
+            penalty = min(
+                gating_cfg.max_total_penalty,
+                gating_cfg.per_contradiction_penalty * len(contradiction_warnings),
+            )
             if any(
                 warning.severity == ContradictionSeverity.HIGH for warning in contradiction_warnings
             ):
-                penalty = min(0.5, penalty + 0.1)
+                penalty = min(
+                    gating_cfg.max_total_penalty,
+                    penalty + gating_cfg.high_severity_bonus_penalty,
+                )
             response_confidence_score = max(0.0, response_confidence_score - penalty)
 
         # Check gating conditions: confidence, freshness, or contradictions
