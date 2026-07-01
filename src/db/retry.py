@@ -44,7 +44,7 @@ def is_transient_error(exception: Exception) -> bool:
         if hasattr(exception, "code") and exception.code is not None:
             error_code_name = str(exception.code).split(".")[-1]
             error_code = error_code_name
-    except AttributeError, IndexError, TypeError:
+    except (AttributeError, IndexError, TypeError):
         pass
 
     # Check if it's a known transient error code
@@ -113,6 +113,8 @@ async def async_retry_with_backoff(
     for attempt in range(max_attempts):
         try:
             return await func(*args, **kwargs)
+        except asyncio.CancelledError:
+            raise  # Always re-raise immediately — never retry cancelled tasks
         except Exception as e:
             last_error = e
             is_retryable = is_transient_error(e)
