@@ -40,7 +40,11 @@ from src.models.mindmap import (
     StageTiming,
     SynthesisResult,
 )
-from src.observability.metrics import pipeline_execution_histogram, pipeline_fact_counter
+from src.observability.metrics import (
+    pipeline_execution_histogram,
+    pipeline_fact_counter,
+    record_high_severity_contradiction,
+)
 from src.observability.tracing import trace_span
 
 logger = logging.getLogger(__name__)
@@ -901,9 +905,20 @@ class MindMapPipeline:
         Returns:
             SynthesisResult: Grounded user response.
         """
-        del mining_result, tenant_id  # Unused in deterministic mode
+        del mining_result  # Unused in deterministic mode
         started = perf_counter()
         signal = self._build_phase5_synthesis_signal(evidence_context=evidence_context)
+
+        if signal is not None and signal.contradiction_warnings:
+            high_severity_warnings = [
+                w for w in signal.contradiction_warnings if w.severity == ContradictionSeverity.HIGH
+            ]
+            if high_severity_warnings and tenant_id:
+                for warning in high_severity_warnings:
+                    record_high_severity_contradiction(
+                        tenant_id,
+                        next(iter(warning.conflicting_node_ids), tenant_id),
+                    )
 
         if not serialization_result.facts:
             return SynthesisResult(

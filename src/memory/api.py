@@ -30,6 +30,7 @@ from src.models.schemas import (
     SessionResponse,
 )
 from src.observability.logging import structured_log
+from src.observability.metrics import record_authorization_denial
 from src.project_base.settings import settings
 from src.security.governance import AuthorizationScope  # noqa: TC001
 from src.security.validators import (
@@ -171,12 +172,19 @@ class MemoryAPI:
                 context=decision_context,
             )
         except RuntimeError:
-            structured_log(logger, logging.WARNING, "authorization_decision_record_failed", {
-                "tenant_id": tenant_id,
-                "operation": operation,
-            })
+            structured_log(
+                logger,
+                logging.WARNING,
+                "authorization_decision_record_failed",
+                {
+                    "tenant_id": tenant_id,
+                    "operation": operation,
+                },
+            )
 
         if not allowed:
+            resource_type = label or memory_tier or relationship_type or operation
+            record_authorization_denial(tenant_id, resource_type)
             msg = f"authorization denied for {operation}"
             raise PermissionError(msg)
 
@@ -367,16 +375,26 @@ class MemoryAPI:
                 initial_backoff_seconds=retry_policy.initial_backoff_seconds,
                 max_backoff_seconds=retry_policy.max_backoff_seconds,
             )
-            structured_log(logger, logging.INFO, "create_session_completed", {
-                "tenant_id": tenant_id,
-                "session_id": session_id,
-            })
+            structured_log(
+                logger,
+                logging.INFO,
+                "create_session_completed",
+                {
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                },
+            )
         except Exception as e:
-            structured_log(logger, logging.ERROR, "create_session_exhausted", {
-                "tenant_id": tenant_id,
-                "session_id": session_id,
-                "attempts": retry_policy.max_attempts,
-            })
+            structured_log(
+                logger,
+                logging.ERROR,
+                "create_session_exhausted",
+                {
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "attempts": retry_policy.max_attempts,
+                },
+            )
             msg = f"Failed to create session after {retry_policy.max_attempts} attempts: {e}"
             raise RuntimeError(msg) from e
 
@@ -550,17 +568,27 @@ class MemoryAPI:
                 initial_backoff_seconds=retry_policy.initial_backoff_seconds,
                 max_backoff_seconds=retry_policy.max_backoff_seconds,
             )
-            structured_log(logger, logging.INFO, "add_semantic_fact_completed", {
-                "tenant_id": tenant_id,
-                "entity_id": entity_id,
-                "entity_type": entity_type,
-            })
+            structured_log(
+                logger,
+                logging.INFO,
+                "add_semantic_fact_completed",
+                {
+                    "tenant_id": tenant_id,
+                    "entity_id": entity_id,
+                    "entity_type": entity_type,
+                },
+            )
         except Exception as e:
-            structured_log(logger, logging.ERROR, "add_semantic_fact_exhausted", {
-                "tenant_id": tenant_id,
-                "entity_id": entity_id,
-                "attempts": retry_policy.max_attempts,
-            })
+            structured_log(
+                logger,
+                logging.ERROR,
+                "add_semantic_fact_exhausted",
+                {
+                    "tenant_id": tenant_id,
+                    "entity_id": entity_id,
+                    "attempts": retry_policy.max_attempts,
+                },
+            )
             msg = f"Failed to add semantic fact after {retry_policy.max_attempts} attempts: {e}"
             raise RuntimeError(msg) from e
 
@@ -820,18 +848,28 @@ class MemoryAPI:
                 initial_backoff_seconds=retry_policy.initial_backoff_seconds,
                 max_backoff_seconds=retry_policy.max_backoff_seconds,
             )
-            structured_log(logger, logging.INFO, "record_audit_event_completed", {
-                "tenant_id": tenant_id,
-                "event_type": event_type,
-                "source_node_id": source_node_id,
-            })
+            structured_log(
+                logger,
+                logging.INFO,
+                "record_audit_event_completed",
+                {
+                    "tenant_id": tenant_id,
+                    "event_type": event_type,
+                    "source_node_id": source_node_id,
+                },
+            )
         except Exception as e:
-            structured_log(logger, logging.ERROR, "record_audit_event_exhausted", {
-                "tenant_id": tenant_id,
-                "event_type": event_type,
-                "source_node_id": source_node_id,
-                "attempts": retry_policy.max_attempts,
-            })
+            structured_log(
+                logger,
+                logging.ERROR,
+                "record_audit_event_exhausted",
+                {
+                    "tenant_id": tenant_id,
+                    "event_type": event_type,
+                    "source_node_id": source_node_id,
+                    "attempts": retry_policy.max_attempts,
+                },
+            )
             msg = f"Failed to record audit event after {retry_policy.max_attempts} attempts: {e}"
             raise RuntimeError(msg) from e
         else:
@@ -966,10 +1004,15 @@ class MemoryAPI:
             except Exception as error:
                 if not _is_match_query_unsupported(error):
                     raise
-                structured_log(logger, logging.INFO, "retrieve_context_window_match_unsupported", {
-                    "tenant_id": tenant_id,
-                    "session_id": session_id,
-                })
+                structured_log(
+                    logger,
+                    logging.INFO,
+                    "retrieve_context_window_match_unsupported",
+                    {
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                    },
+                )
                 results = execute_sql_rows(database, sql_fallback_query, query_params)
 
             for row in results:
@@ -1111,9 +1154,14 @@ class MemoryAPI:
                 MemoryAPI._enforce_audit_append_only("UPDATE")
             except PermissionError:
                 # Keep MemoryAPI contract stable while still enforcing append-only checks.
-                structured_log(logger, logging.WARNING, "audit_immutability_guard_triggered", {
-                    "memory_tier": memory_tier,
-                })
+                structured_log(
+                    logger,
+                    logging.WARNING,
+                    "audit_immutability_guard_triggered",
+                    {
+                        "memory_tier": memory_tier,
+                    },
+                )
             msg = "audit tier is append-only and cannot be updated"
             raise ValueError(msg)
 
@@ -1128,12 +1176,17 @@ class MemoryAPI:
         if session_action_count is not None and not weighting_policy.should_trigger(
             session_action_count
         ):
-            structured_log(logger, logging.INFO, "weight_update_skipped", {
-                "tenant_id": tenant_id,
-                "memory_tier": memory_tier,
-                "action_count": session_action_count,
-                "threshold": weighting_policy.action_count_threshold,
-            })
+            structured_log(
+                logger,
+                logging.INFO,
+                "weight_update_skipped",
+                {
+                    "tenant_id": tenant_id,
+                    "memory_tier": memory_tier,
+                    "action_count": session_action_count,
+                    "threshold": weighting_policy.action_count_threshold,
+                },
+            )
             return
 
         # Bayesian log-odds update: ln(1.25) ≈ 0.223
@@ -1152,18 +1205,28 @@ class MemoryAPI:
                 initial_backoff_seconds=retry_policy.initial_backoff_seconds,
                 max_backoff_seconds=retry_policy.max_backoff_seconds,
             )
-            structured_log(logger, logging.INFO, "weight_update_completed", {
-                "tenant_id": tenant_id,
-                "node_count": len(node_ids),
-                "memory_tier": memory_tier,
-            })
+            structured_log(
+                logger,
+                logging.INFO,
+                "weight_update_completed",
+                {
+                    "tenant_id": tenant_id,
+                    "node_count": len(node_ids),
+                    "memory_tier": memory_tier,
+                },
+            )
         except Exception as e:
-            structured_log(logger, logging.ERROR, "weight_update_exhausted", {
-                "tenant_id": tenant_id,
-                "node_count": len(node_ids),
-                "memory_tier": memory_tier,
-                "attempts": retry_policy.max_attempts,
-            })
+            structured_log(
+                logger,
+                logging.ERROR,
+                "weight_update_exhausted",
+                {
+                    "tenant_id": tenant_id,
+                    "node_count": len(node_ids),
+                    "memory_tier": memory_tier,
+                    "attempts": retry_policy.max_attempts,
+                },
+            )
             raise WeightUpdateFailedError(
                 tenant_id=tenant_id,
                 node_ids=node_ids,

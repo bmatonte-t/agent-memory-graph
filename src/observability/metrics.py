@@ -153,3 +153,42 @@ def pipeline_fact_counter() -> Counter:
         unit="1",
         description="Number of serialized facts produced by MindMap pipeline executions",
     )
+
+
+def emit_counter(name: str, *, labels: dict[str, str]) -> None:
+    """Emit a single-unit increment on a named counter with the given labels.
+
+    This is a convenience wrapper around the OTel Counter API that creates (or
+    looks up) the counter instrument and records a value of 1.
+
+    Args:
+        name: Metric name (e.g. ``"authorization.denied"``).
+        labels: Attribute dictionary forwarded as OTel metric attributes.
+    """
+    _get_meter().create_counter(name, unit="1").add(1, labels)
+
+
+def record_authorization_denial(tenant_id: str, resource_type: str) -> None:
+    """Emit a metric for every authorization DENIED decision.
+
+    Args:
+        tenant_id: Tenant identifier for the denied request.
+        resource_type: Resource type that was denied (e.g. label or memory tier).
+    """
+    emit_counter(
+        "authorization.denied",
+        labels={"tenant_id": tenant_id, "resource_type": resource_type},
+    )
+
+
+def record_high_severity_contradiction(tenant_id: str, node_id: str) -> None:
+    """Emit metric when HIGH severity contradiction is detected during synthesis.
+
+    Args:
+        tenant_id: Tenant identifier for the affected pipeline execution.
+        node_id: Node identifier associated with the contradiction.
+    """
+    emit_counter(
+        "memory.contradiction.high",
+        labels={"tenant_id": tenant_id, "node_id": node_id},
+    )
