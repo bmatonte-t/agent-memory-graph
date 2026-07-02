@@ -41,3 +41,43 @@ output "environment" {
   description = "Active Terraform workspace / environment."
   value       = local.environment
 }
+
+output "audit_log_bucket_name" {
+  description = "Dedicated Cloud Logging bucket for long-term audit retention."
+  value       = google_logging_project_bucket_config.audit_events.name
+}
+
+output "workload_identity_provider_name" {
+  description = "GitLab OIDC Workload Identity provider resource name when enabled."
+  value       = var.enable_workload_identity_federation ? google_iam_workload_identity_pool_provider.gitlab_oidc[0].name : ""
+}
+
+output "monitoring_custom_service_name" {
+  description = "Cloud Monitoring custom service name used for AMG SLOs."
+  value       = google_monitoring_custom_service.amg.name
+}
+
+output "availability_slo_name" {
+  description = "Availability SLO full resource name."
+  value       = google_monitoring_slo.availability.name
+}
+
+output "latency_slo_name" {
+  description = "Latency SLO full resource name."
+  value       = google_monitoring_slo.latency_p95.name
+}
+
+output "error_rate_slo_name" {
+  description = "Error-rate SLO full resource name."
+  value       = google_monitoring_slo.error_rate.name
+}
+
+output "executive_slo_dashboard_name" {
+  description = "Monitoring dashboard ID for executive SLO view."
+  value       = google_monitoring_dashboard.executive_slo.id
+}
+
+output "technical_slo_dashboard_name" {
+  description = "Monitoring dashboard ID for technical SLO view."
+  value       = google_monitoring_dashboard.technical_slo.id
+}

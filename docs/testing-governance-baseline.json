@@ -1,0 +1,19 @@
+{
+    "thresholds": {
+        "max_density": 12.0,
+        "max_mock_references": 80,
+        "max_test_file_lines": 700
+    },
+    "approved_over_mocked_integration_files": [],
+    "approved_duplicate_test_identifiers": [],
+    "approved_large_test_files": [
+        {
+            "path": "tests/unit/pipelines/test_extraction_orchestrator_phase_b3.py",
+            "note": "Legacy hotspot pending phased decomposition under EPIC-08."
+        },
+        {
+            "path": "tests/unit/pipelines/test_fuzzy_matcher_phase_b2.py",
+            "note": "Legacy hotspot pending phased decomposition under EPIC-08."
+        }
+    ]
+}

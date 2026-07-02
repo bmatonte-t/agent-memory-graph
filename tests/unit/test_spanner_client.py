@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
+import threading
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -81,3 +82,56 @@ class TestSpannerClient:
             SpannerClient.execute_update(sql, {})
 
         mock_batch.execute_update.assert_not_called()
+
+
+def test_spanner_client_initialize_is_thread_safe() -> None:
+    """Concurrent initialize() calls must create exactly one underlying client.
+
+    Spawns 20 threads that all call SpannerClient.initialize() simultaneously.
+    Without a lock, the race window between the `if cls._client is None` check
+    and the assignment allows multiple threads to create separate client objects.
+    With a threading.Lock guarding the critical section, exactly one client is
+    ever constructed regardless of scheduling order.
+
+    A barrier synchronizes all threads to start at the same moment, maximizing
+    contention on the singleton guard and reliably exposing the bug if the lock
+    is absent.
+    """
+    # Structural assertion: the class must carry a threading.Lock for protection.
+    assert isinstance(SpannerClient._lock, type(threading.Lock())), (
+        "SpannerClient must define a class-level threading.Lock named '_lock'"
+    )
+
+    SpannerClient._client = None  # Reset singleton state before test
+
+    n_threads = 20
+    barrier = threading.Barrier(n_threads)
+    clients_created: list[int] = []
+
+    def counting_init(*args: object, **kwargs: object) -> MagicMock:
+        clients_created.append(1)
+        mock_client = MagicMock()
+        mock_client.instance.return_value.database.return_value = MagicMock()
+        return mock_client
+
+    def run_initialize() -> None:
+        barrier.wait()  # All threads enter the race at the same time
+        SpannerClient.initialize(
+            project_id="test-project",
+            instance_id="test-instance",
+            database_id="test-database",
+        )
+
+    with patch("google.cloud.spanner.Client", side_effect=counting_init):
+        threads = [threading.Thread(target=run_initialize) for _ in range(n_threads)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+    assert len(clients_created) == 1, f"Expected 1 client, got {len(clients_created)}"
+
+    # Cleanup singleton state after test
+    SpannerClient._client = None
+    SpannerClient._instance_ref = None
+    SpannerClient._database = None

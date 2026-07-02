@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from src.db.spanner_client import SpannerClient
 from src.integrations.google_sdk_wrappers import generate_generative_ai_text
@@ -23,7 +23,7 @@ from src.models.confidence import (
     ContradictionWarning,
     SynthesisConfidenceSignal,
 )
-from src.models.evidence import EvidenceContext, EvidenceSummary
+from src.models.evidence import ContradictionFlag, EvidenceContext, EvidenceSummary
 from src.models.mindmap import (
     AggregationResult,
     EvidenceEdge,
@@ -40,7 +40,11 @@ from src.models.mindmap import (
     StageTiming,
     SynthesisResult,
 )
-from src.observability.metrics import pipeline_execution_histogram, pipeline_fact_counter
+from src.observability.metrics import (
+    pipeline_execution_histogram,
+    pipeline_fact_counter,
+    record_high_severity_contradiction,
+)
 from src.observability.tracing import trace_span
 
 logger = logging.getLogger(__name__)
@@ -89,6 +93,33 @@ class MindMapPipelineError(RuntimeError):
         self.code = code
 
 
+class GatingConfig(BaseModel):
+    """Configurable penalty coefficients for synthesis confidence gating.
+
+    Replaces magic numbers in the contradiction penalty calculation so that
+    callers can tune penalty sensitivity without touching pipeline internals.
+    """
+
+    per_contradiction_penalty: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Confidence penalty applied per contradiction warning.",
+    )
+    high_severity_bonus_penalty: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Additional penalty when any contradiction has HIGH severity.",
+    )
+    max_total_penalty: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Upper bound on total confidence penalty from contradictions.",
+    )
+
+
 class MindMapConfig(BaseModel):
     """Runtime configuration for MindMap execution."""
 
@@ -96,6 +127,7 @@ class MindMapConfig(BaseModel):
     max_hops: int = Field(default=3, ge=1, le=6)
     max_paths: int = Field(default=20, ge=1)
     max_evidence_nodes: int = Field(default=200, ge=1)
+    # Model selection is deployment-controlled (ADR-0002), not caller-controlled.
     extraction_model_name: str = Field(default="gemini-2.5-flash")
     synthesis_model_name: str = Field(default="gemini-2.5-pro")
     use_vertex_mining: bool = Field(default=False)
@@ -135,6 +167,18 @@ class MindMapConfig(BaseModel):
             "'hard_reject' (filter low-confidence evidence) (Phase 5)."
         ),
     )
+    gating: GatingConfig = Field(
+        default_factory=GatingConfig,
+        description="Configurable penalty coefficients for contradiction-based gating.",
+    )
+
+    @model_validator(mode="after")
+    def aggregation_flags_mutually_exclusive(self) -> MindMapConfig:
+        """Enforce aggregation flags are mutually exclusive."""
+        if self.use_spanner_aggregation and self.use_deterministic_aggregation:
+            msg = "use_spanner_aggregation and use_deterministic_aggregation are mutually exclusive"
+            raise ValueError(msg)
+        return self
 
 
 class MiningAdapter(Protocol):
@@ -524,11 +568,22 @@ class SpannerAggregationAdapter:
                 edge_weight,
             ) = row  # type: ignore[misc]
 
+            # Validate required fields before casting — str(None) == "None" is silent corruption.
+            if source_node_id is None:
+                msg = f"node_id cannot be None in row {idx}: {row!r}"
+                raise ValueError(msg)
+            if destination_node_id is None:
+                msg = f"destination_node_id cannot be None in row {idx}: {row!r}"
+                raise ValueError(msg)
+            if memory_tier is None:
+                msg = f"memory_tier cannot be None in row {idx}: {row!r}"
+                raise ValueError(msg)
+
             if source_node_id not in nodes:  # type: ignore[operator]
                 nodes[str(source_node_id)] = EvidenceNode(  # type: ignore[arg-type]
                     node_id=str(source_node_id),  # type: ignore[arg-type]
                     memory_tier=str(memory_tier),  # type: ignore[arg-type]
-                    label=str(label),  # type: ignore[arg-type]
+                    label=str(label) if label is not None else "",  # type: ignore[arg-type]
                     weight=float(source_weight) if source_weight else 0.0,  # type: ignore[arg-type]
                 )
 
@@ -695,20 +750,46 @@ class MindMapPipeline:
             trace_id = f"trace_{uuid.uuid4()}"
             stage_timings: list[StageTiming] = []
 
-            mining_result = await self.mining_adapter.mine(query)
+            with trace_span(
+                "mindmap.stage.mine",
+                attributes={
+                    "tenant.id": tenant_id or "",
+                    "session.id": session_id or "",
+                    "mindmap.stage": "mine",
+                },
+            ):
+                mining_result = await self.mining_adapter.mine(query)
             stage_timings.append(
                 StageTiming(stage=PipelineStage.MINE, latency_ms=mining_result.latency_ms)
             )
 
-            aggregation_result = await self.aggregation_adapter.aggregate(
-                mining_result=mining_result,
-                config=self.config,
-            )
+            with trace_span(
+                "mindmap.stage.aggregate",
+                attributes={
+                    "tenant.id": tenant_id or "",
+                    "session.id": session_id or "",
+                    "mindmap.stage": "aggregate",
+                    "mindmap.mined_entity_count": len(mining_result.entities),
+                },
+            ):
+                aggregation_result = await self.aggregation_adapter.aggregate(
+                    mining_result=mining_result,
+                    config=self.config,
+                )
             stage_timings.append(
                 StageTiming(stage=PipelineStage.AGGREGATE, latency_ms=aggregation_result.latency_ms)
             )
 
-            serialization_result = self._serialize(aggregation_result=aggregation_result)
+            with trace_span(
+                "mindmap.stage.serialize",
+                attributes={
+                    "tenant.id": tenant_id or "",
+                    "session.id": session_id or "",
+                    "mindmap.stage": "serialize",
+                    "mindmap.path_count": len(aggregation_result.paths),
+                },
+            ):
+                serialization_result = self._serialize(aggregation_result=aggregation_result)
             stage_timings.append(
                 StageTiming(
                     stage=PipelineStage.SERIALIZE, latency_ms=serialization_result.latency_ms
@@ -736,20 +817,29 @@ class MindMapPipeline:
                         extra={"tenant_id": tenant_id, "error": str(error)},
                     )
 
-            if self.config.use_vertex_synthesis:
-                synthesis_result = self._synthesize_with_vertex(
-                    serialization_result=serialization_result,
-                    mining_result=mining_result,
-                    tenant_id=tenant_id,
-                    evidence_context=evidence_context,
-                )
-            else:
-                synthesis_result = self._synthesize(
-                    serialization_result=serialization_result,
-                    mining_result=mining_result,
-                    tenant_id=tenant_id,
-                    evidence_context=evidence_context,
-                )
+            with trace_span(
+                "mindmap.stage.synthesize",
+                attributes={
+                    "tenant.id": tenant_id or "",
+                    "session.id": session_id or "",
+                    "mindmap.stage": "synthesize",
+                    "mindmap.fact_count": len(serialization_result.facts),
+                },
+            ):
+                if self.config.use_vertex_synthesis:
+                    synthesis_result = self._synthesize_with_vertex(
+                        serialization_result=serialization_result,
+                        mining_result=mining_result,
+                        tenant_id=tenant_id,
+                        evidence_context=evidence_context,
+                    )
+                else:
+                    synthesis_result = self._synthesize(
+                        serialization_result=serialization_result,
+                        mining_result=mining_result,
+                        tenant_id=tenant_id,
+                        evidence_context=evidence_context,
+                    )
             self._validate_grounding(
                 synthesis_result=synthesis_result,
                 serialization_result=serialization_result,
@@ -901,9 +991,20 @@ class MindMapPipeline:
         Returns:
             SynthesisResult: Grounded user response.
         """
-        del mining_result, tenant_id  # Unused in deterministic mode
+        del mining_result  # Unused in deterministic mode
         started = perf_counter()
         signal = self._build_phase5_synthesis_signal(evidence_context=evidence_context)
+
+        if signal is not None and signal.contradiction_warnings:
+            high_severity_warnings = [
+                w for w in signal.contradiction_warnings if w.severity == ContradictionSeverity.HIGH
+            ]
+            if high_severity_warnings and tenant_id:
+                for warning in high_severity_warnings:
+                    record_high_severity_contradiction(
+                        tenant_id,
+                        next(iter(warning.conflicting_node_ids), tenant_id),
+                    )
 
         if not serialization_result.facts:
             return SynthesisResult(
@@ -1009,11 +1110,18 @@ class MindMapPipeline:
 
         response_confidence_score = breakdown.average_confidence
         if contradiction_warnings and self.config.enable_contradiction_detection:
-            penalty = min(0.5, 0.1 * len(contradiction_warnings))
+            gating_cfg = self.config.gating
+            penalty = min(
+                gating_cfg.max_total_penalty,
+                gating_cfg.per_contradiction_penalty * len(contradiction_warnings),
+            )
             if any(
                 warning.severity == ContradictionSeverity.HIGH for warning in contradiction_warnings
             ):
-                penalty = min(0.5, penalty + 0.1)
+                penalty = min(
+                    gating_cfg.max_total_penalty,
+                    penalty + gating_cfg.high_severity_bonus_penalty,
+                )
             response_confidence_score = max(0.0, response_confidence_score - penalty)
 
         # Check gating conditions: confidence, freshness, or contradictions
@@ -1079,12 +1187,14 @@ class MindMapPipeline:
 
         for item in evidence_context.items:
             for flag_str in item.contradiction_flags:
-                if ":" in flag_str:
-                    severity, node_id = flag_str.split(":", 1)
-                    if severity in contradictions_by_severity:
-                        contradictions_by_severity[severity].add(node_id)
-                else:
-                    contradictions_by_severity["medium"].add(flag_str)
+                try:
+                    flag = ContradictionFlag.from_string(flag_str)
+                except ValueError:
+                    logger.warning(
+                        "Skipping malformed contradiction flag", extra={"flag": flag_str}
+                    )
+                    continue
+                contradictions_by_severity[flag.severity].add(flag.node_id)
 
         warnings: list[ContradictionWarning] = []
         for severity in ["high", "medium", "low"]:

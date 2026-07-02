@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, cast
 
@@ -25,6 +26,18 @@ from src.security.validators import validate_required_string, validate_tenant_id
 logger = logging.getLogger(__name__)
 
 _MIN_ROW_COLUMNS = 2
+
+
+@dataclass(frozen=True)
+class PathRetrievalResult:
+    """Typed result returned by PathFinder.find_paths().
+
+    Replaces the bare tuple (list[str], int) so callers have named attributes
+    and static-analysis tools can verify field access.
+    """
+
+    paths: list[str]
+    total_chars: int
 
 
 def _is_match_query_unsupported(error: Exception) -> bool:
@@ -82,7 +95,7 @@ class EvidentPathFinder:
         end_entity_id: str,
         start_node_id: str | None = None,
         end_node_id: str | None = None,
-    ) -> tuple[list[str], int]:
+    ) -> PathRetrievalResult:
         """Find shortest paths between entities using GQL.
 
         Equivalent to Neo4j allShortestPaths(), but deterministic via:
@@ -98,9 +111,8 @@ class EvidentPathFinder:
             end_node_id: Optional graph node ID to constrain end
 
         Returns:
-            tuple: (serialized_paths, total_chars)
-                - serialized_paths: list of compact path strings
-                - total_chars: total character count for token tracking
+            PathRetrievalResult with paths (list of compact path strings)
+            and total_chars (total character count for token tracking).
 
         Raises:
             PathRetrievalError: If query fails or timeout
@@ -116,7 +128,7 @@ class EvidentPathFinder:
         )
         del start_node_id, end_node_id
 
-        async def _execute_query(**_: Any) -> tuple[list[str], int]:
+        async def _execute_query(**_: Any) -> PathRetrievalResult:
             try:
                 # Build GQL query to find shortest paths
                 # Constraint: max path length = max_path_length hops
@@ -187,7 +199,7 @@ class EvidentPathFinder:
                             f"->{rel_type}->{end_entity_id.replace('_', ' ')}"
                         )
                     total_chars = sum(len(path) for path in results)
-                    return results, total_chars
+                    return PathRetrievalResult(paths=results, total_chars=total_chars)
 
                 for row in rows:
                     if len(row) < _MIN_ROW_COLUMNS:
@@ -254,7 +266,7 @@ class EvidentPathFinder:
                     total_chars,
                 )
 
-                return results, total_chars  # noqa: TRY300
+                return PathRetrievalResult(paths=results, total_chars=total_chars)
 
             except Exception as e:
                 msg = f"path_retrieval_failed: {e}"

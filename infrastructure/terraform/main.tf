@@ -3,9 +3,10 @@
 ###############################################################################
 
 locals {
-  service_name = "agent-memory-graph"
-  min_instances = lookup(var.cloud_run_min_instances, local.environment, 1)
-  max_instances = lookup(var.cloud_run_max_instances, local.environment, 20)
+  service_name       = "agent-memory-graph"
+  min_instances      = lookup(var.cloud_run_min_instances, local.environment, 1)
+  max_instances      = lookup(var.cloud_run_max_instances, local.environment, 20)
+  vpc_connector_name = lookup(var.vpc_connector_name, local.environment, "")
 }
 
 resource "google_cloud_run_v2_service" "app" {
@@ -23,6 +24,14 @@ resource "google_cloud_run_v2_service" "app" {
     scaling {
       min_instance_count = local.min_instances
       max_instance_count = local.max_instances
+    }
+
+    dynamic "vpc_access" {
+      for_each = local.vpc_connector_name != "" ? [local.vpc_connector_name] : []
+      content {
+        connector = vpc_access.value
+        egress    = "PRIVATE_RANGES_ONLY"
+      }
     }
 
     containers {
@@ -45,22 +54,22 @@ resource "google_cloud_run_v2_service" "app" {
       # -----------------------------------------------------------------------
 
       env {
-        name = "AGENT_MEMORY_GRAPH_ENVIRONMENT"
+        name  = "AGENT_MEMORY_GRAPH_ENVIRONMENT"
         value = local.environment
       }
 
       env {
-        name = "AGENT_MEMORY_GRAPH_SINGLE_COMPANY__ENABLED"
+        name  = "AGENT_MEMORY_GRAPH_SINGLE_COMPANY__ENABLED"
         value = "true"
       }
 
       env {
-        name = "AGENT_MEMORY_GRAPH_SINGLE_COMPANY__COMPANY_ID"
+        name  = "AGENT_MEMORY_GRAPH_SINGLE_COMPANY__COMPANY_ID"
         value = var.company_id
       }
 
       env {
-        name = "AGENT_MEMORY_GRAPH_SINGLE_COMPANY__AUTH_MODE"
+        name  = "AGENT_MEMORY_GRAPH_SINGLE_COMPANY__AUTH_MODE"
         value = var.auth_mode
       }
 

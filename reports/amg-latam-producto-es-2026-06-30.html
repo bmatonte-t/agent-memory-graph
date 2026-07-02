@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Memory Graph — Propuesta de Producto LATAM Airlines</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media print {
+      @page { size: A4; margin: 1.2cm; }
+      html, body { margin: 0; padding: 0; }
+      .section { page-break-inside: avoid; page-break-after: auto; }
+      .toc-page { page-break-after: always; }
+      .no-print { display: none !important; }
+      h1 { page-break-before: always; page-break-after: avoid; }
+      table { page-break-inside: avoid; }
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; color: #1e293b; line-height: 1.65; max-width: 960px; margin: 0 auto; padding: 2rem 1.5rem; }
+    .section { margin-bottom: 2.5rem; }
+    h1 { font-size: 1.9rem; font-weight: 800; color: #0F004F; border-bottom: 3px solid #4257E8; padding-bottom: 0.75rem; margin-bottom: 1.5rem; margin-top: 2.5rem; }
+    h2 { font-size: 1.4rem; font-weight: 700; color: #0F004F; margin-bottom: 1rem; margin-top: 1.75rem; }
+    h3 { font-size: 1.15rem; font-weight: 600; color: #4257E8; margin-bottom: 0.75rem; }
+    p { margin-bottom: 1rem; color: #475569; }
+    .tagline { font-size: 1.05rem; color: #ED1650; font-weight: 600; margin-bottom: 1rem; }
+    .highlight { background: linear-gradient(120deg, rgba(66,87,232,.07), rgba(237,22,80,.06)); padding: 1.5rem; border-left: 4px solid #4257E8; border-radius: 0.5rem; margin: 1.5rem 0; }
+    .highlight-coral { background: linear-gradient(120deg, rgba(237,22,80,.06), rgba(237,22,80,.03)); border-left-color: #ED1650; }
+    table { width: 100%; border-collapse: collapse; margin: 1.5rem 0; font-size: .92rem; }
+    th { background: #0F004F; color: white; padding: 0.7rem 0.9rem; text-align: left; font-weight: 700; }
+    td { padding: 0.7rem 0.9rem; border-bottom: 1px solid #e2e8f0; vertical-align: top; }
+    tr:nth-child(even) { background: #f8fafc; }
+    ul, ol { margin-left: 1.5rem; margin-bottom: 1rem; color: #475569; }
+    li { margin-bottom: 0.5rem; }
+    .badge { display: inline-block; background: #4257E8; color: white; padding: 0.25rem 0.75rem; border-radius: 9999px; font-size: 0.78rem; font-weight: 700; margin-right: 0.5rem; margin-bottom: 0.5rem; }
+    .badge-red { background: #ED1650; }
+    .badge-green { background: #10b981; }
+    code { background: #f1f5f9; padding: 0.2rem 0.45rem; border-radius: 0.25rem; font-family: 'Monaco', 'Fira Code', monospace; font-size: .88em; }
+    .cover { background: linear-gradient(135deg, #0F004F 0%, #4257E8 55%, #2d1b69 100%); color: white; padding: 4rem 2.5rem; text-align: center; margin-bottom: 2rem; border-radius: 1rem; }
+    .cover h1 { color: white; border: none; margin: 0; font-size: 2.5rem; }
+    .cover p { color: #c7d2fe; }
+    .toc { background: #f8fafc; padding: 2rem; border-radius: 0.75rem; margin: 2rem 0; }
+    .toc h2 { color: #0F004F; margin-top: 0; }
+    .toc ul { list-style: none; padding: 0; }
+    .toc li { margin: 0.5rem 0; border-bottom: 1px solid #e2e8f0; padding-bottom: .5rem; }
+    .toc a { color: #4257E8; text-decoration: none; font-weight: 500; }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem; margin: 1.5rem 0; }
+    .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 1.25rem; margin: 1.5rem 0; }
+    .card { background: white; border: 1px solid #e2e8f0; border-radius: 0.75rem; padding: 1.4rem; }
+    .card-header { font-weight: 700; color: #0F004F; margin-bottom: 0.75rem; font-size: 1rem; }
+    footer { background: #0F004F; color: white; padding: 2rem; text-align: center; border-radius: 1rem; margin-top: 3rem; }
+    footer p { color: #c7d2fe; margin-bottom: .5rem; }
+    .latam-tag { display: inline-block; background: rgba(66,87,232,.1); border: 1px solid rgba(66,87,232,.3); color: #4257E8; font-size: .75rem; font-weight: 700; padding: .2rem .6rem; border-radius: .35rem; margin-right: .4rem; }
+    .coral-tag { background: rgba(237,22,80,.08); border-color: rgba(237,22,80,.3); color: #ED1650; }
+  </style>
+</head>
+<body>
+
+<!-- PORTADA -->
+<div class="cover">
+  <p style="font-size: 0.85rem; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: rgba(237,22,80,.9); margin-bottom: 1rem;">Propuesta de Producto · LATAM Airlines ADO</p>
+  <h1>Agent Memory Graph</h1>
+  <p style="font-size: 1.25rem; margin: 1rem 0;">Propuesta de Producto y Plan de Despliegue</p>
+  <div style="display:flex;flex-wrap:wrap;justify-content:center;gap:.6rem;margin:1.5rem 0;">
+    <span style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;padding:.3rem .8rem;border-radius:9999px;font-size:.8rem;font-weight:600;">Python 3.14 · FastAPI</span>
+    <span style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;padding:.3rem .8rem;border-radius:9999px;font-size:.8rem;font-weight:600;">Cloud Spanner Graph</span>
+    <span style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;padding:.3rem .8rem;border-radius:9999px;font-size:.8rem;font-weight:600;">843 pruebas · P99 &lt;5ms</span>
+    <span style="background:rgba(255,255,255,.15);border:1px solid rgba(255,255,255,.3);color:#fff;padding:.3rem .8rem;border-radius:9999px;font-size:.8rem;font-weight:600;">MCP · Backstage · DataHub</span>
+    <span style="background:rgba(237,22,80,.4);border:1px solid rgba(237,22,80,.6);color:#fff;padding:.3rem .8rem;border-radius:9999px;font-size:.8rem;font-weight:600;">Listo para producción v0.2</span>
+  </div>
+  <p style="font-size: 0.85rem; margin-top: 1.5rem; color: #cbd5e1;">Plataforma de memoria persistente, auditable y fundamentada para agentes AI de LATAM</p>
+</div>
+
+<!-- ÍNDICE -->
+<div class="toc toc-page">
+  <h2>Contenido</h2>
+  <ul>
+    <li><a href="#storytelling">0. Un lunes sin memoria — el problema que resuelve AMG</a></li>
+    <li><a href="#resumen">1. Resumen Ejecutivo</a></li>
+    <li><a href="#producto">2. Descripción del Producto</a></li>
+    <li><a href="#arquitectura">3. Arquitectura</a></li>
+    <li><a href="#valor">4. Valor Estratégico para LATAM · ROI y TCO</a></li>
+    <li><a href="#casos">5. Casos de Uso en LATAM</a></li>
+    <li><a href="#plan">6. Plan de Despliegue · Qué Necesitamos del Equipo LATAM</a></li>
+    <li><a href="#metricas">7. Métricas de Éxito</a></li>
+    <li><a href="#siguiente">8. Recomendación y Próximos Pasos</a></li>
+  </ul>
+</div>
+
+<!-- 0. STORYTELLING -->
+<div id="storytelling" class="section">
+  <h1 style="border-color: #ED1650;">0. Un lunes sin memoria</h1>
+
+  <p class="tagline">Martín Díaz. Data Engineer. ADO Squad. 9:14 del lunes.</p>
+
+  <p>Martín está construyendo un nuevo agente. El objetivo es simple: un asistente que ayude a su squad a encontrar el dueño correcto de un dataset cuando algo falla en producción. DataHub tiene la respuesta — solo necesita que el agente la encuentre de manera confiable.</p>
+
+  <p>Conecta el agente al Cosmos GenAI Gateway y lanza su primera consulta: <em>"¿Quién es el responsable del dataset de puntualidad de vuelos y cuál es el refresh schedule?"</em> El agente responde con un nombre y un horario. Suena correcto. Martín lo usa para rutear un ticket de incidente.</p>
+
+  <p>Dos horas después, el ticket rebota. Dueño incorrecto. El dataset fue transferido a otro squad hace tres meses, pero el agente no tenía forma de saberlo: arrancó con contexto cero, scrapeó DataHub en el momento, y devolvió un hecho desactualizado. Sin memoria, sin continuidad, sin trazabilidad.</p>
+
+  <div class="highlight highlight-coral">
+    <strong>El cold start problem — en números reales:</strong>
+    <ul style="margin: 0.75rem 0 0 0;">
+      <li><strong>45 minutos</strong> de tiempo de Martín re-explicando contexto al agente en tres sesiones distintas esa misma semana</li>
+      <li><strong>4.200 tokens</strong> gastados por sesión recargando conocimiento que el agente ya había recuperado el día anterior</li>
+      <li><strong>1 incidente mal ruteado</strong> porque el agente devolvió un hecho desactualizado sin señal de confianza ni timestamp</li>
+      <li><strong>Cero trazabilidad</strong> — imposible saber de dónde vino la respuesta incorrecta o qué llamada la disparó</li>
+    </ul>
+  </div>
+
+  <h2>El mismo lunes, con AMG</h2>
+
+  <p>Con Agent Memory Graph, el agente de Martín arranca de manera diferente. Cuando recibe la consulta de ownership, el pipeline MindMap se activa: extrae la entidad <em>"dataset puntualidad vuelos"</em> del prompt, traversa el grafo semántico, y recupera 12 hechos — incluyendo el dueño actual, el evento de transferencia, el refresh schedule y el último score de calidad — todos con pesos de confianza y timestamps. Los hechos se serializan con IDs únicos y se inyectan en el prompt de síntesis. El agente cita <code>fact-id: f_7a3c</code> como fuente de la respuesta de ownership.</p>
+
+  <p>La respuesta es correcta. La transferencia está reflejada. El incidente se rutea en 90 segundos. El log de auditoría muestra exactamente en qué hecho se apoyó el agente, cuándo fue validado por última vez, y cuál era su peso de confianza en el momento de la consulta.</p>
+
+  <div class="highlight">
+    <strong>Con AMG — misma consulta, resultado diferente:</strong>
+    <ul style="margin: 0.75rem 0 0 0;">
+      <li><strong>12 hechos recuperados</strong> en menos de 5ms — pre-ponderados, pre-validados, con procedencia</li>
+      <li><strong>1.200 tokens</strong> usados en síntesis — solo los hechos de alta confianza y relevancia fueron incluidos</li>
+      <li><strong>Dueño correcto devuelto</strong> — el evento de transferencia había sido ingestado desde DataHub y ponderado apropiadamente</li>
+      <li><strong>Trazabilidad completa</strong> — cada acceso, cada hecho citado, cada decisión de autorización logueada de forma inmutable</li>
+    </ul>
+  </div>
+
+  <p>Martín no cambió cómo escribe el agente. No agregó prompt engineering ni carga manual de contexto. AMG lo resolvió en la capa de infraestructura — de forma transparente, determinista, y con riesgo cero de alucinación.</p>
+</div>
+
+<!-- 1. RESUMEN EJECUTIVO -->
+<div id="resumen" class="section">
+  <h1>1. Resumen Ejecutivo</h1>
+
+  <p>Agent Memory Graph (AMG) es una plataforma de coordinación de agentes AI nativa de GCP, lista para producción, que resuelve los principales puntos de falla de los despliegues AI en LATAM: pérdida de contexto entre sesiones, alucinación de hechos organizacionales, y costo de inferencia descontrolado por contextos demasiado amplios.</p>
+
+  <p>Sus dos innovaciones centrales — el pipeline MindMap y el sistema de Cognitive Weighting — trabajan en conjunto para entregar AI mediblemente mejor: menor tasa de alucinación, recuperación más precisa, y reducción significativa del consumo de tokens LLM comparado con arquitecturas RAG convencionales.</p>
+
+  <p>Para LATAM, AMG es la capa de coordinación persistente para la infraestructura AI del ADO: una memoria organizacional compartida que todos los agentes — desde copilots internos hasta asistentes de operaciones — pueden consultar con confianza. AMG está listo para producción (v0.2, 843 pruebas pasando, P99 &lt;5ms), se despliega dentro del GCP de LATAM, e integra de forma nativa con el Cosmos GenAI Gateway, DataHub/ATLAS, MAPIS y el catálogo Backstage del ADO.</p>
+
+  <div class="highlight">
+    <strong>Números clave:</strong> Latencia P99 &lt;5ms (10x por debajo del SLO). Cognitive Weighting acota el contexto de recuperación a solo los hechos de alta confianza — reduciendo directamente el gasto de tokens LLM por turno de agente. Tasa de grounding: 100% de respuestas respaldadas por evidencia o señal explícita de insuficiencia — alucinación cero.
+  </div>
+</div>
+
+<!-- 2. DESCRIPCIÓN DEL PRODUCTO -->
+<div id="producto" class="section">
+  <h1>2. Descripción del Producto</h1>
+
+  <h2>Qué hace</h2>
+  <p>Agent Memory Graph es un sistema de memoria determinista y fundamentado en evidencia para coordinar múltiples agentes AI dentro de LATAM. Elimina la alucinación forzando que cada respuesta del agente se derive de evidencia recuperada de un grafo de conocimiento. Preserva el contexto organizacional entre sesiones, usuarios y agentes. Y provee trazas de auditoría inmutables para cada paso de razonamiento — crítico para operaciones reguladas y flujos sensibles al cumplimiento.</p>
+
+  <h2>Problemas que resuelve</h2>
+  <table>
+    <tr>
+      <th style="width:28%;">Problema</th>
+      <th style="width:42%;">Cómo lo resuelve AMG</th>
+      <th style="width:30%;">Capacidad clave</th>
+    </tr>
+    <tr>
+      <td><strong>Cold start</strong> — cada sesión arranca con contexto cero; los usuarios re-explican el mismo problema</td>
+      <td>El nivel Context almacena historial completo de sesión; el nivel Semantic persiste hechos organizacionales indefinidamente; el recall es automático en cada turno del agente</td>
+      <td>Modelo de Memoria Tripartita</td>
+    </tr>
+    <tr>
+      <td><strong>Alucinación</strong> — agentes inventan hechos no fundamentados en datos de LATAM</td>
+      <td>Pipeline MindMap: la síntesis está prohibida hasta que los hechos sean recuperados y serializados. Sin evidencia = señal explícita de insuficiencia</td>
+      <td>Pipeline MindMap Fundamentado</td>
+    </tr>
+    <tr>
+      <td><strong>Alto costo de tokens</strong> — RAG naïve inunda el contexto con chunks vagamente relevantes</td>
+      <td>Cognitive Weighting filtra la recuperación a solo hechos de alta confianza y frescos antes de la síntesis. Traversal acotado previene explosión de contexto</td>
+      <td>Cognitive Weighting (Bayesiano)</td>
+    </tr>
+    <tr>
+      <td><strong>Baja precisión de recuperación</strong> — similitud vectorial devuelve chunks temáticamente similares pero factualmente poco confiables</td>
+      <td>Traversal de grafo sobre el nivel Semantic sigue relaciones tipadas entre entidades, produciendo caminos estructuralmente fundamentados</td>
+      <td>Recuperación por Grafo Spanner</td>
+    </tr>
+    <tr>
+      <td><strong>Brecha de auditabilidad</strong> — sin trazas de razonamiento; imposible debuggear decisiones o probar cumplimiento</td>
+      <td>El nivel Audit registra inmutablemente cada acceso a memoria, llamada a tool, decisión de autorización y paso de razonamiento (append-only, nunca eliminado)</td>
+      <td>Traza de Auditoría Inmutable</td>
+    </tr>
+    <tr>
+      <td><strong>Coordinación multi-agente</strong> — múltiples agentes toman decisiones contradictorias sin contexto compartido</td>
+      <td>Todos los agentes comparten el mismo grafo Semantic. La detección de contradicción marca hechos conflictivos antes de la síntesis</td>
+      <td>Memoria Organizacional Compartida</td>
+    </tr>
+  </table>
+
+  <h2>Qué provee AMG</h2>
+  <ul>
+    <li><strong>Modelo de Memoria Tripartita</strong> — Separación estricta de Context (historial de sesión por usuario), Semantic (hechos organizacionales durables con confianza Bayesiana) y Audit (logs de cumplimiento inmutables).</li>
+    <li><strong>Pipeline de Razonamiento MindMap</strong> — Cuatro etapas deterministas: Mine → Aggregate → Serialize → Synthesize. Cada respuesta se construye exclusivamente desde evidencia recuperada del grafo.</li>
+    <li><strong>Sistema de Cognitive Weighting</strong> — Pesos log-odds Bayesianos en cada nodo y arista, decay temporal para hechos desactualizados, y gating de síntesis sobre frescura y umbrales de confianza.</li>
+    <li><strong>Coordinación Multi-Agente</strong> — Todos los agentes comparten el mismo grafo de memoria Semantic. Operaciones coordinadas y no redundantes con detección de contradicción.</li>
+    <li><strong>Traza de Auditoría Inmutable</strong> — Cada acceso, llamada a tool y paso de razonamiento en el nivel Audit (append-only) para trazabilidad de cumplimiento completa.</li>
+    <li><strong>Gobernanza ABAC</strong> — Controles de autorización granulares que limitan qué agentes pueden acceder a qué subgrafos y niveles. Deny-by-default con reason codes auditados.</li>
+    <li><strong>Integración con el ecosistema LATAM</strong> — Conectores nativos para DataHub/ATLAS, MAPIS, Cosmos GenAI Gateway, Backstage y el Feedback Engine del ADO.</li>
+  </ul>
+</div>
+
+<!-- 3. ARQUITECTURA -->
+<div id="arquitectura" class="section">
+  <h1>3. Arquitectura</h1>
+
+  <p>AMG es un servicio Python nativo de GCP construido sobre FastAPI, desplegado en Cloud Run, y respaldado por Google Cloud Spanner Graph como almacén de memoria. Todos los componentes están containerizados y gestionados mediante Terraform Infrastructure-as-Code. El sistema se despliega como un servicio dedicado dentro del GCP del ADO de LATAM — ningún dato sale del entorno.</p>
+
+  <h2>Niveles de Memoria</h2>
+  <table>
+    <tr>
+      <th>Nivel</th>
+      <th>Alcance y Propietario</th>
+      <th>Qué almacena</th>
+      <th>Ciclo de vida</th>
+    </tr>
+    <tr>
+      <td><span class="badge">CONTEXT</span></td>
+      <td>Por usuario / por sesión</td>
+      <td>Turnos de conversación específicos del usuario, respuestas del agente, estado de sesión. Alcance estrictamente a una sesión y un usuario — sin compartición cross-usuario.</td>
+      <td>24–48 horas (decay Bayesiano rápido en sesiones inactivas)</td>
+    </tr>
+    <tr>
+      <td><span class="badge">SEMANTIC</span></td>
+      <td>Toda la organización</td>
+      <td>Hechos durables, relaciones de entidades, insights descubiertos, conocimiento de documentos ingestados. Compartido entre todos los agentes del ADO dentro del alcance de política ABAC.</td>
+      <td>Meses a años (decay lento; refuerzo Bayesiano en acceso repetido)</td>
+    </tr>
+    <tr>
+      <td><span class="badge badge-red">AUDIT</span></td>
+      <td>Permanente / cumplimiento</td>
+      <td>Cada acceso a memoria, llamada a tool, grant/deny de autorización, paso de razonamiento y traza de orquestación. Indexado con reason codes.</td>
+      <td>Retención permanente (append-only, nunca modificado)</td>
+    </tr>
+  </table>
+
+  <h2>Stack Tecnológico</h2>
+  <table>
+    <tr>
+      <th>Componente</th>
+      <th>Tecnología</th>
+      <th>Notas</th>
+    </tr>
+    <tr>
+      <td>Runtime</td>
+      <td>Python 3.14 / FastAPI</td>
+      <td>Type-checking estricto (basedpyright, 0 errores, 0 warnings)</td>
+    </tr>
+    <tr>
+      <td>Almacén de Memoria</td>
+      <td>Google Cloud Spanner Graph</td>
+      <td>Queries ISO GQL, almacenamiento intercalado de aristas para traversal rápido</td>
+    </tr>
+    <tr>
+      <td>Despliegue</td>
+      <td>Cloud Run (containerizado)</td>
+      <td>Terraform IaC, estrategia de 3 entornos (dev/intg/prod)</td>
+    </tr>
+    <tr>
+      <td>Observabilidad</td>
+      <td>GCP Logging + Tracing + Metrics</td>
+      <td>Logs JSON estructurados, trazas OpenTelemetry, Cloud Monitoring</td>
+    </tr>
+    <tr>
+      <td>Auth y Gobernanza</td>
+      <td>ABAC interno o delegación externa</td>
+      <td>Conectable a Okta, Auth0, o política interna del ADO</td>
+    </tr>
+    <tr>
+      <td>Backend LLM</td>
+      <td>Cosmos GenAI Gateway</td>
+      <td>Soporta Claude, GPT-5, Gemini según configuración del ADO</td>
+    </tr>
+    <tr>
+      <td>CI/CD</td>
+      <td>GitLab CI / Cloud Build</td>
+      <td>Pre-commit hooks, ruff, type checking, pytest — requeridos antes de merge</td>
+    </tr>
+    <tr>
+      <td>Integración de Datos</td>
+      <td>DataHub MCP + MAPIS BigQuery</td>
+      <td>Conectores nativos para catálogo de datos y base de conocimiento de mantenimiento</td>
+    </tr>
+    <tr>
+      <td>Pruebas</td>
+      <td>pytest — 843 pruebas, 100% pasando</td>
+      <td>Unit + Integration + Aislamiento cross-tenant + Chaos scenarios</td>
+    </tr>
+  </table>
+</div>
+
+<!-- 4. VALOR ESTRATÉGICO + ROI -->
+<div id="valor" class="section">
+  <h1>4. Valor Estratégico para LATAM · ROI y TCO</h1>
+
+  <p>LATAM ha invertido significativamente en infraestructura AI moderna: el Cosmos GenAI Gateway corre una flota de modelos (Claude, GPT-5, Gemini, Llama) con tracking de costo por usuario y controles de budget. DataHub/ATLAS cataloga el patrimonio de datos. MAPIS concentra el conocimiento de mantenimiento. El Feedback Engine valida respuestas de chatbots con humanos. Esta madurez es real — AMG es la capa que falta para que todos estos sistemas se comporten como un todo coherente.</p>
+
+  <h2>El multiplicador organizacional</h2>
+  <p>Hoy cada iniciativa AI del ADO opera en aislamiento: el descubrimiento de un squad es desconocido para los demás. AMG crea un grafo de conocimiento organizacional compartido donde los hallazgos de cada agente enriquecen el corpus para todos los agentes futuros.</p>
+
+  <p>El Cognitive Weighting garantiza que los hechos más frecuentemente útiles suban automáticamente, mientras el conocimiento no utilizado o contradictorio decae — la memoria compartida se auto-mantiene sin curación manual.</p>
+
+  <div class="highlight">
+    <strong>Alineación con el contexto LATAM:</strong> El nivel AUDIT y los controles ABAC de AMG proveen la trazabilidad y gobernanza de acceso requerida para el uso de AI en decisiones operacionales sensibles — incluyendo seguridad aeronáutica, reporting financiero y flujos de cumplimiento regulatorio.
+  </div>
+
+  <h2>TCO y ROI en USD — Año 1</h2>
+  <p>Los siguientes valores se basan en un plan de despliegue de 16 semanas con 4,5 FTE, infraestructura GCP en estado estable, y ganancias de eficiencia medibles por ahorro de tokens y tiempo de ingenieros recuperado de re-explicación de contexto.</p>
+
+  <h3>Costo Total de Propiedad — Año 1</h3>
+  <table>
+    <tr>
+      <th>Categoría</th>
+      <th>Item</th>
+      <th>Costo Estimado (USD)</th>
+      <th>Notas</th>
+    </tr>
+    <tr>
+      <td><strong>Ingeniería</strong></td>
+      <td>4,5 FTE × 16 semanas (build + deploy)</td>
+      <td>$120.000 – $160.000</td>
+      <td>Ingenieros internos del ADO; sin licenciamiento de vendor</td>
+    </tr>
+    <tr>
+      <td><strong>Infraestructura GCP</strong></td>
+      <td>Cloud Run + Spanner + Build + Logging</td>
+      <td>$8.000 – $16.000/año</td>
+      <td>~$615–$1.100/mes estado estable post go-live</td>
+    </tr>
+    <tr>
+      <td><strong>Cosmos GenAI Gateway</strong></td>
+      <td>Inferencia LLM (etapa de síntesis)</td>
+      <td>$6.000 – $12.000/año</td>
+      <td>Cognitive Weighting reduce tokens ~30% vs. RAG baseline</td>
+    </tr>
+    <tr>
+      <td><strong>Operaciones</strong></td>
+      <td>On-call + monitoreo + actualizaciones trimestrales</td>
+      <td>$15.000 – $25.000/año</td>
+      <td>Equivalente a 0,5 FTE post go-live</td>
+    </tr>
+    <tr>
+      <td colspan="2" style="font-weight:700;background:#f1f5f9;">Total Año 1 (build + run)</td>
+      <td style="font-weight:700;background:#f1f5f9;">~$149.000 – $213.000</td>
+      <td style="background:#f1f5f9;">Build único amortizado en 3+ años</td>
+    </tr>
+    <tr>
+      <td colspan="2" style="font-weight:700;background:#f1f5f9;">Años 2–3 (solo run)</td>
+      <td style="font-weight:700;background:#f1f5f9;">~$29.000 – $53.000/año</td>
+      <td style="background:#f1f5f9;">Solo infraestructura + operaciones</td>
+    </tr>
+  </table>
+
+  <h3>Retorno Estimado — Año 1 y más allá</h3>
+  <table>
+    <tr>
+      <th>Driver de Valor</th>
+      <th>Mecanismo</th>
+      <th>Valor Anual Estimado (USD)</th>
+    </tr>
+    <tr>
+      <td><strong>Reducción de costo de tokens</strong></td>
+      <td>&gt;30% menos tokens por turno de agente (Cognitive Weighting acota contexto). A 500k turnos/año y $0,01/1k tokens promedio, una reducción del 30% ahorra ~$45/día solo en síntesis.</td>
+      <td>$15.000 – $30.000/año</td>
+    </tr>
+    <tr>
+      <td><strong>Tiempo de ingenieros recuperado</strong></td>
+      <td>Eliminación del overhead de re-explicación de contexto. Ejemplo de Martín: 45 min/semana × 50 ingenieros × $80/hr costo cargado = $150k/año en tiempo recapturado.</td>
+      <td>$100.000 – $180.000/año</td>
+    </tr>
+    <tr>
+      <td><strong>Prevención de mal ruteo de incidentes</strong></td>
+      <td>Cada incidente mal ruteado cuesta ~2–4h de resolución cross-squad. A 10 incidentes/mes prevenidos, $80/hr, 3h promedio: $28.800/año evitados.</td>
+      <td>$20.000 – $40.000/año</td>
+    </tr>
+    <tr>
+      <td><strong>Reducción de riesgo de cumplimiento</strong></td>
+      <td>La traza de auditoría inmutable reduce el riesgo regulatorio de decisiones AI no auditables en flujos operacionales de LATAM.</td>
+      <td>$50.000 – $200.000/año (ajustado por riesgo)</td>
+    </tr>
+    <tr>
+      <td><strong>Prevención de errores por alucinación</strong></td>
+      <td>Garantía de alucinación cero evita decisiones downstream basadas en hechos inventados. Un solo error crítico evitado a nivel operacional supera fácilmente el costo total del despliegue.</td>
+      <td>$50.000 – $500.000+ (orientado a eventos)</td>
+    </tr>
+    <tr>
+      <td colspan="2" style="font-weight:700;background:#f1f5f9;">Retorno total conservador (Año 1)</td>
+      <td style="font-weight:700;background:#f1f5f9;">~$185.000 – $450.000/año</td>
+    </tr>
+  </table>
+
+  <div class="highlight">
+    <strong>Resumen ROI:</strong> Con un TCO Año 1 de ~$160.000 (punto medio) y retornos anuales conservadores de ~$300.000, AMG alcanza el <strong>break-even en el mes 7–8</strong> de operación. En un horizonte de 3 años — con costos de run de Años 2–3 de ~$40.000/año — el retorno acumulado supera los <strong>$700.000 contra una inversión total de ~$240.000</strong>, generando un ROI a 3 años de aproximadamente <strong>190–400%</strong> dependiendo de la escala de adopción.
+  </div>
+</div>
+
+<!-- 5. CASOS DE USO EN LATAM -->
+<div id="casos" class="section">
+  <h1>5. Casos de Uso en LATAM</h1>
+
+  <table>
+    <tr>
+      <th>Dominio</th>
+      <th>Caso de Uso</th>
+      <th>Capacidad AMG Usada</th>
+      <th>Impacto de Negocio</th>
+    </tr>
+    <tr>
+      <td><strong>Data &amp; AI (ADO)</strong></td>
+      <td>Copilot de ingeniería que recuerda contexto de proyecto entre semanas: schemas, dueños, decisiones técnicas previas</td>
+      <td>Nivel Context + Semantic, integración MCP con Claude Code / Codeen</td>
+      <td>Onboarding más rápido de nuevos integrantes, eliminación del overhead de re-explicación de contexto entre sesiones</td>
+    </tr>
+    <tr>
+      <td><strong>Data Governance</strong></td>
+      <td>Asistente integrado con DataHub/ATLAS que mantiene contexto persistente sobre ownership y linaje de datasets</td>
+      <td>Nivel Semantic (entidades del catálogo), gobernanza ABAC, nivel Audit</td>
+      <td>Triage de gobernanza automatizado con auditabilidad completa; cero respuestas inventadas sobre dueños de datos</td>
+    </tr>
+    <tr>
+      <td><strong>Mantenimiento &amp; Operaciones</strong></td>
+      <td>Copilot para técnicos de mantenimiento con trazabilidad de seguridad-crítica sobre recomendaciones basadas en MAPIS</td>
+      <td>Pipeline de extracción de documentos (MAPIS PDFs), nivel Audit, validación de grounding</td>
+      <td>Recomendaciones AI listas para cumplimiento con traza de razonamiento completa; sin recomendaciones no respaldadas</td>
+    </tr>
+    <tr>
+      <td><strong>Revenue Management</strong></td>
+      <td>Agentes que consultan políticas de pricing y forecasting sin re-ingestar conocimiento en cada llamada</td>
+      <td>Nivel Semantic, grounding MindMap, priorización por peso cognitivo</td>
+      <td>Ciclos de análisis más rápidos; cero reglas de política alucinadas en decisiones automatizadas</td>
+    </tr>
+    <tr>
+      <td><strong>Atención al Cliente</strong></td>
+      <td>Chatbot multi-sesión con contexto persistente del pasajero entre canales (web, app, call center)</td>
+      <td>Nivel Context (por pasajero), hechos Semantic cross-canal, ingestión de NPS</td>
+      <td>Menor tiempo de resolución, mayor first-contact resolution, UX consistente cross-canal</td>
+    </tr>
+    <tr>
+      <td><strong>Analytics &amp; BI</strong></td>
+      <td>Agentes que consultan el data warehouse con relaciones de entidades y lógica de transformación en caché</td>
+      <td>Nivel Semantic (schema + linaje de DataHub), cognitive weighting sobre patrones de query</td>
+      <td>Queries más rápidas; cero nombres de tabla o columna alucinados; menor costo de tokens</td>
+    </tr>
+    <tr>
+      <td><strong>Legal &amp; Cumplimiento</strong></td>
+      <td>Asistente de cumplimiento que recuerda precedentes de política y traza todo el razonamiento para auditorías</td>
+      <td>Nivel Semantic (documentos de política), nivel Audit inmutable con cadena de custodia completa</td>
+      <td>Decisiones AI listas para reguladores con traza de evidencia completa para auditores</td>
+    </tr>
+  </table>
+</div>
+
+<!-- 6. PLAN DE DESPLIEGUE -->
+<div id="plan" class="section">
+  <h1>6. Plan de Despliegue · Qué Necesitamos del Equipo LATAM</h1>
+
+  <p>AMG v0.2 está listo para producción. El plan de despliegue se enfoca en integración, adopción y escalado — no en construcción desde cero. El plan está estructurado en cuatro fases a lo largo de aproximadamente 16 semanas.</p>
+
+  <h2>Qué Necesitamos del Equipo LATAM</h2>
+  <p>AMG está construido — lo que el plan necesita es acceso, tiempo de coordinación de equipos clave, y un squad de ingeniería enfocado en integración y go-live. A continuación el detalle preciso de quién, cuánto y para qué.</p>
+
+  <h3>Equipo Dedicado (4,5 FTE)</h3>
+  <table>
+    <tr>
+      <th>Rol</th>
+      <th>Dedicación</th>
+      <th>Semanas Activas</th>
+      <th>Responsabilidad Principal</th>
+    </tr>
+    <tr>
+      <td><strong>Ingeniero de Plataforma (GCP / Terraform)</strong></td>
+      <td>1 FTE</td>
+      <td>1–14</td>
+      <td>Cloud Run, Spanner, IAM, Terraform workspaces, pipeline CI/CD, dashboards de monitoreo y alertas SLO</td>
+    </tr>
+    <tr>
+      <td><strong>Ingeniero Backend (Python / FastAPI)</strong></td>
+      <td>1–2 FTE</td>
+      <td>1–12</td>
+      <td>Wiring con Cosmos GenAI Gateway, registro MCP en Backstage, adaptadores del pipeline de extracción para DataHub y MAPIS</td>
+    </tr>
+    <tr>
+      <td><strong>Ingeniero Data / AI</strong></td>
+      <td>1 FTE</td>
+      <td>5–12</td>
+      <td>Diseño del schema de entidades del grafo semántico, configuración del conector DataHub, pipeline de ingestión MAPIS y validación de calidad</td>
+    </tr>
+    <tr>
+      <td><strong>Seguridad / Gobernanza</strong></td>
+      <td>0,5 FTE</td>
+      <td>7–14</td>
+      <td>Diseño de políticas ABAC alineadas con el modelo IAM del ADO, documentación de cumplimiento, revisión de residencia de datos, firma del nivel Audit</td>
+    </tr>
+    <tr>
+      <td><strong>Product Manager / Lead</strong></td>
+      <td>0,5 FTE</td>
+      <td>1–16</td>
+      <td>Coordinación del squad piloto, definición y seguimiento de KPIs, comunicación con stakeholders, revisiones de gates de fase</td>
+    </tr>
+    <tr>
+      <td><strong>QA / Integración</strong></td>
+      <td>0,5 FTE</td>
+      <td>10–14</td>
+      <td>Chaos engineering end-to-end, load testing a 7.500+ req/seg, validación de aislamiento cross-tenant, revisión de production readiness</td>
+    </tr>
+    <tr>
+      <td colspan="4" style="text-align:center;font-weight:700;background:#f1f5f9;">Total: 4,5–5,5 FTE en 16 semanas. Un piloto lean (1 caso de uso, 1 squad) puede arrancar con 3 FTE en las Fases 1–2.</td>
+    </tr>
+  </table>
+
+  <h3>Tiempo Requerido de Otros Equipos (No Dedicados)</h3>
+  <table>
+    <tr>
+      <th>Equipo</th>
+      <th>Tiempo Requerido</th>
+      <th>Cuándo</th>
+      <th>Para qué</th>
+    </tr>
+    <tr>
+      <td><strong>Cosmos GenAI Gateway</strong></td>
+      <td>~1 hora</td>
+      <td>Semana 1</td>
+      <td>Emitir API key para la service account de AMG, confirmar acceso a modelos (Claude, GPT-5, Gemini), definir budget mensual inicial del piloto (~$500–$1k/mes)</td>
+    </tr>
+    <tr>
+      <td><strong>DataHub / ATLAS</strong></td>
+      <td>~2 horas</td>
+      <td>Semana 5</td>
+      <td>Proveer token de lectura para el DataHub MCP, confirmar acceso al schema del catálogo para el conector de ingestión, validar ingestión de hechos de ownership y linaje</td>
+    </tr>
+    <tr>
+      <td><strong>Network / Infraestructura</strong></td>
+      <td>~1 día hábil</td>
+      <td>Semana 1</td>
+      <td>Configurar VPC connector para Cloud Run, abrir reglas de firewall para Spanner IP privada, confirmar enrutamiento de egress para Cloud Tasks</td>
+    </tr>
+    <tr>
+      <td><strong>Seguridad / IAM</strong></td>
+      <td>~2 días hábiles</td>
+      <td>Semanas 1 y 11</td>
+      <td>Revisar y aprobar roles de service account, firmar la configuración de Workload Identity, conducir auditoría IAM antes del go-live a PROD</td>
+    </tr>
+    <tr>
+      <td><strong>Legal / Cumplimiento</strong></td>
+      <td>~1 semana</td>
+      <td>Semana 11</td>
+      <td>Firma de residencia de datos para la región Spanner, revisión de política de retención del nivel Context (decay 24–48h), validación del diseño ABAC contra requerimientos de protección de datos aplicables</td>
+    </tr>
+    <tr>
+      <td><strong>Backstage / Developer Platform</strong></td>
+      <td>~1 hora</td>
+      <td>Semana 2</td>
+      <td>Registrar <code>catalog-info.yaml</code> en el catálogo de servicios Cosmos, confirmar visibilidad de tools MCP en GenAI Hub, validar descubrimiento desde Claude Code / Codeen</td>
+    </tr>
+  </table>
+
+  <h3>Accesos GCP Requeridos</h3>
+  <table>
+    <tr>
+      <th>Recurso</th>
+      <th>Acceso Requerido</th>
+      <th>Alcance</th>
+    </tr>
+    <tr>
+      <td>Cloud Spanner</td>
+      <td><code>roles/spanner.databaseAdmin</code> en el proyecto AMG</td>
+      <td>Solo service account de AMG</td>
+    </tr>
+    <tr>
+      <td>Cloud Run</td>
+      <td><code>roles/run.admin</code> para deployments; <code>roles/run.invoker</code> para callers</td>
+      <td>SA de AMG + service accounts de agentes autorizados</td>
+    </tr>
+    <tr>
+      <td>Cloud Tasks</td>
+      <td><code>roles/cloudtasks.enqueuer</code> para la cola de ingestión</td>
+      <td>Solo service account de AMG</td>
+    </tr>
+    <tr>
+      <td>Cloud Build / Artifact Registry</td>
+      <td><code>roles/cloudbuild.builds.editor</code> + <code>roles/artifactregistry.writer</code></td>
+      <td>Service account de CI/CD</td>
+    </tr>
+    <tr>
+      <td>IAM / Service Accounts</td>
+      <td><code>roles/iam.serviceAccountAdmin</code> para crear y gestionar SAs de AMG</td>
+      <td>Solo ingeniero de plataforma, scoped al proyecto AMG</td>
+    </tr>
+    <tr>
+      <td>Logging / Monitoring</td>
+      <td><code>roles/logging.logWriter</code> + <code>roles/monitoring.metricWriter</code></td>
+      <td>Service account de AMG</td>
+    </tr>
+    <tr>
+      <td>BigQuery (MAPIS)</td>
+      <td><code>roles/bigquery.dataViewer</code> en <code>emx-data-prod-e6c5.raw_emx_mapis_rag.*</code></td>
+      <td>Solo service account de ingestión de AMG</td>
+    </tr>
+  </table>
+
+  <div class="highlight">
+    <strong>APIs GCP a habilitar en el proyecto:</strong> <code>spanner.googleapis.com</code> · <code>run.googleapis.com</code> · <code>cloudtasks.googleapis.com</code> · <code>cloudbuild.googleapis.com</code> · <code>artifactregistry.googleapis.com</code> · <code>logging.googleapis.com</code> · <code>monitoring.googleapis.com</code>
+  </div>
+
+  <h2>Fases y Timeline</h2>
+
+  <h3>Fase 1 — Fundación y Piloto (Semanas 1–4)</h3>
+  <p><strong>Objetivo:</strong> Desplegar AMG en el entorno GCP dev del ADO y validar el pipeline central de memoria con un caso de uso real.</p>
+  <table>
+    <tr><th>Semana</th><th>Actividad</th><th>Dueño</th><th>Entregable</th></tr>
+    <tr><td>1</td><td>Setup GCP: Spanner, Cloud Run, IAM, Terraform workspaces, alertas de monitoreo</td><td>Ingeniero de Plataforma</td><td>Entorno dev en vivo</td></tr>
+    <tr><td>1–2</td><td>Wiring del Cosmos GenAI Gateway con la etapa Synthesize de AMG; smoke-test de respuesta fundamentada end-to-end</td><td>Ingeniero Backend</td><td>Pipeline completo devolviendo respuesta fundamentada</td></tr>
+    <tr><td>2</td><td>Registro en catálogo de servicios Backstage; registro MCP en GenAI Hub del ADO</td><td>Ingeniero de Plataforma</td><td>AMG visible en Backstage + descubrible desde Claude Code / Codeen</td></tr>
+    <tr><td>2–3</td><td>Onboarding del primer squad piloto con un caso de uso; 50+ interacciones de agentes en dev</td><td>Product Lead + Backend</td><td>Piloto validado en dev</td></tr>
+    <tr><td>4</td><td>Revisión Fase 1: calidad de grounding, latencia P99, costo de tokens vs. baseline</td><td>Todos</td><td>Sign-off Go/No-Go para Fase 2</td></tr>
+  </table>
+
+  <h3>Fase 2 — Integración y Enriquecimiento de Datos (Semanas 5–9)</h3>
+  <p><strong>Objetivo:</strong> Enriquecer el grafo Semantic con datos organizacionales de LATAM, integrar DataHub y MAPIS, expandir a 2–3 equipos piloto.</p>
+  <table>
+    <tr><th>Semana</th><th>Actividad</th><th>Dueño</th><th>Entregable</th></tr>
+    <tr><td>5–6</td><td>Conector DataHub: ingestión de metadata de datasets, ownership, linaje en el nivel Semantic</td><td>Ingeniero Data/AI</td><td>Entidades del catálogo consultables desde AMG</td></tr>
+    <tr><td>6–7</td><td>Pipeline de extracción MAPIS: PDFs técnicos de mantenimiento → hechos semánticos con procedencia de página</td><td>Backend + Data Engineer</td><td>Primer corpus de conocimiento MAPIS ingestado y ponderado</td></tr>
+    <tr><td>7</td><td>Conector del Feedback Engine del ADO: pares P/R validados → nivel Semantic con peso inicial 0,7</td><td>Ingeniero Backend</td><td>Conocimiento de feedback disponible para todos los agentes</td></tr>
+    <tr><td>7–8</td><td>Diseño de políticas ABAC alineadas con el modelo IAM / identidad del ADO</td><td>Seguridad / Gobernanza</td><td>Documento de política de autorización firmado</td></tr>
+    <tr><td>8–9</td><td>Expansión a 2–3 equipos: piloto de tools internos + un caso de uso orientado a operaciones</td><td>Product Lead</td><td>Piloto multi-equipo en vivo</td></tr>
+    <tr><td>9</td><td>Revisión Fase 2: cobertura de datos, cumplimiento de auth, coordinación entre equipos</td><td>Todos</td><td>Sign-off para Fase 3</td></tr>
+  </table>
+
+  <h3>Fase 3 — Hardening y Producción (Semanas 10–14)</h3>
+  <p><strong>Objetivo:</strong> Desplegar a INTG y PROD, completar documentación de cumplimiento, certificar para casos de uso regulados.</p>
+  <table>
+    <tr><th>Semana</th><th>Actividad</th><th>Dueño</th><th>Entregable</th></tr>
+    <tr><td>10–11</td><td>Despliegue INTG: chaos engineering, load testing (7.500+ req/seg), validación de aislamiento cross-tenant</td><td>Plataforma + QA</td><td>Entorno INTG validado</td></tr>
+    <tr><td>11–12</td><td>Documentación de cumplimiento: revisión del Audit trail, auditoría de políticas ABAC, confirmación de residencia de datos</td><td>Seguridad / Gobernanza</td><td>Documento de sign-off de cumplimiento</td></tr>
+    <tr><td>12–13</td><td>Despliegue canary PROD (5% tráfico) → 24h monitoreo → 100% tráfico</td><td>Ingeniero de Plataforma</td><td>Entorno PROD en vivo</td></tr>
+    <tr><td>13–14</td><td>Runbook, procedimientos de escalada, setup on-call, dashboard SLO en Cloud Monitoring</td><td>Plataforma + Product</td><td>Runbook operacional publicado</td></tr>
+    <tr><td>14</td><td>Revisión Fase 3: disponibilidad, completitud del Audit, calidad del agente piloto</td><td>Todos</td><td>Sign-off de producción</td></tr>
+  </table>
+
+  <h3>Fase 4 — Escala y Expansión (Semanas 15–16+)</h3>
+  <ul>
+    <li>Onboarding de todos los squads interesados del ADO con documentación self-service y grafos de conocimiento de dominio pre-poblados.</li>
+    <li>Evaluar publicar AMG como componente de plataforma reutilizable disponible para todos los squads via el catálogo de servicios Cosmos.</li>
+    <li>Definir roadmap v0.3: recuperación basada en embeddings, búsqueda vectorial sobre el nivel Semantic, templates de workflow agéntico.</li>
+  </ul>
+
+  <h2>Registro de Riesgos</h2>
+  <table>
+    <tr><th>Riesgo</th><th>Probabilidad</th><th>Impacto</th><th>Mitigación</th></tr>
+    <tr><td>Demoras en quota de Cloud Spanner</td><td>Baja</td><td>Medio</td><td>Solicitar aumento de quota temprano en Fase 1; emulador Spanner disponible para dev local inmediatamente</td></tr>
+    <tr><td>Requerimientos de privacidad de datos de pasajeros (GDPR/PDPA)</td><td>Media</td><td>Alto</td><td>El nivel Context tiene decay 24–48h; sin PII persistente en nivel Semantic por política; controles ABAC; revisión legal en Fase 3</td></tr>
+    <tr><td>Complejidad creciente de políticas ABAC</td><td>Media</td><td>Bajo</td><td>Arrancar deny-by-default para todos los agentes, luego otorgar acceso incrementalmente. Mantener políticas declarativas.</td></tr>
+    <tr><td>Calidad de datos del grafo Semantic</td><td>Media</td><td>Alto</td><td>Usar scores de calidad de DataHub para hacer gate de ingestión; el pipeline incluye dedup fuzzy y scoring de confianza</td></tr>
+    <tr><td>Costo LLM a escala de chatbot</td><td>Baja</td><td>Medio</td><td>Cognitive Weighting acota el contexto por request; Cosmos GenAI Gateway provee tracking de budget por usuario y hard limits</td></tr>
+    <tr><td>Disponibilidad del equipo (equipo lean)</td><td>Alta</td><td>Medio</td><td>La Fase 1 puede correr con 3 FTE; AMG ya está construido — sin R&D core necesario. Acotar el piloto antes de escalar el equipo</td></tr>
+  </table>
+</div>
+
+<!-- 7. MÉTRICAS DE ÉXITO -->
+<div id="metricas" class="section">
+  <h1>7. Métricas de Éxito</h1>
+  <table>
+    <tr><th>Métrica</th><th>Target</th><th>Cómo se mide</th></tr>
+    <tr>
+      <td><strong>Tasa de Grounding</strong></td>
+      <td>100% de respuestas respaldadas por evidencia o señal explícita de insuficiencia</td>
+      <td>Nivel Audit: flag de grounding por respuesta</td>
+    </tr>
+    <tr>
+      <td><strong>Tasa de Alucinación</strong></td>
+      <td>0% (ningún claim sin respaldo pasa el gate de validación de grounding)</td>
+      <td>Check de grounding automatizado en etapa de síntesis + revisión de auditoría periódica</td>
+    </tr>
+    <tr>
+      <td><strong>Reducción de Costo de Tokens</strong></td>
+      <td>&gt;30% de reducción vs. RAG baseline por turno de agente</td>
+      <td>Logs de tokens por turno del Cosmos Gateway antes y después de adoptar AMG</td>
+    </tr>
+    <tr>
+      <td><strong>Latencia P99</strong></td>
+      <td>&lt;50ms end-to-end (baseline medido actual: &lt;5ms)</td>
+      <td>Métricas de percentil en Cloud Monitoring</td>
+    </tr>
+    <tr>
+      <td><strong>Disponibilidad</strong></td>
+      <td>99,9% uptime</td>
+      <td>Health checks de Cloud Run + alerta de uptime en Cloud Monitoring</td>
+    </tr>
+    <tr>
+      <td><strong>Cobertura de Auditoría</strong></td>
+      <td>100% de decisiones de autorización logueadas con reason code</td>
+      <td>Query al nivel Audit: eventos granted/denied por día</td>
+    </tr>
+    <tr>
+      <td><strong>Adopción por Squads</strong></td>
+      <td>5+ squads del ADO usando AMG al final de la Fase 4</td>
+      <td>Conteo de invocaciones MCP por squad via logs del Cosmos Gateway</td>
+    </tr>
+    <tr>
+      <td><strong>Costo por Request</strong></td>
+      <td>&lt;$0,01 por turno de agente (infra + LLM)</td>
+      <td>Logs de costo del Cosmos Gateway + métricas de uso de Spanner combinados</td>
+    </tr>
+  </table>
+</div>
+
+<!-- 8. RECOMENDACIÓN Y PRÓXIMOS PASOS -->
+<div id="siguiente" class="section">
+  <h1>8. Recomendación y Próximos Pasos</h1>
+
+  <p>Agent Memory Graph está listo para producción hoy. El enfoque recomendado es comenzar con un piloto de 4 semanas liderado por el equipo GenAI del ADO sobre un único caso de uso de alto valor y alcance bien definido — ya sea el copilot de ingeniería de datos o un asistente de soporte a operaciones. Ambos tienen fuentes de datos ya catalogadas en DataHub, métricas de calidad claras, e implicaciones limitadas de privacidad de datos, lo que los convierte en los ideales para una primera validación antes de expandir a casos orientados a pasajeros.</p>
+
+  <div class="highlight">
+    <strong>Piloto semana a semana:</strong>
+    <ul style="margin: 1rem 0 0 0;">
+      <li>Semana 1: El ingeniero de plataforma despliega el entorno GCP dev; el Cosmos GenAI Gateway queda conectado a AMG.</li>
+      <li>Semana 2: El equipo GenAI del ADO corre las primeras interacciones de agentes a través del pipeline MindMap; se valida grounding y completitud del Audit trail.</li>
+      <li>Semana 3: El stakeholder de seguridad/gobernanza revisa la configuración ABAC y los logs de auditoría.</li>
+      <li>Semana 4: Decisión Go/No-Go. Si se cumplen los umbrales → proceder al plan completo de 16 semanas. Si no → identificar causa raíz e iterar antes de expandir.</li>
+    </ul>
+  </div>
+
+  <p>El caso de uso orientado a operaciones o pasajeros — de mayor escala e impacto — debe entrar al plan en la Fase 2, después de que el piloto interno haya validado el pipeline central y el modelo de gobernanza. Este secuenciamiento gestiona el riesgo mientras preserva el timeline para entrega de valor real.</p>
+
+  <p><strong>Próximo paso:</strong> Agendar una revisión de arquitectura inicial con los equipos de plataforma, datos y seguridad del ADO para alinear en topología de despliegue, postura de seguridad, modelo operacional y alcance del piloto.</p>
+</div>
+
+<footer>
+  <p style="font-weight:700;font-size:1.1rem;">Agent Memory Graph — Propuesta de Producto LATAM Airlines</p>
+  <p>Plataforma de Memoria Persistente, Auditable y Fundamentada para Agentes AI</p>
+  <p style="margin-top: 1.5rem; font-size: 0.85rem; opacity: 0.7;">Esta propuesta se presenta para evaluación y planificación. Para revisión de seguridad, cumplimiento y despliegue, contactar al squad GenAI del ADO · <strong>claudio.urbina@latam.com</strong> · <strong>#cosmos-amg-dev</strong></p>
+</footer>
+
+</body>
+</html>

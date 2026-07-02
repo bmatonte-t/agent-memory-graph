@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
+    from collections.abc import Callable, Mapping
 
 from src.db.idempotency import IdempotencyContext
 from src.db.retry import async_retry_with_backoff, get_retry_policy
@@ -19,16 +19,22 @@ from src.integrations.google_sdk_wrappers import (
     SpannerDatabaseProtocol,
     SpannerTransactionProtocol,
     execute_sql_rows,
-    execute_sql_rows_in_transaction,
 )
 from src.memory.exceptions import WeightUpdateFailedError
 from src.models.schemas import (
     AuditResponse,
     ContextResponse,
     ContextTurn,
+    EndSessionResponse,
     FactResponse,
+    GraphExportEdge,
+    GraphExportNode,
+    GraphExportResponse,
+    SessionKnowledgeExtractionResponse,
     SessionResponse,
 )
+from src.observability.logging import structured_log
+from src.observability.metrics import record_authorization_denial
 from src.project_base.settings import settings
 from src.security.governance import AuthorizationScope  # noqa: TC001
 from src.security.validators import (
@@ -46,7 +52,11 @@ DEFAULT_SOURCE_CONFIDENCE_SCORE = 1.0
 API_DERIVED_SOURCE_CONFIDENCE_SCORE = 0.7
 RECENT_ACCESS_WINDOW_DAYS = 7
 ACTIVE_STATUS_VALUES = {"active", "open", "enabled"}
+VALID_SESSION_END_REASONS = {"completed", "timeout", "aborted"}
+DEFAULT_EXTRACTION_DOMAIN = "general"
+DERIVED_FROM_CONTEXT_RELATIONSHIP = "DERIVED_FROM_CONTEXT"
 TWriteResult = TypeVar("TWriteResult")
+_CONTEXT_CURSOR_SEPARATOR = "|"
 
 
 def _is_match_query_unsupported(error: Exception) -> bool:
@@ -170,9 +180,19 @@ class MemoryAPI:
                 context=decision_context,
             )
         except RuntimeError:
-            logger.warning("failed to record authorization decision", exc_info=True)
+            structured_log(
+                logger,
+                logging.WARNING,
+                "authorization_decision_record_failed",
+                {
+                    "tenant_id": tenant_id,
+                    "operation": operation,
+                },
+            )
 
         if not allowed:
+            resource_type = label or memory_tier or relationship_type or operation
+            record_authorization_denial(tenant_id, resource_type)
             msg = f"authorization denied for {operation}"
             raise PermissionError(msg)
 
@@ -310,6 +330,393 @@ class MemoryAPI:
         return str(tier_value) if tier_value is not None else None
 
     @staticmethod
+    def _has_audit_event(
+        tenant_id: str,
+        source_node_id: str,
+        event_type: str,
+    ) -> bool:
+        """Check whether an audit event already exists for a source node.
+
+        Args:
+            tenant_id: Tenant identifier for isolation.
+            source_node_id: Source node linked to the event.
+            event_type: Event type to look up.
+
+        Returns:
+            bool: True when at least one event exists.
+
+        Raises:
+            RuntimeError: If database read fails.
+        """
+        tenant_id = validate_tenant_id(tenant_id)
+        source_node_id = validate_required_string(source_node_id, field_name="source_node_id")
+        event_type = validate_required_string(event_type, field_name="event_type")
+
+        query = """
+            SELECT EventId
+            FROM AUDIT_EVENTS
+            WHERE TenantId = @tenant_id
+              AND SourceNodeId = @source_node_id
+              AND EventType = @event_type
+            LIMIT 1
+        """
+
+        try:
+            database = SpannerClient.get_database()
+            rows = execute_sql_rows(
+                database,
+                query,
+                {
+                    "tenant_id": tenant_id,
+                    "source_node_id": source_node_id,
+                    "event_type": event_type,
+                },
+            )
+        except Exception as error:
+            msg = f"Failed to lookup audit event: {error}"
+            raise RuntimeError(msg) from error
+
+        return bool(rows)
+
+    @staticmethod
+    def _mark_session_closed(
+        tenant_id: str,
+        session_id: str,
+        end_reason: str,
+        ended_at: datetime,
+    ) -> bool:
+        """Atomically mark a context session as closed.
+
+        Args:
+            tenant_id: Tenant identifier for isolation.
+            session_id: Session node identifier.
+            end_reason: Closure reason.
+            ended_at: Closure timestamp.
+
+        Returns:
+            bool: True when state transitioned to closed, False when already closed.
+
+        Raises:
+            RuntimeError: If state transition write fails.
+        """
+        tenant_id = validate_tenant_id(tenant_id)
+        session_id = validate_required_string(session_id, field_name="session_id")
+        end_reason = validate_required_string(end_reason, field_name="end_reason")
+
+        update_sql = """
+            UPDATE MemoryNode
+            SET SessionStatus = 'closed',
+                SessionEndedAt = @ended_at,
+                SessionEndReason = @end_reason,
+                UpdatedAt = @ended_at
+            WHERE TenantId = @tenant_id
+              AND NodeId = @session_id
+              AND MemoryTier = @tier
+              AND (SessionStatus IS NULL OR SessionStatus != 'closed')
+        """
+
+        database = SpannerClient.get_database()
+
+        def _transaction(transaction: SpannerTransactionProtocol) -> int:
+            return transaction.execute_update(
+                update_sql,
+                {
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
+                    "ended_at": ended_at,
+                    "end_reason": end_reason,
+                },
+            )
+
+        try:
+            updated_rows = database.run_in_transaction(_transaction)
+        except Exception as error:
+            msg = f"Failed to mark session as closed: {error}"
+            raise RuntimeError(msg) from error
+
+        return updated_rows > 0
+
+    @staticmethod
+    def _validate_end_reason(end_reason: str) -> str:
+        """Validate and normalize session end reason.
+
+        Args:
+            end_reason: Session closure reason.
+
+        Returns:
+            str: Normalized closure reason.
+
+        Raises:
+            ValueError: If the reason is unsupported.
+        """
+        normalized_reason = validate_required_string(end_reason, field_name="end_reason").lower()
+        if normalized_reason not in VALID_SESSION_END_REASONS:
+            valid_reasons = ", ".join(sorted(VALID_SESSION_END_REASONS))
+            msg = f"invalid end_reason. Must be one of: {valid_reasons}"
+            raise ValueError(msg)
+        return normalized_reason
+
+    @staticmethod
+    def _extract_turn_content(turn: ContextTurn) -> str:
+        """Extract stable text content from a context turn payload.
+
+        Args:
+            turn: Context turn returned by retrieval APIs.
+
+        Returns:
+            str: Best-effort normalized content string.
+        """
+        raw_content = turn.content.strip()
+        if not raw_content:
+            return ""
+
+        try:
+            parsed_payload = json.loads(raw_content)
+        except json.JSONDecodeError:
+            return raw_content
+
+        if isinstance(parsed_payload, dict):
+            parsed_mapping = cast("Mapping[str, Any]", parsed_payload)
+            candidate = parsed_mapping.get("content")
+            if isinstance(candidate, str):
+                return candidate.strip()
+
+        return raw_content
+
+    @staticmethod
+    async def extract_session_knowledge(
+        tenant_id: str,
+        session_id: str,
+        domain_hint: str | None = None,
+        window_size: int = 50,
+        authorization_scope: AuthorizationScope | None = None,
+    ) -> SessionKnowledgeExtractionResponse:
+        """Extract knowledge from session context and persist it into semantic memory.
+
+        Args:
+            tenant_id: Tenant identifier for isolation.
+            session_id: Session identifier to extract from.
+            domain_hint: Optional destination domain for extracted facts.
+            window_size: Context turns to analyze.
+            authorization_scope: Authorization scope for the request.
+
+        Returns:
+            SessionKnowledgeExtractionResponse: Extraction protocol summary.
+
+        Raises:
+            RuntimeError: If context retrieval fails.
+        """
+        tenant_id = validate_tenant_id(tenant_id)
+        session_id = validate_required_string(session_id, field_name="session_id")
+        window_size = validate_window_size(window_size)
+        resolved_domain = (
+            validate_required_string(domain_hint, field_name="domain_hint")
+            if domain_hint is not None
+            else DEFAULT_EXTRACTION_DOMAIN
+        )
+        extracted_at = datetime.now(UTC)
+
+        await MemoryAPI.record_audit_event(
+            tenant_id=tenant_id,
+            event_type="SESSION_KNOWLEDGE_EXTRACTION_STARTED",
+            source_node_id=session_id,
+            context={"domain": resolved_domain, "window_size": window_size},
+            authorization_scope=authorization_scope,
+        )
+
+        context_response = await MemoryAPI.retrieve_context_window(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            window_size=window_size,
+            session_action_count=0,
+            authorization_scope=authorization_scope,
+        )
+
+        extracted_facts = 0
+        skipped_facts = 0
+        failed_facts = 0
+
+        for turn in context_response.turns:
+            normalized_content = MemoryAPI._extract_turn_content(turn)
+            if not normalized_content:
+                skipped_facts += 1
+                continue
+
+            knowledge_entity_id = f"{session_id}:knowledge:{turn.turn_id}"
+            existing_tier = MemoryAPI._get_node_memory_tier(
+                tenant_id=tenant_id,
+                node_id=knowledge_entity_id,
+            )
+            if existing_tier is not None:
+                skipped_facts += 1
+                continue
+
+            try:
+                await MemoryAPI.add_semantic_fact(
+                    tenant_id=tenant_id,
+                    entity_type="EVENT",
+                    entity_id=knowledge_entity_id,
+                    attributes={
+                        "domain": resolved_domain,
+                        "session_id": session_id,
+                        "turn_id": turn.turn_id,
+                        "role": turn.role,
+                        "content": normalized_content,
+                        "extraction_protocol": "session_close_v1",
+                    },
+                    relationship={
+                        "source_id": session_id,
+                        "type": DERIVED_FROM_CONTEXT_RELATIONSHIP,
+                    },
+                    session_id=None,
+                    authorization_scope=authorization_scope,
+                )
+                extracted_facts += 1
+            except RuntimeError:
+                failed_facts += 1
+
+        extraction_response = SessionKnowledgeExtractionResponse(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            domain=resolved_domain,
+            processed_turns=len(context_response.turns),
+            extracted_facts=extracted_facts,
+            skipped_facts=skipped_facts,
+            failed_facts=failed_facts,
+            extracted_at=extracted_at,
+        )
+
+        await MemoryAPI.record_audit_event(
+            tenant_id=tenant_id,
+            event_type="SESSION_KNOWLEDGE_EXTRACTION_COMPLETED",
+            source_node_id=session_id,
+            context={
+                "domain": extraction_response.domain,
+                "processed_turns": extraction_response.processed_turns,
+                "extracted_facts": extraction_response.extracted_facts,
+                "skipped_facts": extraction_response.skipped_facts,
+                "failed_facts": extraction_response.failed_facts,
+            },
+            authorization_scope=authorization_scope,
+        )
+        return extraction_response
+
+    @staticmethod
+    async def end_session(
+        tenant_id: str,
+        session_id: str,
+        end_reason: str = "completed",
+        domain_hint: str | None = None,
+        window_size: int = 50,
+        authorization_scope: AuthorizationScope | None = None,
+    ) -> EndSessionResponse:
+        """Close a session and trigger the session knowledge extraction protocol.
+
+        Args:
+            tenant_id: Tenant identifier for isolation.
+            session_id: Session identifier to close.
+            end_reason: Session closure reason.
+            domain_hint: Optional target domain for extracted semantic facts.
+            window_size: Number of context turns to process.
+            authorization_scope: Authorization scope for the request.
+
+        Returns:
+            EndSessionResponse: Closure and extraction summary.
+        """
+        tenant_id = validate_tenant_id(tenant_id)
+        session_id = validate_required_string(session_id, field_name="session_id")
+        normalized_end_reason = MemoryAPI._validate_end_reason(end_reason)
+        ended_at = datetime.now(UTC)
+
+        MemoryAPI._authorize_operation(
+            operation="end_session",
+            tenant_id=tenant_id,
+            authorization_scope=authorization_scope,
+            node_id=session_id,
+            label="Session",
+            memory_tier=SchemaConfig.MEMORY_TIER_CONTEXT,
+        )
+
+        did_close = MemoryAPI._mark_session_closed(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            end_reason=normalized_end_reason,
+            ended_at=ended_at,
+        )
+        if not did_close:
+            return EndSessionResponse(
+                session_id=session_id,
+                tenant_id=tenant_id,
+                status="closed",
+                end_reason=normalized_end_reason,
+                ended_at=ended_at,
+                extraction_status="already_closed",
+                extraction=SessionKnowledgeExtractionResponse(
+                    session_id=session_id,
+                    tenant_id=tenant_id,
+                    domain=domain_hint or DEFAULT_EXTRACTION_DOMAIN,
+                    processed_turns=0,
+                    extracted_facts=0,
+                    skipped_facts=0,
+                    failed_facts=0,
+                    extracted_at=ended_at,
+                ),
+            )
+
+        await MemoryAPI.record_audit_event(
+            tenant_id=tenant_id,
+            event_type="SESSION_CLOSED",
+            source_node_id=session_id,
+            context={
+                "end_reason": normalized_end_reason,
+                "domain_hint": domain_hint or DEFAULT_EXTRACTION_DOMAIN,
+            },
+            authorization_scope=authorization_scope,
+        )
+
+        extraction_status = "completed"
+        extraction_response: SessionKnowledgeExtractionResponse
+
+        try:
+            extraction_response = await MemoryAPI.extract_session_knowledge(
+                tenant_id=tenant_id,
+                session_id=session_id,
+                domain_hint=domain_hint,
+                window_size=window_size,
+                authorization_scope=authorization_scope,
+            )
+        except RuntimeError as error:
+            extraction_status = "failed"
+            extraction_response = SessionKnowledgeExtractionResponse(
+                session_id=session_id,
+                tenant_id=tenant_id,
+                domain=domain_hint or DEFAULT_EXTRACTION_DOMAIN,
+                processed_turns=0,
+                extracted_facts=0,
+                skipped_facts=0,
+                failed_facts=0,
+                extracted_at=ended_at,
+            )
+            await MemoryAPI.record_audit_event(
+                tenant_id=tenant_id,
+                event_type="SESSION_KNOWLEDGE_EXTRACTION_FAILED",
+                source_node_id=session_id,
+                context={"error": str(error)},
+                authorization_scope=authorization_scope,
+            )
+
+        return EndSessionResponse(
+            session_id=session_id,
+            tenant_id=tenant_id,
+            status="closed",
+            end_reason=normalized_end_reason,
+            ended_at=ended_at,
+            extraction_status=extraction_status,
+            extraction=extraction_response,
+        )
+
+    @staticmethod
     async def create_session(
         tenant_id: str,
         session_id: str,
@@ -363,17 +770,25 @@ class MemoryAPI:
                 initial_backoff_seconds=retry_policy.initial_backoff_seconds,
                 max_backoff_seconds=retry_policy.max_backoff_seconds,
             )
-            logger.info(
-                "create_session_completed tenant_id=%s session_id=%s",
-                tenant_id,
-                session_id,
+            structured_log(
+                logger,
+                logging.INFO,
+                "create_session_completed",
+                {
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                },
             )
         except Exception as e:
-            logger.exception(
-                "create_session_exhausted tenant_id=%s session_id=%s attempts=%d",
-                tenant_id,
-                session_id,
-                retry_policy.max_attempts,
+            structured_log(
+                logger,
+                logging.ERROR,
+                "create_session_exhausted",
+                {
+                    "tenant_id": tenant_id,
+                    "session_id": session_id,
+                    "attempts": retry_policy.max_attempts,
+                },
             )
             msg = f"Failed to create session after {retry_policy.max_attempts} attempts: {e}"
             raise RuntimeError(msg) from e
@@ -403,16 +818,22 @@ class MemoryAPI:
             created_at: Creation timestamp.
 
         Raises:
+            ValueError: If tenant_id is None or empty — composite PK enforcement.
             Exception: If database write fails (may be retried by caller).
         """
+        if not tenant_id or not tenant_id.strip():
+            msg = "tenant_id is required for all MemoryNode writes"
+            raise ValueError(msg)
         database = SpannerClient.get_database()
         node_sql = """
                 INSERT INTO MemoryNode (
                     NodeId, TenantId, MemoryTier, Label, LogOddsWeight,
-                    SessionActionCount, LastAccessed, Attributes, CreatedAt, UpdatedAt
+                    SessionActionCount, SessionStatus, LastAccessed,
+                    Attributes, CreatedAt, UpdatedAt
                 ) VALUES (
                     @node_id, @tenant_id, @tier, @label, @weight,
-                    @action_count, @now, CAST(@attributes AS JSON), @now, @now
+                    @action_count, @session_status, @now,
+                    CAST(@attributes AS JSON), @now, @now
                 )
             """
 
@@ -428,6 +849,7 @@ class MemoryAPI:
                     "label": "Session",
                     "weight": SchemaConfig.INITIAL_WEIGHT,
                     "action_count": 0,
+                    "session_status": "active",
                     "now": created_at,
                     "attributes": MemoryAPI._serialize_json_attributes(attributes),
                 },
@@ -548,18 +970,26 @@ class MemoryAPI:
                 initial_backoff_seconds=retry_policy.initial_backoff_seconds,
                 max_backoff_seconds=retry_policy.max_backoff_seconds,
             )
-            logger.info(
-                "add_semantic_fact_completed tenant_id=%s entity_id=%s entity_type=%s",
-                tenant_id,
-                entity_id,
-                entity_type,
+            structured_log(
+                logger,
+                logging.INFO,
+                "add_semantic_fact_completed",
+                {
+                    "tenant_id": tenant_id,
+                    "entity_id": entity_id,
+                    "entity_type": entity_type,
+                },
             )
         except Exception as e:
-            logger.exception(
-                "add_semantic_fact_exhausted tenant_id=%s entity_id=%s attempts=%d",
-                tenant_id,
-                entity_id,
-                retry_policy.max_attempts,
+            structured_log(
+                logger,
+                logging.ERROR,
+                "add_semantic_fact_exhausted",
+                {
+                    "tenant_id": tenant_id,
+                    "entity_id": entity_id,
+                    "attempts": retry_policy.max_attempts,
+                },
             )
             msg = f"Failed to add semantic fact after {retry_policy.max_attempts} attempts: {e}"
             raise RuntimeError(msg) from e
@@ -610,8 +1040,12 @@ class MemoryAPI:
             created_at: Creation timestamp.
 
         Raises:
+            ValueError: If tenant_id is None or empty — composite PK enforcement.
             Exception: If database write fails (may be retried by caller).
         """
+        if not tenant_id or not tenant_id.strip():
+            msg = "tenant_id is required for all MemoryNode writes"
+            raise ValueError(msg)
         database = SpannerClient.get_database()
         node_sql = """
                 INSERT INTO MemoryNode (
@@ -820,20 +1254,27 @@ class MemoryAPI:
                 initial_backoff_seconds=retry_policy.initial_backoff_seconds,
                 max_backoff_seconds=retry_policy.max_backoff_seconds,
             )
-            logger.info(
-                "record_audit_event_completed tenant_id=%s event_type=%s source_node_id=%s",
-                tenant_id,
-                event_type,
-                source_node_id,
+            structured_log(
+                logger,
+                logging.INFO,
+                "record_audit_event_completed",
+                {
+                    "tenant_id": tenant_id,
+                    "event_type": event_type,
+                    "source_node_id": source_node_id,
+                },
             )
         except Exception as e:
-            logger.exception(
-                "record_audit_event_exhausted tenant_id=%s "
-                "event_type=%s source_node_id=%s attempts=%d",
-                tenant_id,
-                event_type,
-                source_node_id,
-                retry_policy.max_attempts,
+            structured_log(
+                logger,
+                logging.ERROR,
+                "record_audit_event_exhausted",
+                {
+                    "tenant_id": tenant_id,
+                    "event_type": event_type,
+                    "source_node_id": source_node_id,
+                    "attempts": retry_policy.max_attempts,
+                },
             )
             msg = f"Failed to record audit event after {retry_policy.max_attempts} attempts: {e}"
             raise RuntimeError(msg) from e
@@ -879,10 +1320,55 @@ class MemoryAPI:
             return MemoryAPI._run_write_operation(database, _write)
 
     @staticmethod
+    def _encode_context_cursor(created_at: datetime, turn_id: str) -> str:
+        """Encode a context pagination cursor.
+
+        Args:
+            created_at: Turn creation timestamp.
+            turn_id: Stable turn identifier.
+
+        Returns:
+            str: Encoded cursor value.
+        """
+        return f"{created_at.isoformat()}{_CONTEXT_CURSOR_SEPARATOR}{turn_id}"
+
+    @staticmethod
+    def _decode_context_cursor(cursor: str) -> tuple[datetime, str]:
+        """Decode a context pagination cursor.
+
+        Args:
+            cursor: Encoded cursor string.
+
+        Returns:
+            tuple[datetime, str]: Cursor timestamp and turn identifier.
+
+        Raises:
+            ValueError: If cursor format is invalid.
+        """
+        normalized_cursor = validate_required_string(cursor, field_name="cursor")
+        if _CONTEXT_CURSOR_SEPARATOR not in normalized_cursor:
+            msg = "cursor must use '<iso_datetime>|<turn_id>' format"
+            raise ValueError(msg)
+
+        created_at_raw, turn_id = normalized_cursor.split(_CONTEXT_CURSOR_SEPARATOR, maxsplit=1)
+        validated_turn_id = validate_required_string(turn_id, field_name="cursor_turn_id")
+        try:
+            parsed_created_at = datetime.fromisoformat(created_at_raw)
+        except ValueError as error:
+            msg = "cursor datetime must be a valid ISO-8601 value"
+            raise ValueError(msg) from error
+
+        if parsed_created_at.tzinfo is None:
+            parsed_created_at = parsed_created_at.replace(tzinfo=UTC)
+
+        return parsed_created_at, validated_turn_id
+
+    @staticmethod
     async def retrieve_context_window(
         tenant_id: str,
         session_id: str,
         window_size: int = 10,
+        cursor: str | None = None,
         session_action_count: int | None = None,
         authorization_scope: AuthorizationScope | None = None,
     ) -> ContextResponse:
@@ -892,6 +1378,7 @@ class MemoryAPI:
             tenant_id: Tenant identifier for isolation.
             session_id: Session identifier
             window_size: Number of turns to retrieve (1-100)
+            cursor: Opaque cursor from previous context page.
             session_action_count: Cumulative per-session action count.
             authorization_scope: Authorization scope for the request.
 
@@ -905,6 +1392,12 @@ class MemoryAPI:
         tenant_id = validate_tenant_id(tenant_id)
         session_id = validate_required_string(session_id, field_name="session_id")
         window_size = validate_window_size(window_size)
+        cursor_created_at: datetime | None = None
+        cursor_turn_id: str | None = None
+        if cursor is not None:
+            cursor_created_at, cursor_turn_id = MemoryAPI._decode_context_cursor(cursor)
+
+        limit_plus_one = window_size + 1
 
         MemoryAPI._authorize_operation(
             operation="retrieve_context_window",
@@ -926,9 +1419,14 @@ class MemoryAPI:
               AND s.NodeId = @session_id
               AND s.MemoryTier = 'CONTEXT'
               AND t.MemoryTier = 'CONTEXT'
+                            AND (
+                                @cursor_created_at IS NULL
+                                OR t.CreatedAt < @cursor_created_at
+                                OR (t.CreatedAt = @cursor_created_at AND t.NodeId < @cursor_turn_id)
+                            )
             RETURN t.NodeId, t.Label, t.Attributes, t.LogOddsWeight, t.CreatedAt, e.RelType
-            ORDER BY t.CreatedAt DESC
-            LIMIT @window_size
+                        ORDER BY t.CreatedAt DESC, t.NodeId DESC
+                        LIMIT @limit_plus_one
         """
 
         sql_fallback_query = """
@@ -950,8 +1448,13 @@ class MemoryAPI:
               AND s.NodeId = @session_id
               AND s.MemoryTier = 'CONTEXT'
               AND t.MemoryTier = 'CONTEXT'
-            ORDER BY t.CreatedAt DESC
-            LIMIT @window_size
+                            AND (
+                                @cursor_created_at IS NULL
+                                OR t.CreatedAt < @cursor_created_at
+                                OR (t.CreatedAt = @cursor_created_at AND t.NodeId < @cursor_turn_id)
+                            )
+                        ORDER BY t.CreatedAt DESC, t.NodeId DESC
+                        LIMIT @limit_plus_one
         """
 
         try:
@@ -963,20 +1466,31 @@ class MemoryAPI:
                 "tenant_id": tenant_id,
                 "session_id": session_id,
                 "window_size": window_size,
+                "cursor_created_at": cursor_created_at,
+                "cursor_turn_id": cursor_turn_id,
+                "limit_plus_one": limit_plus_one,
             }
             try:
                 results = execute_sql_rows(database, gql_query, query_params)
             except Exception as error:
                 if not _is_match_query_unsupported(error):
                     raise
-                logger.info(
-                    "retrieve_context_window_match_unsupported tenant_id=%s session_id=%s",
-                    tenant_id,
-                    session_id,
+                structured_log(
+                    logger,
+                    logging.INFO,
+                    "retrieve_context_window_match_unsupported",
+                    {
+                        "tenant_id": tenant_id,
+                        "session_id": session_id,
+                    },
                 )
                 results = execute_sql_rows(database, sql_fallback_query, query_params)
 
-            for row in results:
+            materialized_rows = list(results)
+            has_more = len(materialized_rows) > window_size
+            rows_to_return = materialized_rows[:window_size]
+
+            for row in rows_to_return:
                 turn_id, label, attributes, weight, created_at, _rel_type = row
                 turn_id_str = str(turn_id)
                 role = str(label)
@@ -998,6 +1512,14 @@ class MemoryAPI:
                 )
                 turns.append(turn)
                 total_weight_sum += turn.weight
+
+            next_cursor: str | None = None
+            if has_more and turns:
+                last_turn = turns[-1]
+                next_cursor = MemoryAPI._encode_context_cursor(
+                    created_at=last_turn.created_at,
+                    turn_id=last_turn.turn_id,
+                )
 
             # Log retrieval to audit
             await MemoryAPI.record_audit_event(
@@ -1027,12 +1549,153 @@ class MemoryAPI:
                 tenant_id=tenant_id,
                 session_id=session_id,
                 turns=turns,
+                next_cursor=next_cursor,
+                has_more=has_more,
                 total_weight_sum=total_weight_sum,
                 retrieved_at=retrieved_at,
             )
         except Exception as e:
             msg = f"Failed to retrieve context window: {e}"
             raise RuntimeError(msg) from e
+
+    @staticmethod
+    def _coerce_json_object(raw_value: object) -> dict[str, Any]:
+        """Normalize SQL JSON fields into dictionaries.
+
+        Args:
+            raw_value: Raw value returned by Spanner for JSON columns.
+
+        Returns:
+            dict[str, Any]: Parsed JSON object or empty dictionary.
+        """
+        if isinstance(raw_value, dict):
+            return dict(cast("dict[str, Any]", raw_value))
+        if isinstance(raw_value, str):
+            try:
+                parsed = json.loads(raw_value)
+            except json.JSONDecodeError:
+                return {}
+            if isinstance(parsed, dict):
+                return dict(cast("dict[str, Any]", parsed))
+        return {}
+
+    @staticmethod
+    async def export_graph_snapshot(
+        tenant_id: str,
+        limit: int = 1000,
+        authorization_scope: AuthorizationScope | None = None,
+    ) -> GraphExportResponse:
+        """Export a tenant-scoped graph snapshot as JSON-LD entries.
+
+        Args:
+            tenant_id: Tenant identifier for isolation.
+            limit: Maximum number of nodes and edges to export per tier.
+            authorization_scope: Authorization scope for the request.
+
+        Returns:
+            GraphExportResponse: JSON-LD graph snapshot envelope.
+
+        Raises:
+            ValueError: If tenant or limit are invalid.
+            RuntimeError: If database reads fail.
+        """
+        tenant_id = validate_tenant_id(tenant_id)
+        if limit < 1:
+            msg = "limit must be greater than 0"
+            raise ValueError(msg)
+
+        MemoryAPI._authorize_operation(
+            operation="export_graph_snapshot",
+            tenant_id=tenant_id,
+            authorization_scope=authorization_scope,
+            node_id=tenant_id,
+            label="GraphSnapshot",
+            memory_tier=SchemaConfig.MEMORY_TIER_SEMANTIC,
+        )
+
+        node_query = """
+            SELECT NodeId, Label, MemoryTier, LogOddsWeight, Attributes
+            FROM MemoryNode
+            WHERE TenantId = @tenant_id
+            ORDER BY CreatedAt DESC, NodeId DESC
+            LIMIT @limit
+        """
+        edge_query = """
+            SELECT EdgeId, SourceNodeId, DestNodeId, RelType, LogOddsWeight, Attributes
+            FROM MemoryEdge
+            WHERE TenantId = @tenant_id
+            ORDER BY CreatedAt DESC, EdgeId DESC
+            LIMIT @limit
+        """
+
+        try:
+            database = SpannerClient.get_database()
+            params = {
+                "tenant_id": tenant_id,
+                "limit": limit,
+            }
+            node_rows = execute_sql_rows(database, node_query, params)
+            edge_rows = execute_sql_rows(database, edge_query, params)
+        except Exception as error:
+            msg = f"Failed to export graph snapshot: {error}"
+            raise RuntimeError(msg) from error
+
+        exported_nodes: list[GraphExportNode] = []
+        exported_edges: list[GraphExportEdge] = []
+
+        for row in node_rows:
+            node_id, label, memory_tier, weight, attributes = row
+            exported_nodes.append(
+                GraphExportNode(
+                    id=f"node:{node_id}",
+                    type=str(label) if label is not None else "Node",
+                    tenant_id=tenant_id,
+                    memory_tier=str(memory_tier) if memory_tier is not None else "UNKNOWN",
+                    label=str(label) if label is not None else "Node",
+                    weight=float(weight) if isinstance(weight, (float, int)) else 0.0,
+                    attributes=MemoryAPI._coerce_json_object(attributes),
+                )
+            )
+
+        for row in edge_rows:
+            edge_id, source_node_id, destination_node_id, rel_type, weight, attributes = row
+            exported_edges.append(
+                GraphExportEdge(
+                    id=f"edge:{edge_id}",
+                    tenant_id=tenant_id,
+                    relationship_type=str(rel_type) if rel_type is not None else "RELATED_TO",
+                    source_node_id=str(source_node_id),
+                    destination_node_id=str(destination_node_id),
+                    weight=float(weight) if isinstance(weight, (float, int)) else 0.0,
+                    attributes=MemoryAPI._coerce_json_object(attributes),
+                )
+            )
+
+        await MemoryAPI.record_audit_event(
+            tenant_id=tenant_id,
+            event_type="GRAPH_EXPORT",
+            source_node_id=tenant_id,
+            context={
+                "limit": limit,
+                "node_count": len(exported_nodes),
+                "edge_count": len(exported_edges),
+            },
+            authorization_scope=authorization_scope,
+        )
+
+        return GraphExportResponse(
+            context={
+                "@vocab": "https://agent-memory-graph.local/vocab#",
+                "tenant_id": "https://agent-memory-graph.local/schema/tenant_id",
+                "memory_tier": "https://agent-memory-graph.local/schema/memory_tier",
+                "relationship_type": "https://agent-memory-graph.local/schema/relationship_type",
+            },
+            graph=[*exported_nodes, *exported_edges],
+            tenant_id=tenant_id,
+            node_count=len(exported_nodes),
+            edge_count=len(exported_edges),
+            exported_at=datetime.now(UTC),
+        )
 
     @staticmethod
     async def _do_weight_update_batch(
@@ -1052,8 +1715,12 @@ class MemoryAPI:
             bayes_factor_ln: Log-odds delta (ln(BF)).
 
         Raises:
+            ValueError: If tenant_id is None or empty — composite PK enforcement.
             Exception: Any exception from Spanner (to be retried).
         """
+        if not tenant_id or not tenant_id.strip():
+            msg = "tenant_id is required for all MemoryNode writes"
+            raise ValueError(msg)
         sql = """
             UPDATE MemoryNode
             SET LogOddsWeight = LogOddsWeight + @delta,
@@ -1115,7 +1782,14 @@ class MemoryAPI:
                 MemoryAPI._enforce_audit_append_only("UPDATE")
             except PermissionError:
                 # Keep MemoryAPI contract stable while still enforcing append-only checks.
-                logger.warning("audit immutability guard triggered for audit tier update")
+                structured_log(
+                    logger,
+                    logging.WARNING,
+                    "audit_immutability_guard_triggered",
+                    {
+                        "memory_tier": memory_tier,
+                    },
+                )
             msg = "audit tier is append-only and cannot be updated"
             raise ValueError(msg)
 
@@ -1130,12 +1804,16 @@ class MemoryAPI:
         if session_action_count is not None and not weighting_policy.should_trigger(
             session_action_count
         ):
-            logger.info(
-                ("weight_update_skipped tenant_id=%s memory_tier=%s action_count=%s threshold=%s"),
-                tenant_id,
-                memory_tier,
-                session_action_count,
-                weighting_policy.action_count_threshold,
+            structured_log(
+                logger,
+                logging.INFO,
+                "weight_update_skipped",
+                {
+                    "tenant_id": tenant_id,
+                    "memory_tier": memory_tier,
+                    "action_count": session_action_count,
+                    "threshold": weighting_policy.action_count_threshold,
+                },
             )
             return
 
@@ -1155,19 +1833,27 @@ class MemoryAPI:
                 initial_backoff_seconds=retry_policy.initial_backoff_seconds,
                 max_backoff_seconds=retry_policy.max_backoff_seconds,
             )
-            logger.info(
-                "weight_update_completed tenant_id=%s node_count=%d memory_tier=%s",
-                tenant_id,
-                len(node_ids),
-                memory_tier,
+            structured_log(
+                logger,
+                logging.INFO,
+                "weight_update_completed",
+                {
+                    "tenant_id": tenant_id,
+                    "node_count": len(node_ids),
+                    "memory_tier": memory_tier,
+                },
             )
         except Exception as e:
-            logger.exception(
-                ("weight_update_exhausted tenant_id=%s node_count=%d memory_tier=%s attempts=%d"),
-                tenant_id,
-                len(node_ids),
-                memory_tier,
-                retry_policy.max_attempts,
+            structured_log(
+                logger,
+                logging.ERROR,
+                "weight_update_exhausted",
+                {
+                    "tenant_id": tenant_id,
+                    "node_count": len(node_ids),
+                    "memory_tier": memory_tier,
+                    "attempts": retry_policy.max_attempts,
+                },
             )
             raise WeightUpdateFailedError(
                 tenant_id=tenant_id,
@@ -1178,18 +1864,22 @@ class MemoryAPI:
 
     @staticmethod
     def _increment_session_action_count(tenant_id: str, session_id: str) -> int:
-        """Atomically increment and return the cumulative per-session action counter."""
+        """Atomically increment and return the cumulative per-session action counter.
+
+        Uses a single atomic SQL UPDATE (SET count = count + 1) with no prior SELECT
+        read. This eliminates the read-modify-write race condition where two concurrent
+        callers could both read 0, both write 1, and silently drop one increment.
+
+        Raises:
+            ValueError: If tenant_id is None or empty — composite PK enforcement.
+            RuntimeError: If the database update fails.
+        """
+        if not tenant_id or not tenant_id.strip():
+            msg = "tenant_id is required for all MemoryNode writes"
+            raise ValueError(msg)
         tenant_id = validate_tenant_id(tenant_id)
         session_id = validate_required_string(session_id, field_name="session_id")
 
-        select_sql = """
-            SELECT SessionActionCount
-            FROM MemoryNode
-            WHERE TenantId = @tenant_id
-              AND NodeId = @session_id
-              AND MemoryTier = @tier
-            LIMIT 1
-        """
         update_sql = """
             UPDATE MemoryNode
             SET SessionActionCount = SessionActionCount + 1,
@@ -1202,35 +1892,16 @@ class MemoryAPI:
         database = SpannerClient.get_database()
 
         def _transaction(transaction: SpannerTransactionProtocol) -> int:
-            """Execute atomic read-modify-write for action counter.
+            """Execute single atomic UPDATE for action counter — no read required.
 
             Args:
                 transaction: Active Spanner transaction.
 
             Returns:
-                Updated action count (incremented by 1).
-
-            Raises:
-                ValueError: If session not found.
+                Row count updated (1 on success, 0 if session not found).
             """
-            rows = execute_sql_rows_in_transaction(
-                transaction,
-                select_sql,
-                {
-                    "tenant_id": tenant_id,
-                    "session_id": session_id,
-                    "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
-                },
-            )
-            if not rows:
-                msg = f"session {session_id} not found in tenant"
-                raise ValueError(msg)
-
-            current_count_raw = rows[0][0] or 0
-            current_count = (
-                int(current_count_raw) if isinstance(current_count_raw, (int, float)) else 0
-            )
-            transaction.execute_update(
+            # Atomic increment — no SELECT read, no race condition possible.
+            return transaction.execute_update(
                 update_sql,
                 {
                     "tenant_id": tenant_id,
@@ -1238,12 +1909,9 @@ class MemoryAPI:
                     "tier": SchemaConfig.MEMORY_TIER_CONTEXT,
                 },
             )
-            return current_count + 1
 
         try:
             return database.run_in_transaction(_transaction)
-        except ValueError:
-            raise
         except Exception as error:
             msg = f"Failed to increment session action count: {error}"
             raise RuntimeError(msg) from error

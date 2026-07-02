@@ -11,12 +11,14 @@ Tests:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, Mock, patch
+from unittest.mock import Mock
 
 import pytest
 
+from src.memory import retrieval
 from src.memory.evidence_service import EvidenceService
 from src.memory.mindmap_pipeline import MindMapConfig, MindMapPipeline
+from src.memory.retrieval import PathRetrievalResult
 from src.models.evidence import (
     EvidenceContext,
     EvidenceInsufficientReason,
@@ -40,42 +42,62 @@ EVIDENCE_SUMMARY_LATENCY_MS = 35.0
 class TestEvidenceServiceBuildContext:
     """Test EvidenceService.build_evidence_context() orchestration."""
 
-    @pytest.mark.asyncio
     async def test_build_evidence_context_with_valid_entities(self) -> None:
         """Valid entities should produce evidence context."""
         # Arrange
         mock_client = Mock()
         service = EvidenceService(mock_client)
 
-        # Mock PathFinder and NeighborEnricher at the method import location
-        with (
-            patch("src.memory.retrieval.EvidentPathFinder") as mock_path_finder_class,
-            patch("src.memory.retrieval.NeighborEnricher") as mock_enricher_class,
-        ):
-            mock_finder = AsyncMock()
-            mock_finder.find_paths = AsyncMock(
-                return_value=(
-                    ["patient->has_symptom->fever", "patient->indicates->infection"],
-                    45,
-                )
-            )
-            mock_path_finder_class.return_value = mock_finder
+        original_path_finder = retrieval.EvidentPathFinder
+        original_neighbor_enricher = retrieval.NeighborEnricher
 
-            mock_enricher = AsyncMock()
-            mock_enricher.enrich_neighbors = AsyncMock(
-                return_value=(
+        class _PathFinderStub:
+            def __init__(self, client: object) -> None:
+                del client
+
+            async def find_paths(
+                self,
+                tenant_id: str,
+                start_entity_id: str,
+                end_entity_id: str,
+                start_node_id: str | None = None,
+                end_node_id: str | None = None,
+            ) -> PathRetrievalResult:
+                del tenant_id, start_entity_id, end_entity_id, start_node_id, end_node_id
+                return PathRetrievalResult(
+                    paths=["patient->has_symptom->fever", "patient->indicates->infection"],
+                    total_chars=45,
+                )
+
+        class _NeighborEnricherStub:
+            def __init__(self, client: object) -> None:
+                del client
+
+            async def enrich_neighbors(
+                self,
+                tenant_id: str,
+                entity_id: str,
+                context_flags: dict[str, object] | None = None,
+            ) -> tuple[list[str], int]:
+                del tenant_id, entity_id, context_flags
+                return (
                     ["patient->has_symptom->cough,fever", "patient->indicates->diagnosis"],
                     40,
                 )
-            )
-            mock_enricher_class.return_value = mock_enricher
 
+        retrieval.EvidentPathFinder = _PathFinderStub
+        retrieval.NeighborEnricher = _NeighborEnricherStub
+
+        try:
             # Act
             result = await service.build_evidence_context(
                 tenant_id="tenant-123",
                 mined_entities=["patient", "fever"],
                 session_id="sess-456",
             )
+        finally:
+            retrieval.EvidentPathFinder = original_path_finder
+            retrieval.NeighborEnricher = original_neighbor_enricher
 
         # Assert
         assert result is not None
@@ -84,7 +106,6 @@ class TestEvidenceServiceBuildContext:
         assert result.neighbor_count > 0
         assert result.total_chars > 0
 
-    @pytest.mark.asyncio
     async def test_build_evidence_context_empty_entities(self) -> None:
         """Empty entity list should return empty context."""
         # Arrange
@@ -103,7 +124,6 @@ class TestEvidenceServiceBuildContext:
         assert result.total_items == 0
         assert result.insufficient_reasons == [EvidenceInsufficientReason.EMPTY_GRAPH]
 
-    @pytest.mark.asyncio
     async def test_build_evidence_context_invalid_tenant_id(self) -> None:
         """Empty tenant_id should raise ValueError."""
         # Arrange
@@ -117,24 +137,40 @@ class TestEvidenceServiceBuildContext:
                 mined_entities=["patient"],
             )
 
-    @pytest.mark.asyncio
     async def test_build_evidence_context_error_handling(self) -> None:
         """Errors during retrieval should return context with insufficient reasons."""
         # Arrange
         mock_client = Mock()
         service = EvidenceService(mock_client)
 
-        # Mock PathFinder to raise error
-        with patch("src.memory.retrieval.EvidentPathFinder") as mock_path_finder_class:
-            mock_finder = AsyncMock()
-            mock_finder.find_paths = AsyncMock(side_effect=RuntimeError("Timeout"))
-            mock_path_finder_class.return_value = mock_finder
+        original_path_finder = retrieval.EvidentPathFinder
 
+        class _PathFinderErrorStub:
+            def __init__(self, client: object) -> None:
+                del client
+
+            async def find_paths(
+                self,
+                tenant_id: str,
+                start_entity_id: str,
+                end_entity_id: str,
+                start_node_id: str | None = None,
+                end_node_id: str | None = None,
+            ) -> PathRetrievalResult:
+                del tenant_id, start_entity_id, end_entity_id, start_node_id, end_node_id
+                msg = "Timeout"
+                raise RuntimeError(msg)
+
+        retrieval.EvidentPathFinder = _PathFinderErrorStub
+
+        try:
             # Act
             result = await service.build_evidence_context(
                 tenant_id="tenant-123",
                 mined_entities=["patient", "provider"],
             )
+        finally:
+            retrieval.EvidentPathFinder = original_path_finder
 
         # Assert
         assert result is not None
@@ -144,7 +180,6 @@ class TestEvidenceServiceBuildContext:
 class TestMindMapPipelineEvidenceIntegration:
     """Test MindMapPipeline integration with evidence service."""
 
-    @pytest.mark.asyncio
     async def test_execute_includes_evidence_summary(self) -> None:
         """MindMapResponse should include evidence_summary when tenant_id provided."""
         # Arrange
@@ -176,19 +211,22 @@ class TestMindMapPipelineEvidenceIntegration:
             retrieval_latency_ms=50.0,
         )
 
-        with patch.object(
-            pipeline.evidence_service,
-            "build_evidence_context",
-            new_callable=AsyncMock,
-        ) as mock_build_evidence:
-            mock_build_evidence.return_value = mock_evidence_context
+        original_build_evidence_context = pipeline.evidence_service.build_evidence_context
 
+        async def _build_evidence_context_stub(**_: object) -> EvidenceContext:
+            return mock_evidence_context
+
+        pipeline.evidence_service.build_evidence_context = _build_evidence_context_stub
+
+        try:
             # Act
             response = await pipeline.execute(
                 query="What is the patient's condition?",
                 tenant_id="tenant-123",
                 session_id="sess-456",
             )
+        finally:
+            pipeline.evidence_service.build_evidence_context = original_build_evidence_context
 
         # Assert
         assert response.evidence_summary is not None
@@ -201,7 +239,6 @@ class TestMindMapPipelineEvidenceIntegration:
             in response.evidence_summary.insufficient_reasons
         )
 
-    @pytest.mark.asyncio
     async def test_execute_without_tenant_id_skips_evidence(self) -> None:
         """Without tenant_id, evidence service should not be called."""
         # Arrange
@@ -209,23 +246,31 @@ class TestMindMapPipelineEvidenceIntegration:
         mock_spanner_client = Mock()
         pipeline = MindMapPipeline(config=config, spanner_client=mock_spanner_client)
 
-        with patch.object(
-            pipeline.evidence_service,
-            "build_evidence_context",
-            new_callable=AsyncMock,
-        ) as mock_build_evidence:
+        original_build_evidence_context = pipeline.evidence_service.build_evidence_context
+        called = False
+
+        async def _build_evidence_context_stub(**_: object) -> EvidenceContext:
+            nonlocal called
+            called = True
+            msg = "Should not be called when tenant_id is None"
+            raise AssertionError(msg)
+
+        pipeline.evidence_service.build_evidence_context = _build_evidence_context_stub
+
+        try:
             # Act
             response = await pipeline.execute(
                 query="What is the patient's condition?",
                 tenant_id=None,
                 session_id="sess-456",
             )
+        finally:
+            pipeline.evidence_service.build_evidence_context = original_build_evidence_context
 
         # Assert
         assert response.evidence_summary is None
-        mock_build_evidence.assert_not_called()
+        assert called is False
 
-    @pytest.mark.asyncio
     async def test_execute_evidence_error_handling(self) -> None:
         """Evidence service errors should not break pipeline execution."""
         # Arrange
@@ -233,18 +278,23 @@ class TestMindMapPipelineEvidenceIntegration:
         mock_spanner_client = Mock()
         pipeline = MindMapPipeline(config=config, spanner_client=mock_spanner_client)
 
-        with patch.object(
-            pipeline.evidence_service,
-            "build_evidence_context",
-            new_callable=AsyncMock,
-            side_effect=RuntimeError("Evidence retrieval failed"),
-        ):
+        original_build_evidence_context = pipeline.evidence_service.build_evidence_context
+
+        async def _build_evidence_context_error_stub(**_: object) -> EvidenceContext:
+            msg = "Evidence retrieval failed"
+            raise RuntimeError(msg)
+
+        pipeline.evidence_service.build_evidence_context = _build_evidence_context_error_stub
+
+        try:
             # Act - should not raise
             response = await pipeline.execute(
                 query="What is the patient's condition?",
                 tenant_id="tenant-123",
                 session_id="sess-456",
             )
+        finally:
+            pipeline.evidence_service.build_evidence_context = original_build_evidence_context
 
         # Assert
         assert response is not None

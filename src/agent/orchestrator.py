@@ -25,6 +25,7 @@ if TYPE_CHECKING:
     from src.mcp.service import MCPToolService
 
 logger = logging.getLogger(__name__)
+DEFAULT_TIMEOUT_EXTRACTION_WINDOW = 50
 
 
 @dataclass(slots=True)
@@ -52,6 +53,9 @@ class AgentOrchestrator:
                 "agent.mode": str(request.mode),
             },
         ):
+            request_id = request.request_id or f"req_{uuid4()}"
+            execution_mode = request.mode
+
             if request.mode == AgentExecutionMode.VERTEX:
                 if self.vertex_adapter is None:
                     logger.warning(
@@ -67,24 +71,39 @@ class AgentOrchestrator:
                             default=str,
                         ),
                     )
-                    return await self._respond_single_mode(
+                    execution_mode = AgentExecutionMode.SINGLE
+                    orchestrator_coro = self._respond_single_mode(
                         request=request,
-                        request_id=request.request_id or f"req_{uuid4()}",
-                        execution_mode=AgentExecutionMode.SINGLE,
+                        request_id=request_id,
+                        execution_mode=execution_mode,
                     )
-                return await self.vertex_adapter.respond(request)
-
-            if request.mode == AgentExecutionMode.SUPERVISOR_WORKER:
-                return await self._respond_supervisor_worker_mode(
+                else:
+                    orchestrator_coro = self.vertex_adapter.respond(request)
+            elif request.mode == AgentExecutionMode.SUPERVISOR_WORKER:
+                orchestrator_coro = self._respond_supervisor_worker_mode(
                     request=request,
-                    request_id=request.request_id or f"req_{uuid4()}",
+                    request_id=request_id,
+                )
+            else:
+                execution_mode = AgentExecutionMode.SINGLE
+                orchestrator_coro = self._respond_single_mode(
+                    request=request,
+                    request_id=request_id,
+                    execution_mode=execution_mode,
                 )
 
-            return await self._respond_single_mode(
-                request=request,
-                request_id=request.request_id or f"req_{uuid4()}",
-                execution_mode=AgentExecutionMode.SINGLE,
-            )
+            if request.timeout_ms is None:
+                return await orchestrator_coro
+
+            timeout_seconds = request.timeout_ms / 1000
+            try:
+                return await asyncio.wait_for(orchestrator_coro, timeout=timeout_seconds)
+            except TimeoutError:
+                return await self._handle_timeout(
+                    request=request,
+                    request_id=request_id,
+                    execution_mode=execution_mode,
+                )
 
     async def _respond_single_mode(
         self,
@@ -350,6 +369,63 @@ class AgentOrchestrator:
             MCPInvokeResponse: Tool execution response.
         """
         return await self.mcp_tool_service.invoke(request)
+
+    async def _handle_timeout(
+        self,
+        request: AgentOrchestrationRequest,
+        request_id: str,
+        execution_mode: AgentExecutionMode,
+    ) -> AgentOrchestrationResponse:
+        """Handle orchestration timeout and trigger session closure protocol.
+
+        Args:
+            request: Orchestration request that timed out.
+            request_id: Stable request identifier.
+            execution_mode: Mode to report in the response payload.
+
+        Returns:
+            AgentOrchestrationResponse: Timeout response enriched with closure trace.
+        """
+        timeout_response = await self._invoke_tool(
+            MCPInvokeRequest(
+                tenant_id=request.tenant_id,
+                agent_id=request.agent_id,
+                tool_name=MCPToolName.MEMORY_END_SESSION,
+                arguments={
+                    "end_reason": "timeout",
+                    "window_size": DEFAULT_TIMEOUT_EXTRACTION_WINDOW,
+                },
+                session_id=request.session_id,
+                request_id=request_id,
+                authorization_scope=request.authorization_scope,
+            )
+        )
+
+        structured_log(
+            logger,
+            logging.WARNING,
+            "agent_orchestration_timeout",
+            {
+                "tenant_id": request.tenant_id,
+                "session_id": request.session_id,
+                "request_id": request_id,
+                "mode": str(execution_mode),
+                "timeout_ms": request.timeout_ms,
+                "session_close_success": timeout_response.success,
+            },
+        )
+
+        return AgentOrchestrationResponse(
+            session_id=request.session_id,
+            request_id=request_id,
+            execution_mode=execution_mode,
+            response_text=(
+                "The session timed out. Session closure and knowledge extraction were triggered."
+            ),
+            grounded=False,
+            tool_call_count=1,
+            tool_calls=[self._to_tool_trace(timeout_response)],
+        )
 
     @staticmethod
     def _to_tool_trace(response: MCPInvokeResponse) -> AgentToolCallTrace:

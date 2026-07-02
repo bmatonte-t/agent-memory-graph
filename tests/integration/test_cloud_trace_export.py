@@ -7,14 +7,15 @@ orchestrator, MCP service, and MindMap pipeline execution paths.
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 
+import src.mcp.service as mcp_service
 from src.agent.orchestrator import AgentOrchestrator
 from src.mcp.service import MCPToolService
+from src.memory import mindmap_pipeline
 from src.memory.mindmap_pipeline import MindMapPipeline
 from src.models.agent import AgentOrchestrationRequest
 from src.models.mcp import MCPInvokeRequest, MCPInvokeResponse, MCPTokenUsage, MCPToolName
@@ -99,26 +100,28 @@ class TestOrchestratorTracing:
         self, span_exporter: InMemorySpanExporter
     ) -> None:
         """orchestrator.respond span should carry tenant, session, and mode attributes."""
-        fake_service = AsyncMock()
 
-        async def fake_invoke(request: MCPInvokeRequest) -> MCPInvokeResponse:
-            """Return a stub successful tool response."""
-            result = {}
-            if request.tool_name == MCPToolName.MEMORY_SEARCH:
-                result = {"synthesis": {"response_text": "ok", "grounded": True}}
-            return MCPInvokeResponse(
-                tool_name=request.tool_name,
-                request_id=request.request_id,
-                success=True,
-                latency_ms=1.0,
-                result=result,
-                token_usage=MCPTokenUsage(
-                    input_tokens=1, output_tokens=1, total_tokens=2, estimated=True
-                ),
-            )
+        class _FakeToolService:
+            async def invoke(self, request: MCPInvokeRequest) -> MCPInvokeResponse:
+                """Return a stub successful tool response."""
+                result = {}
+                if request.tool_name == MCPToolName.MEMORY_SEARCH:
+                    result = {"synthesis": {"response_text": "ok", "grounded": True}}
+                return MCPInvokeResponse(
+                    tool_name=request.tool_name,
+                    request_id=request.request_id,
+                    success=True,
+                    latency_ms=1.0,
+                    result=result,
+                    token_usage=MCPTokenUsage(
+                        input_tokens=1,
+                        output_tokens=1,
+                        total_tokens=2,
+                        estimated=True,
+                    ),
+                )
 
-        fake_service.invoke.side_effect = fake_invoke
-        orchestrator = AgentOrchestrator(mcp_tool_service=fake_service)
+        orchestrator = AgentOrchestrator(mcp_tool_service=_FakeToolService())
 
         await orchestrator.respond(
             AgentOrchestrationRequest(
@@ -145,32 +148,56 @@ class TestMCPServiceTracing:
     async def test_invoke_emits_mcp_span(
         self,
         span_exporter: InMemorySpanExporter,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """mcp.invoke span should carry tool name, tenant, session, and request context."""
-        fake_pipeline = AsyncMock()
-        fake_pipeline.execute.return_value = MagicMock(
-            model_dump=lambda mode: {
-                "synthesis": {"response_text": "ok", "grounded": True},
-            }
-        )
+
+        class _PipelineResponseStub:
+            def model_dump(self, mode: str) -> dict[str, dict[str, str | bool]]:
+                del mode
+                return {
+                    "synthesis": {"response_text": "ok", "grounded": True},
+                }
+
+        class _PipelineStub:
+            async def execute(self, **_: object) -> _PipelineResponseStub:
+                return _PipelineResponseStub()
+
+        fake_pipeline = _PipelineStub()
         service = MCPToolService(mindmap_pipeline=fake_pipeline)
 
-        # Mock the session action counter to avoid SpannerClient initialization
-        monkeypatch.setattr(
-            "src.memory.api.MemoryAPI._increment_session_action_count",
-            lambda *_: None,
+        # Stub audit event write — now propagates (Bug A fix), must be stubbed in unit tests.
+        async def fake_record_audit_event(**_: object) -> AuditResponse:
+            return AuditResponse(
+                tenant_id="tenant_mcp",
+                event_id="audit_stub",
+                event_type="MCP_AUTHORIZATION_GRANTED",
+                timestamp=datetime.now(UTC),
+            )
+
+        original_record_audit_event = mcp_service.MemoryAPI.record_audit_event
+        original_increment_session_action_count = (
+            mcp_service.MemoryAPI._increment_session_action_count
         )
 
-        await service.invoke(
-            MCPInvokeRequest(
-                tenant_id="tenant_mcp",
-                tool_name=MCPToolName.MEMORY_SEARCH,
-                arguments={"query": "test query"},
-                session_id="session_mcp",
-                request_id="req_mcp",
+        mcp_service.MemoryAPI.record_audit_event = fake_record_audit_event
+        # Avoid Spanner client initialization in this integration path test.
+        mcp_service.MemoryAPI._increment_session_action_count = lambda *_: None
+
+        try:
+            await service.invoke(
+                MCPInvokeRequest(
+                    tenant_id="tenant_mcp",
+                    tool_name=MCPToolName.MEMORY_SEARCH,
+                    arguments={"query": "test query"},
+                    session_id="session_mcp",
+                    request_id="req_mcp",
+                )
             )
-        )
+        finally:
+            mcp_service.MemoryAPI.record_audit_event = original_record_audit_event
+            mcp_service.MemoryAPI._increment_session_action_count = (
+                original_increment_session_action_count
+            )
 
         finished_spans = span_exporter.get_finished_spans()
         span_names = [s.name for s in finished_spans]
@@ -189,7 +216,6 @@ class TestMindMapPipelineTracing:
     async def test_execute_emits_mindmap_span(
         self,
         span_exporter: InMemorySpanExporter,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """mindmap.execute span should carry session, tenant, and query length attributes."""
 
@@ -202,17 +228,18 @@ class TestMindMapPipelineTracing:
                 timestamp=datetime.now(UTC),
             )
 
-        monkeypatch.setattr(
-            "src.memory.mindmap_pipeline.MemoryAPI.record_audit_event",
-            fake_audit,
-        )
+        original_record_audit_event = mindmap_pipeline.MemoryAPI.record_audit_event
+        mindmap_pipeline.MemoryAPI.record_audit_event = fake_audit
 
-        pipeline = MindMapPipeline()
-        await pipeline.execute(
-            query="Explain alpha budget",
-            session_id="session_mm",
-            tenant_id="tenant_mm",
-        )
+        try:
+            pipeline = MindMapPipeline()
+            await pipeline.execute(
+                query="Explain alpha budget",
+                session_id="session_mm",
+                tenant_id="tenant_mm",
+            )
+        finally:
+            mindmap_pipeline.MemoryAPI.record_audit_event = original_record_audit_event
 
         finished_spans = span_exporter.get_finished_spans()
         span_names = [s.name for s in finished_spans]
@@ -223,3 +250,36 @@ class TestMindMapPipelineTracing:
         assert mm_span.attributes["tenant.id"] == "tenant_mm"
         assert isinstance(mm_span.attributes["query.length"], int)
         assert mm_span.attributes["query.length"] > 0
+
+    async def test_execute_emits_stage_spans(
+        self,
+        span_exporter: InMemorySpanExporter,
+    ) -> None:
+        """MindMap execution should emit child spans for Mine/Aggregate/Serialize/Synthesize."""
+
+        async def fake_audit(**_: object) -> AuditResponse:
+            return AuditResponse(
+                tenant_id="tenant_mm",
+                event_id="evt_2",
+                event_type="MINDMAP_EXECUTION",
+                timestamp=datetime.now(UTC),
+            )
+
+        original_record_audit_event = mindmap_pipeline.MemoryAPI.record_audit_event
+        mindmap_pipeline.MemoryAPI.record_audit_event = fake_audit
+
+        try:
+            pipeline = MindMapPipeline()
+            await pipeline.execute(
+                query="Explain alpha budget",
+                session_id="session_mm",
+                tenant_id="tenant_mm",
+            )
+        finally:
+            mindmap_pipeline.MemoryAPI.record_audit_event = original_record_audit_event
+
+        span_names = {span.name for span in span_exporter.get_finished_spans()}
+        assert "mindmap.stage.mine" in span_names
+        assert "mindmap.stage.aggregate" in span_names
+        assert "mindmap.stage.serialize" in span_names
+        assert "mindmap.stage.synthesize" in span_names

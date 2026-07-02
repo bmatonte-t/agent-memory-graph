@@ -8,8 +8,8 @@
 ###############################################################################
 
 locals {
-  product_sa_id  = "agent-memory-graph-sa"
-  spanner_sa_id  = "agent-memory-graph-spanner-sa"
+  product_sa_id    = "agent-memory-graph-sa"
+  spanner_sa_id    = "agent-memory-graph-spanner-sa"
   product_sa_email = "${local.product_sa_id}@${local.project_id}.iam.gserviceaccount.com"
   spanner_sa_email = "${local.spanner_sa_id}@${local.spanner_project_id}.iam.gserviceaccount.com"
 }
@@ -53,6 +53,51 @@ resource "google_service_account_iam_member" "agents_group_impersonation" {
   service_account_id = google_service_account.product_sa.name
   role               = "roles/iam.serviceAccountUser"
   member             = "group:${var.agents_group_email}"
+}
+
+# ---------------------------------------------------------------------------
+# Optional Workload Identity Federation (GitLab OIDC)
+#
+# When enabled, CI jobs can impersonate the product service account without
+# long-lived JSON keys.
+# ---------------------------------------------------------------------------
+
+resource "google_iam_workload_identity_pool" "gitlab" {
+  count = var.enable_workload_identity_federation ? 1 : 0
+
+  workload_identity_pool_id = var.workload_identity_pool_id
+  display_name              = "Agent Memory Graph GitLab CI Pool"
+  description               = "OIDC pool for GitLab CI federation"
+  project                   = local.project_id
+}
+
+resource "google_iam_workload_identity_pool_provider" "gitlab_oidc" {
+  count = var.enable_workload_identity_federation ? 1 : 0
+
+  workload_identity_pool_id          = google_iam_workload_identity_pool.gitlab[0].workload_identity_pool_id
+  workload_identity_pool_provider_id = var.workload_identity_provider_id
+  display_name                       = "Agent Memory Graph GitLab OIDC Provider"
+  project                            = local.project_id
+
+  oidc {
+    issuer_uri        = var.gitlab_oidc_issuer_uri
+    allowed_audiences = var.gitlab_oidc_allowed_audiences
+  }
+
+  attribute_mapping = {
+    "google.subject"         = "assertion.sub"
+    "attribute.project_path" = "assertion.project_path"
+    "attribute.ref"          = "assertion.ref"
+    "attribute.pipeline_id"  = "assertion.pipeline_id"
+  }
+}
+
+resource "google_service_account_iam_member" "gitlab_oidc_impersonation" {
+  count = var.enable_workload_identity_federation && var.gitlab_project_path != "" ? 1 : 0
+
+  service_account_id = google_service_account.product_sa.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.gitlab[0].name}/attribute.project_path/${var.gitlab_project_path}"
 }
 
 # ---------------------------------------------------------------------------

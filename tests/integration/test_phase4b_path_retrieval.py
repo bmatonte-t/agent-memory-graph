@@ -6,8 +6,6 @@ and tenant isolation for the EvidentPathFinder.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from src.memory.retrieval import EvidentPathFinder, PathRetrievalError
@@ -19,19 +17,23 @@ MAX_PATHS_REDUCED = 2
 SMALL_CHAR_BUDGET = 100
 
 
+class _SpannerClientStub:
+    """Minimal client stub accepted by EvidentPathFinder in tests."""
+
+
 class TestEvidentPathFinder:
     """Tests for EvidentPathFinder GQL queries and serialization."""
 
     @pytest.fixture
-    def mock_spanner_client(self) -> MagicMock:
-        """Create a mock Spanner client."""
-        return MagicMock()
+    def spanner_client_stub(self) -> _SpannerClientStub:
+        """Create a lightweight Spanner client stub."""
+        return _SpannerClientStub()
 
     @pytest.fixture
-    def path_finder(self, mock_spanner_client: MagicMock) -> EvidentPathFinder:
+    def path_finder(self, spanner_client_stub: _SpannerClientStub) -> EvidentPathFinder:
         """Create a path finder with mock client."""
         return EvidentPathFinder(
-            client=mock_spanner_client,
+            client=spanner_client_stub,
             max_path_length=MAX_PATH_LENGTH,
             max_paths=MAX_PATHS_DEFAULT,
             max_chars=MAX_PATH_CHARS_DEFAULT,
@@ -131,7 +133,7 @@ class TestEvidentPathFinder:
         """find_paths respects max_paths parameter."""
         # Create finder with max_paths=2
         finder = EvidentPathFinder(
-            client=MagicMock(),
+            client=_SpannerClientStub(),
             max_paths=MAX_PATHS_REDUCED,
             max_chars=MAX_PATH_CHARS_DEFAULT,
         )
@@ -147,7 +149,7 @@ class TestEvidentPathFinder:
         """find_paths truncates results if total chars exceed budget."""
         # Create finder with small char budget
         finder = EvidentPathFinder(
-            client=MagicMock(),
+            client=_SpannerClientStub(),
             max_paths=10,
             max_chars=SMALL_CHAR_BUDGET,  # Very small budget
         )
@@ -204,7 +206,7 @@ class TestPathSerializationEdgeCases:
     @pytest.fixture
     def path_finder(self) -> EvidentPathFinder:
         """Create path finder with mock client."""
-        return EvidentPathFinder(client=MagicMock())
+        return EvidentPathFinder(client=_SpannerClientStub())
 
     @pytest.mark.asyncio
     async def test_serialize_path_single_node(self, path_finder: EvidentPathFinder) -> None:

@@ -57,9 +57,22 @@ packages = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = [
+    "--strict-markers",
+    "--strict-config",
+]
 markers = [
     "integration: integration tests",
     "unit: unit tests",
+    "contract: contract tests between internal modules or adapters",
+    "smoke: high-signal smoke scenarios",
+    "performance: performance-oriented validation",
+    "load: sustained load and stress validation",
+    "chaos: resilience and fault-injection validation",
+    "security: security-oriented validation",
+    "migration: migration and backward compatibility validation",
+    "slow: intentionally long-running validation",
+    "asyncio: async event-loop based test",
 ]
 # ASYNC TESTING CONFIGURATION #
 # asyncio_mode = "auto" automatically detects async test functions and applies the asyncio marker

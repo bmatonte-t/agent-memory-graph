@@ -162,6 +162,33 @@ class AgentMemoryGraphClient:
             arguments,
         )
 
+    async def add_facts_batch(
+        self,
+        facts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Add multiple semantic facts in a single MCP request.
+
+        Args:
+            facts: Array of fact objects. Each item must include
+                ``entity_type`` and ``entity_id`` and may include
+                ``attributes`` and ``relationship``.
+
+        Returns:
+            dict[str, Any]: Batch summary with per-item success/failure data.
+
+        Raises:
+            ValueError: If `facts` is empty.
+            httpx.HTTPError: On network or HTTP errors.
+        """
+        if not facts:
+            msg = "facts must be a non-empty list"
+            raise ValueError(msg)
+
+        return await self._invoke_tool(
+            MCPToolName.MEMORY_ADD_FACT_BATCH,
+            {"facts": facts},
+        )
+
     async def log_trace(
         self,
         source_node_id: str,

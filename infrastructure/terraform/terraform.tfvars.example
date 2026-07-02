@@ -45,11 +45,23 @@ spanner_instance_id = {
 # ---------------------------------------------------------------------------
 # Region
 # ---------------------------------------------------------------------------
+#
+# Guidance:
+# - us-east1: lower latency to shared US-based control planes and commonly used
+#   by platform tooling.
+# - southamerica-east1: lower latency for LATAM end users and data locality.
+#
+# Spanner trade-off:
+# - Regional (single region): lower cost and write latency.
+# - Multi-region: higher availability/DR at higher cost and write latency.
+#
+# Start with regional Spanner in the same region as Cloud Run for MVP,
+# then evaluate multi-region for strict resiliency requirements.
 
 region = {
   dev  = "us-east1"
   intg = "us-east1"
-  prod = "us-east1"
+  prod = "southamerica-east1"
 }
 
 # ---------------------------------------------------------------------------
@@ -109,3 +121,44 @@ cloud_run_max_instances = {
 # Notification channels for alert policies (leave empty to use Cloud Monitoring console only)
 # Create channels via: gcloud alpha monitoring channels create
 notification_channels = []
+
+# Optional VPC connector names for private egress from Cloud Run
+vpc_connector_name = {
+  dev  = ""
+  intg = ""
+  prod = ""
+}
+
+# Optional Workload Identity Federation (recommended over GOOGLE_CREDENTIALS)
+enable_workload_identity_federation = false
+gitlab_oidc_issuer_uri              = "https://gitlab.com"
+gitlab_oidc_allowed_audiences       = ["https://sts.googleapis.com"]
+gitlab_project_path                 = "<GROUP>/<SUBGROUP>/agent-memory-graph"
+workload_identity_pool_id           = "gitlab-ci-pool"
+workload_identity_provider_id       = "gitlab-ci-provider"
+
+# Seven-year retention for audit logs
+audit_log_retention_days = 2555
+
+# Cloud Scheduler maintenance jobs (EPIC-03)
+enable_scheduler_jobs  = true
+scheduler_location     = "us-central1"
+scheduler_time_zone    = "UTC"
+scheduler_decay_schedule = "0 2 * * *"
+scheduler_prune_schedule = "0 3 * * 0"
+scheduler_decay_rate     = 0.05
+scheduler_prune_threshold = 0.30
+scheduler_decay_absence_window = "129600s"
+scheduler_prune_absence_window = "691200s"
+
+# EPIC-06 SLOs and burn-rate controls
+monitoring_service_id         = "agent-memory-graph"
+slo_rolling_period_days       = 30
+slo_target_availability       = 0.995
+slo_target_latency            = 0.95
+slo_target_error_rate         = 0.99
+slo_latency_threshold_ms      = 500
+slo_burn_rate_short_threshold = 14
+slo_burn_rate_long_threshold  = 6
+slo_burn_rate_short_window    = "300s"
+slo_burn_rate_long_window     = "3600s"

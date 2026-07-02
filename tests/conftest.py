@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+import uuid
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from unittest.mock import patch
 
@@ -9,15 +12,24 @@ import pytest
 import yaml
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
     from pathlib import Path
+    from typing import Protocol
 
-import uuid
+    class HttpServerLike(Protocol):
+        """Protocol for pytest http server fixtures exposing url_for."""
+
+        def url_for(self, path: str) -> str:
+            """Build a full URL for the provided path."""
+            ...
+
 
 from src.models.agent import AgentOrchestrationRequest
 from src.models.mcp import MCPInvokeRequest, MCPToolName
 from src.models.schemas import (
     AddSemanticFactRequest,
+    ContextResponse,
+    ContextTurn,
     CreateSessionRequest,
     RecordAuditEventRequest,
     RetrieveContextWindowRequest,
@@ -111,6 +123,7 @@ def add_semantic_fact_request(tenant_id: str) -> AddSemanticFactRequest:
         entity_type="PERSON",
         entity_id="entity_test_1",
         attributes={"name": "Test Entity"},
+        relationship=None,
     )
 
 
@@ -189,7 +202,7 @@ def single_company_settings() -> Generator[SingleCompanySettings]:
 
 
 @pytest.fixture
-def external_auth_settings(httpserver: object) -> Generator[object]:
+def external_auth_settings(httpserver: HttpServerLike) -> Generator[HttpServerLike]:
     """Activate org-wide mode with an external passthrough auth adapter.
 
     Requires ``pytest-localserver`` or ``pytest-httpserver`` to provide
@@ -210,3 +223,134 @@ def external_auth_settings(httpserver: object) -> Generator[object]:
         yield httpserver
 
     governance_adapter._ADAPTER_CACHE.clear()
+
+
+def _derive_markers_from_path(test_path: Path) -> set[str]:
+    """Infer default pytest markers from the test file path.
+
+    Args:
+        test_path: Path of the collected test item.
+
+    Returns:
+        set[str]: Marker names inferred from the path and file name.
+    """
+    absolute_path = test_path.as_posix()
+    relative_path = absolute_path.replace("\\", "/")
+    marker_names: set[str] = set()
+
+    if "/tests/unit/" in relative_path or relative_path.startswith("tests/unit/"):
+        marker_names.add("unit")
+
+    if "/tests/integration/" in relative_path or relative_path.startswith("tests/integration/"):
+        marker_names.add("integration")
+
+    if "/tests/load/" in relative_path or relative_path.startswith("tests/load/"):
+        marker_names.add("load")
+
+    if "/tests/chaos/" in relative_path or relative_path.startswith("tests/chaos/"):
+        marker_names.add("chaos")
+
+    # Keep legacy top-level tests (tests/test_*.py) inside functional gates by
+    # default so they are not excluded from marker-based CI confidence checks.
+    is_top_level_test = (
+        (relative_path.startswith("tests/test_") or "/tests/test_" in relative_path)
+        and "/tests/unit/" not in relative_path
+        and "/tests/integration/" not in relative_path
+        and "/tests/load/" not in relative_path
+        and "/tests/chaos/" not in relative_path
+    )
+    if is_top_level_test:
+        marker_names.add("unit")
+
+    file_name = test_path.name.lower()
+    if "performance" in file_name:
+        marker_names.add("performance")
+
+    return marker_names
+
+
+def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+    """Apply default layer markers from file paths when tests omit explicit markers.
+
+    This keeps marker-based gates reliable without forcing repetitive per-test
+    decorators, while still allowing explicit markers to coexist.
+
+    Args:
+        config: Pytest configuration object.
+        items: Collected pytest items.
+    """
+    del config
+    for item in items:
+        derived_markers = _derive_markers_from_path(item.path)
+        existing_markers = {marker.name for marker in item.iter_markers()}
+
+        for marker_name in derived_markers - existing_markers:
+            item.add_marker(marker_name)
+
+
+@pytest.fixture
+def context_turn_row_factory() -> Callable[..., tuple[str, str, str, float, datetime, str]]:
+    """Build canonical DB rows used by context-window tests.
+
+    Returns:
+        Callable[..., tuple[str, str, str, float, datetime, str]]: Factory that
+        returns one context row tuple in DB result shape.
+    """
+
+    def _factory(
+        *,
+        turn_id: str,
+        role: str,
+        content: str,
+        weight: float,
+    ) -> tuple[str, str, str, float, datetime, str]:
+        return (
+            turn_id,
+            role,
+            json.dumps({"content": content}),
+            weight,
+            datetime.now(UTC),
+            "HAS_TURN",
+        )
+
+    return _factory
+
+
+@pytest.fixture
+def context_response_factory() -> Callable[..., ContextResponse]:
+    """Build canonical `ContextResponse` payloads for memory API tests.
+
+    Returns:
+        Callable[..., ContextResponse]: Factory that generates consistent
+        context envelopes from compact turn tuples.
+    """
+
+    def _factory(
+        *,
+        tenant_id: str,
+        session_id: str,
+        turns: list[tuple[str, str, str, float]],
+    ) -> ContextResponse:
+        retrieved_at = datetime.now(UTC)
+        context_turns = [
+            ContextTurn(
+                turn_id=turn_id,
+                node_id=turn_id,
+                tenant_id=tenant_id,
+                role=role,
+                content=json.dumps({"content": content}),
+                weight=weight,
+                created_at=retrieved_at,
+            )
+            for turn_id, role, content, weight in turns
+        ]
+
+        return ContextResponse(
+            tenant_id=tenant_id,
+            session_id=session_id,
+            turns=context_turns,
+            total_weight_sum=sum(turn.weight for turn in context_turns),
+            retrieved_at=retrieved_at,
+        )
+
+    return _factory

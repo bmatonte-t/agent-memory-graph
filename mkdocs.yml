@@ -131,6 +131,7 @@ nav:
       - Branch Management: workflow/branch_management.md
       - Commit Conventions: workflow/commit_conventions.md
       - Pull Request Process: workflow/pr_process.md
+      - Testing Health Dashboard: testing-health-dashboard.md
   - Tutorials:
       - Overview: tutorials/overview.md
       - Documentation:

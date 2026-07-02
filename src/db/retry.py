@@ -113,6 +113,8 @@ async def async_retry_with_backoff(
     for attempt in range(max_attempts):
         try:
             return await func(*args, **kwargs)
+        except asyncio.CancelledError:
+            raise  # Always re-raise immediately — never retry cancelled tasks
         except Exception as e:
             last_error = e
             is_retryable = is_transient_error(e)

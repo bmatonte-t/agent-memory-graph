@@ -30,7 +30,7 @@ class SchemaManager:
         if not cls.MIGRATIONS_DIR.exists():
             return []
 
-        return sorted([f.name for f in cls.MIGRATIONS_DIR.glob("*.sql")])
+        return sorted([f.name for f in cls.MIGRATIONS_DIR.glob("*.sql") if "_down" not in f.name])
 
     @staticmethod
     def _parse_sql_statements(sql: str) -> list[str]:
@@ -249,6 +249,7 @@ class SchemaConfig:
     INITIAL_WEIGHT = 0.50
     BAYES_FACTOR_SUCCESS = 1.25  # ln(1.25) ≈ 0.223
     TEMPORAL_DECAY_RATE = 0.05  # 5% per 24 hours
+    # Global deployment-level threshold (EPIC-05 ADR-0004). Not per-tenant.
     WEIGHT_THRESHOLD = 0.30  # Minimum weight for inclusion in retrieval horizon
 
     # Common Relationship Types

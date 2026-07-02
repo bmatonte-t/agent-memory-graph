@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
@@ -17,7 +18,21 @@ from src.security.tenant_context import OrgTenantContext
 from src.security.validators import validate_tenant_id
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from src.project_base.settings.config import SingleCompanySettings
+
+
+@contextmanager
+def _temporary_single_company(settings: object, single_company: object) -> Iterator[None]:
+    """Temporarily override ``settings.single_company`` for test isolation."""
+    original_single_company = settings.single_company
+    settings.single_company = single_company
+    try:
+        yield
+    finally:
+        settings.single_company = original_single_company
+
 
 # Test performance thresholds and constants
 LATENCY_INJECTION_ITERATIONS = 1000
@@ -119,7 +134,7 @@ class TestOrgWideModeThroughput:
 class TestOrgWideModeConcurrency:
     """Tests for concurrent operation safety."""
 
-    def test_concurrent_orgs_do_not_interfere(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_concurrent_orgs_do_not_interfere(self) -> None:
         """Concurrent requests from different orgs should be isolated."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
@@ -131,17 +146,16 @@ class TestOrgWideModeConcurrency:
                 enabled=True,
                 company_id=org_company_id,
             )
-            monkeypatch.setattr(settings, "single_company", org_settings)
+            with _temporary_single_company(settings, org_settings):
+                req = MCPInvokeRequest(
+                    tenant_id=None,
+                    tool_name=MCPToolName.MEMORY_SEARCH,
+                    arguments={"query": f"org_{org_id}"},
+                    session_id=f"session_{org_id}",
+                    request_id=f"req_{org_id}",
+                )
 
-            req = MCPInvokeRequest(
-                tenant_id=None,
-                tool_name=MCPToolName.MEMORY_SEARCH,
-                arguments={"query": f"org_{org_id}"},
-                session_id=f"session_{org_id}",
-                request_id=f"req_{org_id}",
-            )
-
-            results[org_id] = req.tenant_id
+                results[org_id] = req.tenant_id
 
         # Simulate concurrent requests
         make_request("1", "org-1")
@@ -198,9 +212,7 @@ class TestOrgWideModeMemoryEfficiency:
         # All same value
         assert tenant_1 == tenant_2 == tenant_3
 
-    def test_governance_adapter_caching_reduces_allocations(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_governance_adapter_caching_reduces_allocations(self) -> None:
         """Adapter caching should reduce memory allocations."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
@@ -211,16 +223,16 @@ class TestOrgWideModeMemoryEfficiency:
             enabled=True,
             company_id="org-1",
         )
-        monkeypatch.setattr(settings, "single_company", org_settings)
-        governance_adapter._ADAPTER_CACHE.clear()
+        with _temporary_single_company(settings, org_settings):
+            governance_adapter._ADAPTER_CACHE.clear()
 
-        # First call creates adapter
-        adapter_1 = build_governance_adapter()
-        # Second call returns cached adapter
-        adapter_2 = build_governance_adapter()
+            # First call creates adapter
+            adapter_1 = build_governance_adapter()
+            # Second call returns cached adapter
+            adapter_2 = build_governance_adapter()
 
-        # Same object (cached)
-        assert adapter_1 is adapter_2
+            # Same object (cached)
+            assert adapter_1 is adapter_2
 
 
 class TestOrgWideModeSLOs:

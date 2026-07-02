@@ -27,11 +27,14 @@ from src.models.mcp import (
 from src.models.schemas import AuditResponse
 from src.observability.metrics import (
     configure_metrics,
+    emit_counter,
     mcp_tool_error_counter,
     mcp_tool_invocation_counter,
     orchestrator_request_counter,
     pipeline_execution_histogram,
     pipeline_fact_counter,
+    record_authorization_denial,
+    record_high_severity_contradiction,
 )
 
 
@@ -87,6 +90,18 @@ class TestMetricInstruments:
         provider = configure_metrics()
         assert provider is not None
 
+    def test_emit_counter_increments_without_error(self) -> None:
+        """emit_counter should create a counter and increment it by 1 without raising."""
+        emit_counter("test.counter", labels={"key": "value"})
+
+    def test_record_authorization_denial_emits_without_error(self) -> None:
+        """record_authorization_denial should emit the authorization.denied counter once."""
+        record_authorization_denial("tenant_abc", "Session")
+
+    def test_record_high_severity_contradiction_emits_without_error(self) -> None:
+        """record_high_severity_contradiction should emit the memory.contradiction.high counter."""
+        record_high_severity_contradiction("tenant_abc", "node_xyz")
+
 
 class TestOrchestratorMetricsEmission:
     """Verify the orchestrator emits request counter after each turn."""
@@ -136,6 +151,31 @@ class TestOrchestratorMetricsEmission:
 
 class TestMCPServiceMetricsEmission:
     """Verify MCP service emits invocation and error counters."""
+
+    @pytest.fixture(autouse=True)
+    def _stub_audit_and_counter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Stub audit persistence and session counter to avoid Spanner calls.
+
+        The audit write is now non-swallowed (Bug A fix); these unit tests must
+        stub it so real Spanner calls are not attempted during metrics testing.
+        """
+
+        async def fake_record_audit_event(**_: object) -> AuditResponse:
+            return AuditResponse(
+                tenant_id="tenant_m",
+                event_id="audit_stub",
+                event_type="MCP_AUTHORIZATION_GRANTED",
+                timestamp=datetime.now(UTC),
+            )
+
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI.record_audit_event",
+            fake_record_audit_event,
+        )
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count",
+            lambda *_: 1,
+        )
 
     async def test_invoke_success_emits_invocation_counter(self) -> None:
         """Successful invocations should emit to mcp_tool_invocation_counter."""

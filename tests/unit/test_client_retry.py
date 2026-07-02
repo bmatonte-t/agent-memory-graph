@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from src.client.retry import RetryConfig, async_retry_with_backoff
+from src.db.retry import async_retry_with_backoff as db_async_retry_with_backoff
 
 DEFAULT_MAX_ATTEMPTS = 3
 DEFAULT_MAX_DELAY_SEC = 30.0
@@ -112,3 +113,24 @@ class TestAsyncRetry:
 
         # Expected: 0.05 + 0.1 = 0.15 seconds min
         assert elapsed >= 0.15 - 0.01  # Allow 10ms tolerance
+
+
+class TestDbRetry:
+    """Tests for src.db.retry.async_retry_with_backoff (Spanner-specific retry logic)."""
+
+    @pytest.mark.asyncio
+    async def test_async_retry_propagates_cancelled_error(self) -> None:
+        """CancelledError must bypass retry logic entirely and propagate immediately."""
+        call_count = 0
+
+        async def always_raises() -> None:
+            nonlocal call_count
+            call_count += 1
+            raise asyncio.CancelledError
+
+        with pytest.raises(asyncio.CancelledError):
+            await db_async_retry_with_backoff(
+                always_raises, max_attempts=5, initial_backoff_seconds=0.01
+            )
+
+        assert call_count == 1, "CancelledError must not trigger retries"

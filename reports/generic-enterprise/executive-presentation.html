@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Agent Memory Graph — Executive Presentation</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @media print {
+      @page { size: A4 landscape; margin: 0; }
+      body { margin: 0; padding: 0; }
+      .slide {
+        page-break-after: always;
+        page-break-inside: avoid;
+        width: 297mm;
+        height: 210mm;
+        margin: 0; padding: 0;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+      }
+      .slide:last-child { page-break-after: auto; }
+      .no-print { display: none !important; }
+    }
+    @media screen {
+      body { background: #0f172a; padding: 2rem; }
+      .slide {
+        width: 100%;
+        max-width: 1200px;
+        aspect-ratio: 16/9;
+        margin: 2rem auto;
+        border-radius: 0.75rem;
+        overflow: hidden;
+        box-shadow: 0 25px 50px -12px rgba(0,0,0,.5);
+      }
+    }
+    .slide { position: relative; color: #f1f5f9; }
+    .badge {
+      position: absolute;
+      bottom: 1.5rem; right: 2rem;
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      opacity: 0.45;
+      color: #fff;
+      font-weight: 700;
+    }
+    .slide-num {
+      position: absolute;
+      bottom: 1.5rem; left: 2rem;
+      font-size: 0.7rem;
+      opacity: 0.35;
+      color: #fff;
+    }
+    .coral { color: #ED1650; }
+    .bg-coral { background-color: #ED1650; }
+    .border-coral { border-color: #ED1650; }
+    .indigo-main { color: #4257E8; }
+    .bg-indigo { background-color: #4257E8; }
+  </style>
+</head>
+<body class="font-sans antialiased">
+
+<div class="no-print" style="background:#1B0088;color:#fff;padding:1rem 2rem;border-radius:.5rem;max-width:900px;margin:0 auto 2rem;text-align:center;font-size:.9rem;">
+  <strong>Executive Presentation — Agent Memory Graph</strong> &nbsp;|&nbsp;
+  Press <kbd style="background:#4257E8;padding:.2rem .6rem;border-radius:.3rem;">Cmd+P</kbd> to export PDF. Select <strong>Landscape</strong> orientation.
+</div>
+
+<!-- SLIDE 1: COVER -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#4257E8 60%,#1B0088 100%);">
+  <div class="h-full flex flex-col items-center justify-center px-20 py-12">
+    <div class="mb-6">
+      <div style="width:64px;height:6px;background:#ED1650;border-radius:3px;margin:0 auto;"></div>
+    </div>
+    <h1 class="text-6xl font-extrabold text-white text-center leading-tight mb-4">
+      Agent Memory Graph
+    </h1>
+    <h2 class="text-2xl text-blue-200 font-light text-center mb-10">
+      The unified memory layer for enterprise AI agents
+    </h2>
+    <div style="display:flex;gap:2rem;justify-content:center;flex-wrap:wrap;">
+      <span style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);padding:.5rem 1.5rem;border-radius:2rem;font-size:.9rem;color:#e2e8f0;">Multi-Agent Orchestration</span>
+      <span style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);padding:.5rem 1.5rem;border-radius:2rem;font-size:.9rem;color:#e2e8f0;">Enterprise Compliance</span>
+      <span style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);padding:.5rem 1.5rem;border-radius:2rem;font-size:.9rem;color:#e2e8f0;">GCP-Native</span>
+      <span style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);padding:.5rem 1.5rem;border-radius:2rem;font-size:.9rem;color:#e2e8f0;">v0.2 — Production Ready</span>
+    </div>
+  </div>
+  <span class="badge">Enterprise Platform</span>
+  <span class="slide-num">01 / 09</span>
+</div>
+
+<!-- SLIDE 2: THE PROBLEM -->
+<div class="slide" style="background:#0f1729;">
+  <div class="h-full flex flex-col justify-center px-20 py-12">
+    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
+      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#ED1650;margin-bottom:.5rem;">The Challenge</p>
+      <h1 class="text-4xl font-bold text-white">Enterprise AI agents operate without shared memory</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.3);border-radius:.75rem;padding:1.5rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:1rem;margin-bottom:.75rem;">❌ Lost Context</p>
+        <p style="color:#cbd5e1;font-size:.95rem;line-height:1.6;">Agents restart from zero each session. Users re-explain problems repeatedly. Token spend balloons with redundant retrieval.</p>
+      </div>
+      <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.3);border-radius:.75rem;padding:1.5rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:1rem;margin-bottom:.75rem;">❌ No Coordination</p>
+        <p style="color:#cbd5e1;font-size:.95rem;line-height:1.6;">Multiple agents work in isolation. Duplicate queries, conflicting decisions, no shared context. No resolving disputes.</p>
+      </div>
+      <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.3);border-radius:.75rem;padding:1.5rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:1rem;margin-bottom:.75rem;">❌ Unauditable</p>
+        <p style="color:#cbd5e1;font-size:.95rem;line-height:1.6;">No trace of reasoning. Can't debug failures, reproduce decisions, or prove compliance for regulated workloads.</p>
+      </div>
+      <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.3);border-radius:.75rem;padding:1.5rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:1rem;margin-bottom:.75rem;">❌ Hallucination Risk</p>
+        <p style="color:#cbd5e1;font-size:.95rem;line-height:1.6;">Agents generate facts without grounding. Customers distrust AI decisions. Compliance violations accumulate silently.</p>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Enterprise Platform</span>
+  <span class="slide-num">02 / 09</span>
+</div>
+
+<!-- SLIDE 3: THE SOLUTION -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
+  <div class="h-full flex flex-col justify-center px-20 py-12">
+    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
+      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#4257E8;margin-bottom:.5rem;">Agent Memory Graph</p>
+      <h1 class="text-4xl font-bold text-white">Deterministic reasoning with grounded evidence</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.5rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:1rem;margin-bottom:.75rem;">✅ Shared Memory</p>
+        <p style="color:#cbd5e1;font-size:.95rem;line-height:1.6;">All agents share one persistent graph. Organizations retain context across sessions, conversations, and team members.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.5rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:1rem;margin-bottom:.75rem;">✅ Multi-Agent Sync</p>
+        <p style="color:#cbd5e1;font-size:.95rem;line-height:1.6;">Agents coordinate through shared facts. Eliminate redundant work, resolve conflicts via evidence, enforce consistency.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.5rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:1rem;margin-bottom:.75rem;">✅ Immutable Audit Trail</p>
+        <p style="color:#cbd5e1;font-size:.95rem;line-height:1.6;">Every decision logged. Prove compliance to auditors. Debug production incidents. Reproduce agent decisions deterministically.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.08);border:1px solid rgba(66,87,232,.3);border-radius:.75rem;padding:1.5rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:1rem;margin-bottom:.75rem;">✅ Grounded Responses</p>
+        <p style="color:#cbd5e1;font-size:.95rem;line-height:1.6;">All answers backed by graph evidence. No hallucination. Fail gracefully if data insufficient. Explainable decisions.</p>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Enterprise Platform</span>
+  <span class="slide-num">03 / 09</span>
+</div>
+
+<!-- SLIDE 4: USE CASES -->
+<div class="slide" style="background:#0f1729;">
+  <div class="h-full flex flex-col justify-center px-20 py-12">
+    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
+      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#4257E8;margin-bottom:.5rem;">Enterprise Use Cases</p>
+      <h1 class="text-4xl font-bold text-white">Deploy across your entire organization</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.95rem;margin-bottom:.5rem;">Finance & Risk</p>
+        <p style="color:#94a3b8;font-size:.85rem;">Multi-agent analysis of regulatory changes, risk factors, and trading decisions. Shared context across quants, traders, and compliance.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.95rem;margin-bottom:.5rem;">Operations & Supply Chain</p>
+        <p style="color:#94a3b8;font-size:.85rem;">Agent coordinators managing inventory, demand forecasting, and logistics. Shared facts about supplier status, lead times, constraints.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.95rem;margin-bottom:.5rem;">Customer Support</p>
+        <p style="color:#94a3b8;font-size:.85rem;">Multi-turn resolution agents that remember customer history, billing context, and previous tickets. Seamless handoffs between tiers.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.95rem;margin-bottom:.5rem;">Data & Analytics</p>
+        <p style="color:#94a3b8;font-size:.85rem;">Data analysts and ML engineers coordinating on schema discovery, data quality rules, and transformation lineage. Single source of truth.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.95rem;margin-bottom:.5rem;">Legal & Compliance</p>
+        <p style="color:#94a3b8;font-size:.85rem;">Agents analyzing contracts, regulatory filings, and audit evidence. Shared context about policy applicability and compliance status.</p>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.75rem;padding:1.25rem;">
+        <p style="color:#4257E8;font-weight:700;font-size:.95rem;margin-bottom:.5rem;">DevOps & Observability</p>
+        <p style="color:#94a3b8;font-size:.85rem;">Incident response agents coordinating runbooks, alerts, and deployment status. Shared context about system state and recent changes.</p>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Enterprise Platform</span>
+  <span class="slide-num">04 / 09</span>
+</div>
+
+<!-- SLIDE 5: ARCHITECTURE -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
+  <div class="h-full flex flex-col justify-center px-20 py-12">
+    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
+      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#4257E8;margin-bottom:.5rem;">Tripartite Memory Model</p>
+      <h1 class="text-3xl font-bold text-white">Isolated tiers for different time horizons</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+      <div style="background:rgba(66,87,232,.15);border:2px solid rgba(66,87,232,.5);border-radius:.5rem;padding:1.25rem;">
+        <div style="background:#4257E8;border-radius:.3rem;padding:.3rem .6rem;font-size:.65rem;font-weight:800;color:#fff;width:fit-content;margin-bottom:.75rem;">CONTEXT</div>
+        <p style="color:#c7d2fe;font-size:.85rem;font-weight:600;margin-bottom:.5rem;margin-top:0;">Per user, per session</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.8rem;">
+          <li style="margin-bottom:.3rem;">→ Recent conversation history</li>
+          <li style="margin-bottom:.3rem;">→ Session state & decisions</li>
+          <li style="margin-bottom:.3rem;">→ User preferences & context</li>
+          <li>→ Decays: 24–48 hours</li>
+        </ul>
+      </div>
+      <div style="background:rgba(0,214,204,.08);border:2px solid rgba(0,214,204,.35);border-radius:.5rem;padding:1.25rem;">
+        <div style="background:#00B5AD;border-radius:.3rem;padding:.3rem .6rem;font-size:.65rem;font-weight:800;color:#fff;width:fit-content;margin-bottom:.75rem;">SEMANTIC</div>
+        <p style="color:#5eead4;font-size:.85rem;font-weight:600;margin-bottom:.5rem;margin-top:0;">Shared by all agents</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.8rem;">
+          <li style="margin-bottom:.3rem;">→ Organizational facts & entities</li>
+          <li style="margin-bottom:.3rem;">→ Relationships with confidence</li>
+          <li style="margin-bottom:.3rem;">→ Cognitive weighting (Bayesian)</li>
+          <li>→ Decays: temporal + action-count</li>
+        </ul>
+      </div>
+      <div style="background:rgba(237,22,80,.08);border:2px solid rgba(237,22,80,.35);border-radius:.5rem;padding:1.25rem;">
+        <div style="background:#ED1650;border-radius:.3rem;padding:.3rem .6rem;font-size:.65rem;font-weight:800;color:#fff;width:fit-content;margin-bottom:.75rem;">AUDIT</div>
+        <p style="color:#fca5a5;font-size:.85rem;font-weight:600;margin-bottom:.5rem;margin-top:0;">Immutable forever</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.8rem;">
+          <li style="margin-bottom:.3rem;">→ Access events & decisions</li>
+          <li style="margin-bottom:.3rem;">→ Authorization outcomes</li>
+          <li style="margin-bottom:.3rem;">→ Reasoning traces</li>
+          <li>→ Never deleted or modified</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Enterprise Platform</span>
+  <span class="slide-num">05 / 09</span>
+</div>
+
+<!-- SLIDE 6: DEPLOYMENT MODEL -->
+<div class="slide" style="background:#0f1729;">
+  <div class="h-full flex flex-col justify-center px-20 py-12">
+    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
+      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#4257E8;margin-bottom:.5rem;">Enterprise Deployment</p>
+      <h1 class="text-3xl font-bold text-white">Project-based architecture for your GCP organization</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1.2fr;gap:2rem;">
+      <div>
+        <p style="color:#cbd5e1;font-size:.9rem;margin-bottom:1.5rem;line-height:1.6;">Each team gets its own isolated deployment with three environments (dev, intg, prod) and dedicated infrastructure:</p>
+        <div style="background:rgba(66,87,232,.06);border-left:3px solid #4257E8;border-radius:.25rem;padding:.9rem 1.1rem;margin-bottom:1rem;">
+          <p style="color:#4257E8;font-weight:700;font-size:.85rem;margin:0 0 .4rem 0;">Cloud Run Service</p>
+          <p style="color:#94a3b8;font-size:.8rem;margin:0;">2 vCPU / 4 Gi, auto-scaling min 1–max N</p>
+        </div>
+        <div style="background:rgba(66,87,232,.06);border-left:3px solid #4257E8;border-radius:.25rem;padding:.9rem 1.1rem;margin-bottom:1rem;">
+          <p style="color:#4257E8;font-weight:700;font-size:.85rem;margin:0 0 .4rem 0;">Spanner Instance</p>
+          <p style="color:#94a3b8;font-size:.8rem;margin:0;">100 PU (dev/intg), 200 PU (prod) · Global replication</p>
+        </div>
+        <div style="background:rgba(66,87,232,.06);border-left:3px solid #4257E8;border-radius:.25rem;padding:.9rem 1.1rem;">
+          <p style="color:#4257E8;font-weight:700;font-size:.85rem;margin:0 0 .4rem 0;">IAM + Secrets</p>
+          <p style="color:#94a3b8;font-size:.8rem;margin:0;">Least-privilege SAs, Secret Manager for credentials</p>
+        </div>
+      </div>
+      <div style="background:rgba(66,87,232,.06);border:1px solid rgba(66,87,232,.2);border-radius:.5rem;padding:1.25rem;font-family:monospace;font-size:.75rem;color:#94a3b8;line-height:1.8;overflow-x:auto;">
+<pre style="margin:0;white-space:pre-wrap;word-break:break-word;">Your GCP Organization
+│
+├── Team A: Finance
+│   ├── finance-dev   → AMG Cloud Run
+│   ├── finance-intg  → AMG Cloud Run
+│   └── finance-prod  → AMG Cloud Run
+│
+├── Team B: Operations
+│   ├── ops-dev       → AMG Cloud Run
+│   ├── ops-intg      → AMG Cloud Run
+│   └── ops-prod      → AMG Cloud Run
+│
+└── Team C: Analytics
+    ├── analytics-dev   → AMG Cloud Run
+    ├── analytics-intg  → AMG Cloud Run
+    └── analytics-prod  → AMG Cloud Run
+
+Each independent. Zero shared state.</pre>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Enterprise Platform</span>
+  <span class="slide-num">06 / 09</span>
+</div>
+
+<!-- SLIDE 7: BUSINESS VALUE -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#1e2a5e 100%);">
+  <div class="h-full flex flex-col justify-center px-20 py-12">
+    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
+      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#ED1650;margin-bottom:.5rem;">Return on Investment</p>
+      <h1 class="text-3xl font-bold text-white">Quantified value in 3–6 months</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:1.5rem;">
+      <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.3);border-radius:.5rem;padding:1.25rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:1.1rem;margin-bottom:.75rem;">Reduce Token Spend</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.9rem;">
+          <li style="margin-bottom:.5rem;">→ Eliminate redundant LLM calls via shared memory</li>
+          <li style="margin-bottom:.5rem;">→ Smaller, more precise context windows</li>
+          <li>→ Expected: 30–50% reduction in LLM costs</li>
+        </ul>
+      </div>
+      <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.3);border-radius:.5rem;padding:1.25rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:1.1rem;margin-bottom:.75rem;">Improve Agent Reliability</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.9rem;">
+          <li style="margin-bottom:.5rem;">→ Deterministic reasoning with auditable traces</li>
+          <li style="margin-bottom:.5rem;">→ Eliminate hallucination (ground all answers)</li>
+          <li>→ Expected: 10x reduction in production incidents</li>
+        </ul>
+      </div>
+      <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.3);border-radius:.5rem;padding:1.25rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:1.1rem;margin-bottom:.75rem;">Enable Compliance</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.9rem;">
+          <li style="margin-bottom:.5rem;">→ Immutable audit trail for all decisions</li>
+          <li style="margin-bottom:.5rem;">→ Prove explainability to regulators</li>
+          <li>→ Expected: Eliminate compliance violations</li>
+        </ul>
+      </div>
+      <div style="background:rgba(237,22,80,.08);border:1px solid rgba(237,22,80,.3);border-radius:.5rem;padding:1.25rem;">
+        <p style="color:#ED1650;font-weight:700;font-size:1.1rem;margin-bottom:.75rem;">Accelerate Time-to-Value</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#94a3b8;font-size:.9rem;">
+          <li style="margin-bottom:.5rem;">→ Deploy new agents in weeks, not months</li>
+          <li style="margin-bottom:.5rem;">→ Reuse context from prior agents/sessions</li>
+          <li>→ Expected: 50% faster agent development</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <span class="badge">Enterprise Platform</span>
+  <span class="slide-num">07 / 09</span>
+</div>
+
+<!-- SLIDE 8: IMPLEMENTATION ROADMAP -->
+<div class="slide" style="background:#0f1729;">
+  <div class="h-full flex flex-col justify-center px-20 py-12">
+    <div style="border-bottom:1px solid rgba(255,255,255,.12);padding-bottom:1.5rem;margin-bottom:2rem;">
+      <p style="font-size:.75rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:#4257E8;margin-bottom:.5rem;">Go-to-Market</p>
+      <h1 class="text-3xl font-bold text-white">Phase-gated rollout across teams</h1>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:1rem;">
+      <div style="border:2px solid rgba(66,87,232,.4);border-radius:.75rem;padding:1.5rem;background:rgba(66,87,232,.05);">
+        <p style="color:#4257E8;font-weight:700;font-size:.95rem;margin:0 0 1rem 0;">Phase 1: Pilot (Weeks 1–4)</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#cbd5e1;font-size:.85rem;">
+          <li style="margin-bottom:.5rem;">→ One team (e.g., Data & Analytics)</li>
+          <li style="margin-bottom:.5rem;">→ Limited use case (e.g., schema discovery)</li>
+          <li>→ Dev + intg environments only</li>
+        </ul>
+      </div>
+      <div style="border:2px solid rgba(237,22,80,.4);border-radius:.75rem;padding:1.5rem;background:rgba(237,22,80,.05);">
+        <p style="color:#ED1650;font-weight:700;font-size:.95rem;margin:0 0 1rem 0;">Phase 2: Expand (Weeks 5–12)</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#cbd5e1;font-size:.85rem;">
+          <li style="margin-bottom:.5rem;">→ Pilot team → Production</li>
+          <li style="margin-bottom:.5rem;">→ 2–3 additional teams onboard</li>
+          <li>→ Shared lessons learned</li>
+        </ul>
+      </div>
+      <div style="border:2px solid rgba(66,87,232,.4);border-radius:.75rem;padding:1.5rem;background:rgba(66,87,232,.05);">
+        <p style="color:#4257E8;font-weight:700;font-size:.95rem;margin:0 0 1rem 0;">Phase 3: Scale (Weeks 13+)</p>
+        <ul style="list-style:none;padding:0;margin:0;color:#cbd5e1;font-size:.85rem;">
+          <li style="margin-bottom:.5rem;">→ Organization-wide adoption</li>
+          <li style="margin-bottom:.5rem;">→ All teams deployed independently</li>
+          <li>→ Continuous optimization</li>
+        </ul>
+      </div>
+    </div>
+    <div style="margin-top:1.75rem;background:rgba(66,87,232,.06);border-left:3px solid #4257E8;border-radius:.25rem;padding:1rem 1.25rem;">
+      <p style="color:#cbd5e1;font-size:.9rem;margin:0;"><strong style="color:#4257E8;">Team independence</strong> — Each team owns their deployment. No shared state. Teams adopt at their own pace.</p>
+    </div>
+  </div>
+  <span class="badge">Enterprise Platform</span>
+  <span class="slide-num">08 / 09</span>
+</div>
+
+<!-- SLIDE 9: NEXT STEPS -->
+<div class="slide" style="background:linear-gradient(135deg,#0F004F 0%,#4257E8 60%,#1B0088 100%);">
+  <div class="h-full flex flex-col items-center justify-center px-20 py-12 text-center">
+    <div class="mb-6">
+      <div style="width:64px;height:6px;background:#ED1650;border-radius:3px;margin:0 auto;"></div>
+    </div>
+    <h1 class="text-5xl font-extrabold text-white mb-6">Let's build together</h1>
+    <p class="text-xl text-blue-200 mb-8 leading-relaxed max-w-2xl">
+      Agent Memory Graph eliminates hallucination, coordinates your agents, and provides the audit trail compliance requires.
+    </p>
+    <div style="display:flex;gap:1rem;justify-content:center;flex-direction:column;align-items:center;">
+      <p style="color:#cbd5e1;font-size:.95rem;">Schedule a technical deep dive with our team</p>
+      <p style="color:#94a3b8;font-size:.85rem;">Topics: Architecture, APIs, deployment model, security</p>
+    </div>
+  </div>
+  <span class="badge">Enterprise Platform</span>
+  <span class="slide-num">09 / 09</span>
+</div>
+
+</body>
+</html>

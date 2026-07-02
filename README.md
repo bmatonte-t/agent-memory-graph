@@ -69,11 +69,13 @@ single_company:
 ### Governance Options
 
 **Internal ABAC** (default):
+
 - Deny-by-default with `AuthorizationScope` per request
 - Dual audit logging (GRANTED/DENIED decisions)
 - Suitable for organizations with centralized policy management
 
 **External Delegation** (enterprise):
+
 - Delegates authorization decisions to your policy service (e.g., Entitlements Platform, Okta, Auth0)
 - Your service receives `POST /authorize` with agent context and responds with allow/deny
 - Enables sync between your identity infrastructure and agent permissions
@@ -83,23 +85,24 @@ single_company:
 Core memory and orchestration endpoints:
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `GET /health` | Health check and readiness probe |
 | `POST /api/v1/mindmap/execute` | Execute MindMap reasoning pipeline (Mine → Aggregate → Serialize → Synthesize) |
-| `POST /api/v1/mcp/invoke` | Invoke MCP tools: `MEMORY_SEARCH`, `MEMORY_ADD_FACT`, `MEMORY_LOG_TRACE`, `MEMORY_RECALL_CONTEXT` |
+| `POST /api/v1/mcp/invoke` | Invoke MCP tools: `MEMORY_SEARCH`, `MEMORY_ADD_FACT`, `MEMORY_ADD_FACT_BATCH`, `MEMORY_LOG_TRACE`, `MEMORY_RECALL_CONTEXT` |
 | `POST /api/v1/agent/respond` | Orchestrate agent responses across single/supervisor/gemini modes |
+| `GET /api/v1/graph/export` | Export tenant-scoped graph snapshot in JSON-LD |
 
 Internal maintenance endpoints:
 
 | Endpoint | Description |
-|---|---|
+| --- | --- |
 | `POST /internal/decay-weights` | Apply temporal cognitive weight decay (scheduled or manual) |
 | `POST /internal/prune-weights` | Prune low-confidence evidence below configurable threshold |
 
 ## Technology Stack
 
 | Component | Technology |
-|---|---|
+| --- | --- |
 | Runtime | Python 3.14, FastAPI, uvicorn |
 | Database | Google Cloud Spanner (property graph with GQL) |
 | AI Engine | Gemini Enterprise Agent Platform (Gemini 1.5 Flash for extraction, Gemini 1.5 Pro for synthesis) |
@@ -149,6 +152,25 @@ source scripts/start-emulator.sh
 uv run uvicorn src.api.main:app --reload
 ```
 
+Alternative Docker Compose workflow:
+
+```bash
+just emulator-up
+uv run uvicorn src.api.main:app --reload
+```
+
+Use emulator-focused settings file:
+
+```bash
+export AGENT_MEMORY_GRAPH_CONFIG_FILE=config.emulator.yaml
+```
+
+Run emulator round-trip integration suite:
+
+```bash
+just test-e2e-emulator
+```
+
 ## Developer Commands
 
 ```bash
@@ -176,17 +198,33 @@ just docs-publish-site  # Publish to documentation.tryolabs.com
 just phase3-render-cloudrun <project_id>   # Render Cloud Run manifest
 just phase3-build-image <project_id>       # Build container with Cloud Build
 just phase3-deploy-cloudrun <project_id>   # Deploy to Cloud Run
+
+# Emulator DX
+just emulator-up       # Start local Spanner emulator container
+just emulator-down     # Stop local emulator container
+just test-e2e-emulator # Run MCP end-to-end round-trip suite for emulator runtime
 ```
+
+## API Additions
+
+- `POST /internal/ingest/bigquery`: asynchronous BigQuery ingestion job trigger.
+- `GET /api/v1/graph/export`: tenant-scoped JSON-LD graph snapshot export.
+- MCP tool `memory_add_fact_batch`: bulk semantic ingestion with per-item partial-failure reporting.
+
+Observability hardening additions:
+
+- Structured logging schema fields on API and MCP paths: `trace_id`, `tenant_id`, `tool_name`, `latency_ms`, `error_code`.
+- Cloud Trace stage spans: `mindmap.stage.mine`, `mindmap.stage.aggregate`, `mindmap.stage.serialize`, `mindmap.stage.synthesize`.
 
 ## Testing and Quality
 
 | Metric | Status |
-|---|---|
-| Tests | 843 passing (unit, integration, chaos, load) |
+| --- | --- |
+| Tests | 889 collected (886 passing, 3 skipped) in latest local full gate |
 | Type Safety | basedpyright strict mode — 0 errors, 0 warnings |
 | Linting | ruff — 100% compliant |
 | Formatting | ruff format — 100% compliant |
-| Docstring Coverage | 93.6% (Excellent) |
+| Docstring Coverage | 93.9% (Excellent) |
 
 Test categories:
 
@@ -201,9 +239,20 @@ Pre-PR gate (runs all checks):
 just check-all
 ```
 
+Testing governance operations:
+
+```bash
+just test-governance-audit
+just test-governance-enforce
+just test-gate-pr-functional
+just test-gate-full-functional
+just test-gate-non-functional
+just test-health-dashboard
+```
+
 ## Project Structure
 
-```
+```text
 src/
 ├── api/              # FastAPI application and route handlers
 ├── agent/            # Agent orchestrator and Vertex AI adapter
@@ -211,7 +260,7 @@ src/
 ├── db/               # Spanner client and database access
 ├── deployment/       # Cloud Run configuration helpers
 ├── integrations/     # Typed SDK wrappers (BigQuery, Scheduler, Spanner)
-├── mcp/              # MCP tool service (4 tools)
+├── mcp/              # MCP tool service (5 tools)
 ├── memory/           # Core memory: MindMap pipeline, cognitive weighting, retrieval, evidence
 ├── models/           # Pydantic schemas for all API contracts
 ├── observability/    # Structured logging, metrics, distributed tracing
@@ -249,7 +298,7 @@ scripts/              # Utility scripts (deploy, metrics, rendering)
 All infrastructure is provisioned by a Terraform module at `infrastructure/terraform/`:
 
 | Resource | Description |
-|---|---|
+| --- | --- |
 | Cloud Run service | 2 vCPU / 4 Gi, min 1 instance |
 | Spanner instance | 100 PU (dev/intg), 200 PU (prod) |
 | Spanner database | 9 migrations auto-applied |
@@ -301,7 +350,7 @@ just serve-docs  # http://localhost:8000
 ### Documentation Structure
 
 | Section | Contents |
-|---|---|
+| --- | --- |
 | [Concepts](docs/concepts/tripartite-memory.md) | Tripartite memory model, MindMap pipeline, cognitive weighting |
 | [Architecture](docs/architecture.md) | System components, data flows, tech stack |
 | [User Guide — MCP Tools](docs/user-guide/mcp-tools.md) | The four MCP tools with request/response examples |
@@ -309,7 +358,9 @@ just serve-docs  # http://localhost:8000
 | [User Guide — Extraction Pipeline](docs/user-guide/extraction-pipeline.md) | Document and BigQuery ingestion |
 | [Deployment](docs/deployment.md) | Adoption model, project-by-project rollout, onboarding steps |
 | [Infrastructure](docs/infrastructure.md) | Terraform resources, CI/CD pipeline, GCP configuration |
-| [Backlog](docs/backlog.md) | Current state, open work, known limitations |
+| [Testing Governance](docs/testing-governance.md) | Canonical policy, test admission and retirement rules |
+| [Testing Health Dashboard](docs/testing-health-dashboard.md) | Governance metrics and cadence |
+| [Backlog](docs/backlog.md) | Active pending work and design decisions on hold |
 
 ## Project Status
 
