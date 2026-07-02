@@ -1,0 +1,40 @@
+name: Testing Governance Audit
+
+on:
+  schedule:
+    - cron: "0 10 * * 1"
+  workflow_dispatch:
+
+jobs:
+  governance-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v6
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install just
+        uses: extractions/setup-just@v4
+
+      - name: Install dependencies
+        run: just install
+
+      - name: Run governance audit
+        run: just test-governance-audit
+
+      - name: Generate unified testing health dashboard
+        run: just test-health-dashboard
+
+      - name: Upload governance artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: testing-governance-artifacts
+          path: |
+            reports/testing-governance-inventory.json
+            reports/testing-governance-inventory.md
+            reports/testing-health-dashboard.md
+            reports/escaped-defects-log.md

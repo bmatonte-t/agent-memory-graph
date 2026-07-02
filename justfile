@@ -89,7 +89,34 @@ dependency-outdated:
   uv pip list --outdated
 
 # Run all quality checks
-check-all: lint check-types check-format test-coverage docstring-coverage
+check-all: lint check-types check-format test-coverage docstring-coverage test-governance-enforce
+
+# Generate testing governance artifacts (inventory + policy status)
+test-governance-audit:
+  uv run python scripts/test_suite_governance.py
+
+# Enforce testing governance policy (fails on new unapproved violations)
+test-governance-enforce:
+  uv run python scripts/test_suite_governance.py --fail-on-new-violations
+
+# PR functional gate: fast, high-signal functional validation
+test-gate-pr-functional:
+  uv run python scripts/check_pytest_selection.py --gate-name "PR functional gate" --marker-expression "unit or contract or smoke" --min-selected 80
+  uv run pytest -m "unit or contract or smoke"
+
+# Full functional gate: complete functional confidence for integration-heavy changes
+test-gate-full-functional:
+  uv run python scripts/check_pytest_selection.py --gate-name "Full functional gate" --marker-expression "unit or contract or integration" --min-selected 150
+  uv run pytest -m "unit or contract or integration"
+
+# Non-functional gate: performance, load, and chaos validation
+test-gate-non-functional:
+  uv run python scripts/check_pytest_selection.py --gate-name "Non-functional gate" --marker-expression "performance or load or chaos" --min-selected 1
+  uv run pytest -m "performance or load or chaos"
+
+# Publish unified testing health dashboard artifact
+test-health-dashboard:
+  uv run python scripts/generate_testing_health_dashboard.py
 
 # Serve docs locally with live reload
 serve-docs:
@@ -130,3 +157,15 @@ phase3-build-image project_id image_tag='latest' region='us-central1' artifact_r
 phase3-deploy-cloudrun project_id image_tag='latest' region='us-central1' artifact_repo='agent-memory-graph' image_name='phase3' service_name='agent-memory-graph-phase3':
   just phase3-render-cloudrun "{{project_id}}" "{{image_tag}}" "{{region}}" "{{artifact_repo}}" "{{image_name}}" "{{service_name}}"
   gcloud run services replace infrastructure/phase3/cloudrun-service.rendered.yaml --project "{{project_id}}" --region "{{region}}"
+
+# Start local Spanner emulator stack for end-to-end development
+emulator-up:
+  docker compose -f docker-compose.emulator.yml up -d spanner-emulator
+
+# Stop local Spanner emulator stack
+emulator-down:
+  docker compose -f docker-compose.emulator.yml down
+
+# Run MCP end-to-end round-trip tests against emulator runtime settings
+test-e2e-emulator:
+  RUN_EMULATOR_E2E=1 SPANNER_EMULATOR_HOST=localhost:9010 uv run pytest tests/integration/test_mcp_e2e_emulator.py -q

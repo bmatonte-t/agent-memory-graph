@@ -15,6 +15,33 @@ class SessionResponse(BaseModel):
     status: str = Field(default="active", description="Session status")
 
 
+class SessionKnowledgeExtractionResponse(BaseModel):
+    """Response model for extracted knowledge generated from a closed session."""
+
+    session_id: str = Field(..., description="Session identifier")
+    tenant_id: str = Field(..., description="Tenant identifier for multi-tenant isolation")
+    domain: str = Field(..., description="Resolved semantic domain for extracted knowledge")
+    processed_turns: int = Field(..., ge=0, description="Total context turns processed")
+    extracted_facts: int = Field(..., ge=0, description="Semantic facts created")
+    skipped_facts: int = Field(..., ge=0, description="Facts skipped due to deduplication")
+    failed_facts: int = Field(..., ge=0, description="Facts that failed to persist")
+    extracted_at: datetime = Field(..., description="Extraction completion timestamp")
+
+
+class EndSessionResponse(BaseModel):
+    """Response model for session closure and extraction protocol."""
+
+    session_id: str = Field(..., description="Session identifier")
+    tenant_id: str = Field(..., description="Tenant identifier for multi-tenant isolation")
+    status: str = Field(default="closed", description="Session status after closure")
+    end_reason: str = Field(..., description="Reason for session closure")
+    ended_at: datetime = Field(..., description="Session closure timestamp")
+    extraction_status: str = Field(..., description="Extraction protocol final status")
+    extraction: SessionKnowledgeExtractionResponse = Field(
+        ..., description="Extraction summary for semantic persistence"
+    )
+
+
 class FactResponse(BaseModel):
     """Response model for add_semantic_fact operation.
 
@@ -78,6 +105,11 @@ class ContextResponse(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     tenant_id: str = Field(..., description="Tenant identifier for multi-tenant isolation")
     turns: list[ContextTurn] = Field(default_factory=list, description="Context turns")
+    next_cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor for next page retrieval, or null when exhausted",
+    )
+    has_more: bool = Field(default=False, description="Whether additional context turns exist")
     total_weight_sum: float = Field(default=0.0, description="Sum of all turn weights")
     retrieved_at: datetime = Field(..., description="Retrieval timestamp")
 
@@ -123,6 +155,31 @@ class RetrieveContextWindowRequest(BaseModel):
     session_id: str = Field(..., description="Session identifier")
     tenant_id: str = Field(..., description="Tenant identifier for multi-tenant isolation")
     window_size: int = Field(default=10, ge=1, le=100, description="Number of turns to retrieve")
+    cursor: str | None = Field(
+        default=None,
+        description="Opaque cursor from previous context retrieval page",
+    )
+
+
+class EndSessionRequest(BaseModel):
+    """Request model for ending a session and extracting knowledge."""
+
+    tenant_id: str = Field(..., description="Tenant identifier for multi-tenant isolation")
+    session_id: str = Field(..., description="Session identifier")
+    end_reason: str = Field(
+        default="completed",
+        description="Session end reason: completed, timeout, or aborted",
+    )
+    domain_hint: str | None = Field(
+        default=None,
+        description="Optional target semantic domain for extracted knowledge",
+    )
+    window_size: int = Field(
+        default=50,
+        ge=1,
+        le=100,
+        description="Number of context turns to scan for extraction",
+    )
 
 
 class ErrorResponse(BaseModel):
@@ -139,3 +196,51 @@ class HealthCheckResponse(BaseModel):
     status: str = Field(..., description="Service status")
     timestamp: datetime = Field(..., description="Check timestamp")
     database: str = Field(..., description="Database connection status")
+
+
+class GraphExportNode(BaseModel):
+    """JSON-LD node representation for graph exports."""
+
+    id: str = Field(..., serialization_alias="@id", description="JSON-LD node identifier")
+    type: str = Field(..., serialization_alias="@type", description="JSON-LD node type")
+    tenant_id: str = Field(..., description="Tenant identifier")
+    memory_tier: str = Field(..., description="Memory tier for this node")
+    label: str = Field(..., description="Domain label for the node")
+    weight: float = Field(..., description="Current node weight")
+    attributes: dict[str, Any] = Field(default_factory=dict, description="Node attributes payload")
+
+
+class GraphExportEdge(BaseModel):
+    """JSON-LD edge representation for graph exports."""
+
+    id: str = Field(..., serialization_alias="@id", description="JSON-LD edge identifier")
+    type: str = Field(
+        default="MemoryEdge",
+        serialization_alias="@type",
+        description="JSON-LD edge type",
+    )
+    tenant_id: str = Field(..., description="Tenant identifier")
+    relationship_type: str = Field(..., description="Relationship type")
+    source_node_id: str = Field(..., description="Source node identifier")
+    destination_node_id: str = Field(..., description="Destination node identifier")
+    weight: float = Field(..., description="Current edge weight")
+    attributes: dict[str, Any] = Field(default_factory=dict, description="Edge attributes payload")
+
+
+class GraphExportResponse(BaseModel):
+    """JSON-LD export envelope for tenant graph snapshots."""
+
+    context: dict[str, str] = Field(
+        default_factory=dict,
+        serialization_alias="@context",
+        description="JSON-LD context map",
+    )
+    graph: list[GraphExportNode | GraphExportEdge] = Field(
+        default_factory=list,
+        serialization_alias="@graph",
+        description="JSON-LD graph entries",
+    )
+    tenant_id: str = Field(..., description="Tenant identifier")
+    node_count: int = Field(..., ge=0, description="Exported node count")
+    edge_count: int = Field(..., ge=0, description="Exported edge count")
+    exported_at: datetime = Field(..., description="Export timestamp")

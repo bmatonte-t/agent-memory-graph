@@ -6,49 +6,84 @@ projects, with cross-project IAM roles and service account permissions.
 
 from __future__ import annotations
 
+import os
+from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
 import pytest
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+
+@contextmanager
+def _temporary_environ(updates: dict[str, str]) -> Iterator[None]:
+    """Temporarily set environment variables for a test scope."""
+    original_values = {key: os.environ.get(key) for key in updates}
+    os.environ.update(updates)
+    try:
+        yield
+    finally:
+        for key, original in original_values.items():
+            if original is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = original
+
+
+@contextmanager
+def _temporary_single_company(settings: object, single_company: object) -> Iterator[None]:
+    """Temporarily override ``settings.single_company`` for test isolation."""
+    original_single_company = settings.single_company
+    settings.single_company = single_company
+    try:
+        yield
+    finally:
+        settings.single_company = original_single_company
 
 
 class TestCrossProjectSpannerSetup:
     """Tests for cross-project Spanner configuration."""
 
-    def test_cloud_run_can_access_spanner_in_different_project(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_cloud_run_can_access_spanner_in_different_project(self) -> None:
         """Cloud Run service account should access Spanner in different project."""
         # Simulate environment variables for cross-project setup
-        monkeypatch.setenv("GCP_PROJECT_ID", "cloudrun-project")
-        monkeypatch.setenv("SPANNER_PROJECT_ID", "spanner-project")
-        monkeypatch.setenv("SPANNER_INSTANCE_ID", "prod-instance")
-        monkeypatch.setenv("SPANNER_DATABASE_ID", "memory_graph")
+        with _temporary_environ(
+            {
+                "GCP_PROJECT_ID": "cloudrun-project",
+                "SPANNER_PROJECT_ID": "spanner-project",
+                "SPANNER_INSTANCE_ID": "prod-instance",
+                "SPANNER_DATABASE_ID": "memory_graph",
+            }
+        ):
+            # These should be different
+            cloud_run_project = "cloudrun-project"
 
-        # These should be different
-        cloud_run_project = "cloudrun-project"
+            assert cloud_run_project != "spanner-project"
 
-        assert cloud_run_project != "spanner-project"
-
-    def test_spanner_connection_uses_cross_project_resource_name(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_spanner_connection_uses_cross_project_resource_name(self) -> None:
         """Spanner client should use cross-project resource name."""
-        monkeypatch.setenv("SPANNER_PROJECT_ID", "spanner-project")
-        monkeypatch.setenv("SPANNER_INSTANCE_ID", "prod-instance")
-        monkeypatch.setenv("SPANNER_DATABASE_ID", "memory_graph")
+        with _temporary_environ(
+            {
+                "SPANNER_PROJECT_ID": "spanner-project",
+                "SPANNER_INSTANCE_ID": "prod-instance",
+                "SPANNER_DATABASE_ID": "memory_graph",
+            }
+        ):
+            # Expected resource name format
+            expected_resource_name = (
+                "projects/spanner-project/instances/prod-instance/databases/memory_graph"
+            )
 
-        # Expected resource name format
-        expected_resource_name = (
-            "projects/spanner-project/instances/prod-instance/databases/memory_graph"
-        )
+            spanner_project = "spanner-project"
+            instance_id = "prod-instance"
+            database_id = "memory_graph"
 
-        spanner_project = "spanner-project"
-        instance_id = "prod-instance"
-        database_id = "memory_graph"
+            actual_resource_name = (
+                f"projects/{spanner_project}/instances/{instance_id}/databases/{database_id}"
+            )
 
-        actual_resource_name = (
-            f"projects/{spanner_project}/instances/{instance_id}/databases/{database_id}"
-        )
-
-        assert actual_resource_name == expected_resource_name
+            assert actual_resource_name == expected_resource_name
 
 
 class TestCrossProjectServiceAccountIAM:
@@ -100,9 +135,7 @@ class TestCrossProjectServiceAccountIAM:
 class TestCrossProjectTenantIsolation:
     """Tests for tenant isolation across projects."""
 
-    def test_tenant_id_isolation_independent_of_project(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_tenant_id_isolation_independent_of_project(self) -> None:
         """Tenant_id should be independent of project boundaries."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
@@ -111,17 +144,18 @@ class TestCrossProjectTenantIsolation:
             enabled=True,
             company_id="org-1",
         )
-        monkeypatch.setattr(settings, "single_company", org_settings)
-        monkeypatch.setenv("SPANNER_PROJECT_ID", "spanner-project-1")
+        with (
+            _temporary_single_company(settings, org_settings),
+            _temporary_environ({"SPANNER_PROJECT_ID": "spanner-project-1"}),
+        ):
+            from src.security.tenant_context import OrgTenantContext  # noqa: PLC0415
 
-        from src.security.tenant_context import OrgTenantContext  # noqa: PLC0415
+            tenant_id = OrgTenantContext.get_fixed_tenant_id()
 
-        tenant_id = OrgTenantContext.get_fixed_tenant_id()
-
-        assert tenant_id == "org-1"
+            assert tenant_id == "org-1"
 
     def test_tenant_context_resolves_in_cross_project_scenario(
-        self, monkeypatch: pytest.MonkeyPatch
+        self,
     ) -> None:
         """OrgTenantContext should resolve correctly with cross-project setup."""
         from src.project_base.settings import settings  # noqa: PLC0415
@@ -131,18 +165,23 @@ class TestCrossProjectTenantIsolation:
             enabled=True,
             company_id="org-1-tenant",
         )
-        monkeypatch.setattr(settings, "single_company", org_settings)
-        monkeypatch.setenv("GCP_PROJECT_ID", "cloudrun-project")
-        monkeypatch.setenv("SPANNER_PROJECT_ID", "spanner-project")
+        with (
+            _temporary_single_company(settings, org_settings),
+            _temporary_environ(
+                {
+                    "GCP_PROJECT_ID": "cloudrun-project",
+                    "SPANNER_PROJECT_ID": "spanner-project",
+                }
+            ),
+        ):
+            from src.security.tenant_context import OrgTenantContext  # noqa: PLC0415
 
-        from src.security.tenant_context import OrgTenantContext  # noqa: PLC0415
+            # Resolve with None should inject company_id
+            resolved = OrgTenantContext.resolve(None)
 
-        # Resolve with None should inject company_id
-        resolved = OrgTenantContext.resolve(None)
+            assert resolved == "org-1-tenant"
 
-        assert resolved == "org-1-tenant"
-
-    def test_multiple_orgs_in_same_spanner_instance(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_multiple_orgs_in_same_spanner_instance(self) -> None:
         """Single Spanner instance can host multiple orgs."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import (  # noqa: PLC0415
@@ -156,18 +195,21 @@ class TestCrossProjectTenantIsolation:
         org_1 = SingleCompanySettings(enabled=True, company_id="org-1")
 
         # Both use same Spanner instance/database
-        monkeypatch.setenv("SPANNER_PROJECT_ID", "shared-spanner-project")
-        monkeypatch.setenv("SPANNER_INSTANCE_ID", "shared-instance")
-        monkeypatch.setenv("SPANNER_DATABASE_ID", "multi_org_db")
+        with _temporary_environ(
+            {
+                "SPANNER_PROJECT_ID": "shared-spanner-project",
+                "SPANNER_INSTANCE_ID": "shared-instance",
+                "SPANNER_DATABASE_ID": "multi_org_db",
+            }
+        ):
+            # Set org 1
+            with _temporary_single_company(settings, org_1):
+                org_1_id = OrgTenantContext.resolve(None)
 
-        # Set org 1
-        monkeypatch.setattr(settings, "single_company", org_1)
-        org_1_id = OrgTenantContext.resolve(None)
-
-        # Org 2 in cloudrun-project-2 (different Cloud Run project)
-        org_2 = SingleCompanySettings(enabled=True, company_id="org-2")
-        monkeypatch.setattr(settings, "single_company", org_2)
-        org_2_id = OrgTenantContext.resolve(None)
+            # Org 2 in cloudrun-project-2 (different Cloud Run project)
+            org_2 = SingleCompanySettings(enabled=True, company_id="org-2")
+            with _temporary_single_company(settings, org_2):
+                org_2_id = OrgTenantContext.resolve(None)
 
         # They should maintain separate tenant_ids
         assert org_1_id == "org-1"
@@ -236,9 +278,7 @@ class TestCrossProjectErrorHandling:
 class TestCrossProjectDataConsistency:
     """Tests for data consistency across project boundaries."""
 
-    def test_tenant_data_isolation_persists_across_projects(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_tenant_data_isolation_persists_across_projects(self) -> None:
         """Tenant isolation should be enforced regardless of project split."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
@@ -248,60 +288,61 @@ class TestCrossProjectDataConsistency:
             enabled=True,
             company_id="org-1",
         )
-        monkeypatch.setattr(settings, "single_company", org_settings)
-
-        # Attempt to access with different tenant_id should fail
-        with pytest.raises(ValueError, match="does not match"):
+        with (
+            _temporary_single_company(settings, org_settings),
+            pytest.raises(ValueError, match="does not match"),
+        ):
+            # Attempt to access with different tenant_id should fail
             validate_tenant_id("org-2")
 
-    def test_audit_log_tenant_id_includes_project(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_audit_log_tenant_id_includes_project(self) -> None:
         """Audit logs should distinguish between cross-project orgs."""
-        monkeypatch.setenv("GCP_PROJECT_ID", "cloudrun-project-1")
-        monkeypatch.setenv("SPANNER_PROJECT_ID", "spanner-project")
+        with _temporary_environ(
+            {
+                "GCP_PROJECT_ID": "cloudrun-project-1",
+                "SPANNER_PROJECT_ID": "spanner-project",
+            }
+        ):
+            # Audit event should include both
+            audit_event = {
+                "cloud_run_project": "cloudrun-project-1",
+                "spanner_project": "spanner-project",
+                "tenant_id": "org-1",
+            }
 
-        # Audit event should include both
-        audit_event = {
-            "cloud_run_project": "cloudrun-project-1",
-            "spanner_project": "spanner-project",
-            "tenant_id": "org-1",
-        }
-
-        assert audit_event["cloud_run_project"] != audit_event["spanner_project"]
-        assert audit_event["tenant_id"] == "org-1"
+            assert audit_event["cloud_run_project"] != audit_event["spanner_project"]
+            assert audit_event["tenant_id"] == "org-1"
 
 
 class TestCrossProjectDeploymentConfiguration:
     """Tests for deployment configuration in cross-project setup."""
 
-    def test_environment_variables_configure_cross_project_access(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_environment_variables_configure_cross_project_access(self) -> None:
         """Environment variables should specify cross-project resources."""
-        # Cloud Run project
-        monkeypatch.setenv("GCP_PROJECT_ID", "cloudrun-prod")
-        # Spanner in different project
-        monkeypatch.setenv("SPANNER_PROJECT_ID", "spanner-prod")
+        with _temporary_environ(
+            {
+                # Cloud Run project
+                "GCP_PROJECT_ID": "cloudrun-prod",
+                # Spanner in different project
+                "SPANNER_PROJECT_ID": "spanner-prod",
+            }
+        ):
+            assert os.getenv("GCP_PROJECT_ID") == "cloudrun-prod"
+            assert os.getenv("SPANNER_PROJECT_ID") == "spanner-prod"
+            assert os.getenv("GCP_PROJECT_ID") != os.getenv("SPANNER_PROJECT_ID")
 
-        import os  # noqa: PLC0415
-
-        assert os.getenv("GCP_PROJECT_ID") == "cloudrun-prod"
-        assert os.getenv("SPANNER_PROJECT_ID") == "spanner-prod"
-        assert os.getenv("GCP_PROJECT_ID") != os.getenv("SPANNER_PROJECT_ID")
-
-    def test_service_account_configuration_for_cross_project(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_service_account_configuration_for_cross_project(self) -> None:
         """Service account should be configured for cross-project access."""
-        # Cloud Run SA in cloudrun-project
-        monkeypatch.setenv("GOOGLE_APPLICATION_CREDENTIALS", "/var/secrets/cloudrun-sa-key.json")
+        with _temporary_environ(
+            {"GOOGLE_APPLICATION_CREDENTIALS": "/var/secrets/cloudrun-sa-key.json"}
+        ):
+            # SA should have permissions in Spanner project
+            expected_scopes = [
+                "https://www.googleapis.com/auth/spanner",
+                "https://www.googleapis.com/auth/cloud-platform",
+            ]
 
-        # SA should have permissions in Spanner project
-        expected_scopes = [
-            "https://www.googleapis.com/auth/spanner",
-            "https://www.googleapis.com/auth/cloud-platform",
-        ]
+            # Mock SA info would include these scopes
+            sa_scopes = expected_scopes
 
-        # Mock SA info would include these scopes
-        sa_scopes = expected_scopes
-
-        assert all(scope in sa_scopes for scope in expected_scopes)
+            assert all(scope in sa_scopes for scope in expected_scopes)

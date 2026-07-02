@@ -60,11 +60,18 @@ The primary interface for AI agents. Receives `MCPInvokeRequest` objects and rou
 2. Enforcing ABAC authorization (deny-by-default)
 3. Writing an audit entry (GRANTED or DENIED with reason code)
 
-The four tools map to internal services:
+Discovery endpoint:
+
+- `GET /.well-known/mcp` publishes versioned contract metadata for client
+  auto-configuration.
+
+The six tools map to internal services:
 - `MEMORY_SEARCH` → MindMap pipeline
 - `MEMORY_ADD_FACT` → MemoryAPI
+- `MEMORY_ADD_FACT_BATCH` → MemoryAPI (batch with partial-failure contract)
 - `MEMORY_LOG_TRACE` → MemoryAPI (audit write)
 - `MEMORY_RECALL_CONTEXT` → MemoryAPI (context window read)
+- `MEMORY_END_SESSION` → MemoryAPI (session closure + extraction)
 
 ### MindMap Pipeline (`src/memory/mindmap_pipeline.py`)
 
@@ -103,6 +110,13 @@ The graph database. Key properties:
 - **Property graph** — `AgentMemoryGraph` property graph enables GQL traversal queries
 - **Schema** — 9 SQL migrations manage the schema; migrations are idempotent (`IF NOT EXISTS`)
 - **Tenant isolation** — `TenantId` on every row; enforced at the application query layer
+
+### Accepted ADRs
+
+- [ADR-0001: Spanner tenancy model](architecture/adr/ADR-0001-spanner-tenancy-model.md)
+- [ADR-0002: Synthesis model policy](architecture/adr/ADR-0002-synthesis-model-policy.md)
+- [ADR-0003: AUDIT_EVENTS export strategy](architecture/adr/ADR-0003-audit-events-export-strategy.md)
+- [ADR-0004: Pruning threshold scope](architecture/adr/ADR-0004-pruning-threshold-scope.md)
 
 ## Data Flows
 

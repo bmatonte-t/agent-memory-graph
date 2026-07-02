@@ -9,6 +9,8 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+import src.memory.api as memory_api
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
@@ -255,14 +257,22 @@ class _FakeTransaction:
 class TestTenantIsolatedMemoryFlow:
     """Integration tests for tenant isolation across the memory API flow."""
 
+    @pytest.fixture(autouse=True)
+    def _configure_fake_database(self) -> object:
+        """Provide a shared fake database and apply API dependency override."""
+        self._fake_database = _FakeMemoryDatabase()
+        original_get_database = memory_api.SpannerClient.get_database
+        memory_api.SpannerClient.get_database = lambda: self._fake_database
+
+        try:
+            yield
+        finally:
+            memory_api.SpannerClient.get_database = original_get_database
+
     async def test_full_memory_flow_isolates_same_session_id_across_tenants(
         self,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Sessions with the same identifier must remain isolated by tenant."""
-        fake_database = _FakeMemoryDatabase()
-        monkeypatch.setattr("src.memory.api.SpannerClient.get_database", lambda: fake_database)
-
         await MemoryAPI.create_session(
             tenant_id="tenant_a",
             session_id="session_shared",
@@ -286,7 +296,7 @@ class TestTenantIsolatedMemoryFlow:
             relationship={"source_id": "session_shared", "type": "REFERENCES"},
         )
 
-        fake_database.seed_context_turns(
+        self._fake_database.seed_context_turns(
             tenant_id="tenant_a",
             session_id="session_shared",
             turns=[
@@ -294,7 +304,7 @@ class TestTenantIsolatedMemoryFlow:
                 ("turn_a_2", "Agent", '{"content": "alpha reply"}', 0.55),
             ],
         )
-        fake_database.seed_context_turns(
+        self._fake_database.seed_context_turns(
             tenant_id="tenant_b",
             session_id="session_shared",
             turns=[("turn_b_1", "User", '{"content": "beta"}', 0.65)],
@@ -319,22 +329,23 @@ class TestTenantIsolatedMemoryFlow:
         ]
         assert [turn.content for turn in response_b.turns] == ['{"content": "beta"}']
         assert {
-            node["tenant_id"] for node in fake_database.nodes if node["node_id"] == "session_shared"
+            node["tenant_id"]
+            for node in self._fake_database.nodes
+            if node["node_id"] == "session_shared"
         } == {"tenant_a", "tenant_b"}
-        assert {edge["tenant_id"] for edge in fake_database.edges} == {"tenant_a", "tenant_b"}
-        assert {event["tenant_id"] for event in fake_database.audit_events} == {
+        assert {edge["tenant_id"] for edge in self._fake_database.edges} == {
+            "tenant_a",
+            "tenant_b",
+        }
+        assert {event["tenant_id"] for event in self._fake_database.audit_events} == {
             "tenant_a",
             "tenant_b",
         }
 
     async def test_relationship_lookup_rejects_cross_tenant_source_node(
         self,
-        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """A tenant must not be able to attach relationships to another tenant's nodes."""
-        fake_database = _FakeMemoryDatabase()
-        monkeypatch.setattr("src.memory.api.SpannerClient.get_database", lambda: fake_database)
-
         await MemoryAPI.create_session(
             tenant_id="tenant_a",
             session_id="session_shared",
@@ -351,7 +362,7 @@ class TestTenantIsolatedMemoryFlow:
 
         assert all(
             node["tenant_id"] != "tenant_b"
-            for node in fake_database.nodes
+            for node in self._fake_database.nodes
             if node["node_id"] == "session_shared"
         )
-        assert fake_database.edges == []
+        assert self._fake_database.edges == []

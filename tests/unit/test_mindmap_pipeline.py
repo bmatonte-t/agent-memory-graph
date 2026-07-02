@@ -10,6 +10,7 @@ import pytest
 
 from src.memory.mindmap_pipeline import (
     AuditTraceRecorder,
+    GatingConfig,
     MindMapConfig,
     MindMapPipeline,
     MindMapPipelineError,
@@ -547,75 +548,23 @@ class TestMindMapConfigValidation:
 
     def test_gating_penalty_respects_custom_coefficients(self) -> None:
         """Custom GatingConfig penalty coefficients must be stored and accessible."""
-        from src.memory.mindmap_pipeline import GatingConfig
-
+        penalty = 0.2
+        cap = 0.8
         config = MindMapConfig(
-            gating=GatingConfig(per_contradiction_penalty=0.2, max_total_penalty=0.8)
+            gating=GatingConfig(per_contradiction_penalty=penalty, max_total_penalty=cap)
         )
-        assert config.gating.per_contradiction_penalty == 0.2
-        assert config.gating.max_total_penalty == 0.8
+        assert config.gating.per_contradiction_penalty == penalty
+        assert config.gating.max_total_penalty == cap
 
     def test_gating_config_defaults_are_valid(self) -> None:
         """Default GatingConfig matches original magic-number behaviour (0.1 penalty, 0.5 cap)."""
-        from src.memory.mindmap_pipeline import GatingConfig
-
+        expected_penalty = 0.1
+        expected_cap = 0.5
         defaults = GatingConfig()
-        assert defaults.per_contradiction_penalty == 0.1
-        assert defaults.max_total_penalty == 0.5
+        assert defaults.per_contradiction_penalty == expected_penalty
+        assert defaults.max_total_penalty == expected_cap
 
     def test_gating_config_rejects_penalty_above_one(self) -> None:
         """per_contradiction_penalty > 1.0 must raise a validation error."""
-        from src.memory.mindmap_pipeline import GatingConfig
-
-        with pytest.raises(ValueError):
-            GatingConfig(per_contradiction_penalty=1.5)
-
-
-class TestMindMapConfigValidation:
-    """Tests for MindMapConfig field-level and cross-field validation."""
-
-    def test_mindmap_config_rejects_conflicting_aggregation_flags(self) -> None:
-        """Setting both use_spanner_aggregation and use_deterministic_aggregation must raise."""
-        with pytest.raises(ValueError, match="mutually exclusive"):
-            MindMapConfig(use_spanner_aggregation=True, use_deterministic_aggregation=True)
-
-    def test_mindmap_config_allows_only_spanner_aggregation(self) -> None:
-        """use_spanner_aggregation=True alone must be accepted without error."""
-        cfg = MindMapConfig(use_spanner_aggregation=True, use_deterministic_aggregation=False)
-        assert cfg.use_spanner_aggregation is True
-
-    def test_mindmap_config_allows_only_deterministic_aggregation(self) -> None:
-        """use_deterministic_aggregation=True alone must be accepted without error."""
-        cfg = MindMapConfig(use_spanner_aggregation=False, use_deterministic_aggregation=True)
-        assert cfg.use_deterministic_aggregation is True
-
-    def test_mindmap_config_allows_both_false(self) -> None:
-        """Both flags False is the default valid state."""
-        cfg = MindMapConfig()
-        assert cfg.use_spanner_aggregation is False
-        assert cfg.use_deterministic_aggregation is False
-
-    def test_gating_penalty_respects_custom_coefficients(self) -> None:
-        """Custom GatingConfig penalty coefficients must be stored and accessible."""
-        from src.memory.mindmap_pipeline import GatingConfig
-
-        config = MindMapConfig(
-            gating=GatingConfig(per_contradiction_penalty=0.2, max_total_penalty=0.8)
-        )
-        assert config.gating.per_contradiction_penalty == 0.2
-        assert config.gating.max_total_penalty == 0.8
-
-    def test_gating_config_defaults_are_valid(self) -> None:
-        """Default GatingConfig matches original magic-number behaviour (0.1 penalty, 0.5 cap)."""
-        from src.memory.mindmap_pipeline import GatingConfig
-
-        defaults = GatingConfig()
-        assert defaults.per_contradiction_penalty == 0.1
-        assert defaults.max_total_penalty == 0.5
-
-    def test_gating_config_rejects_penalty_above_one(self) -> None:
-        """per_contradiction_penalty > 1.0 must raise a validation error."""
-        from src.memory.mindmap_pipeline import GatingConfig
-
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="per_contradiction_penalty"):
             GatingConfig(per_contradiction_penalty=1.5)

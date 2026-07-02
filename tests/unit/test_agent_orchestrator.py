@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+import asyncio
+from unittest.mock import AsyncMock, patch
 
 from src.agent.orchestrator import AgentOrchestrator
-from src.models.agent import AgentExecutionMode, AgentOrchestrationRequest
+from src.models.agent import (
+    AgentExecutionMode,
+    AgentOrchestrationRequest,
+    AgentOrchestrationResponse,
+)
 from src.models.mcp import (
     MCPInvokeRequest,
     MCPInvokeResponse,
@@ -15,6 +20,7 @@ from src.models.mcp import (
 )
 
 EXPECTED_TOOL_CALLS = 3
+EXPECTED_TIMEOUT_TOOL_CALLS = 1
 
 
 def _token_usage(input_tokens: int, output_tokens: int) -> MCPTokenUsage:
@@ -213,3 +219,53 @@ class TestAgentOrchestrator:
         assert response.tool_call_count == EXPECTED_TOOL_CALLS
         assert len(response.tool_calls) == EXPECTED_TOOL_CALLS
         assert [request.tenant_id for request in seen_requests] == ["tenant_a"] * 3
+
+    async def test_respond_timeout_triggers_session_end_tool(self) -> None:
+        """Timeout path should trigger session end extraction protocol through MCP."""
+        fake_service = AsyncMock()
+
+        async def fake_invoke(request: MCPInvokeRequest) -> MCPInvokeResponse:
+            return MCPInvokeResponse(
+                tool_name=request.tool_name,
+                request_id=request.request_id,
+                success=True,
+                latency_ms=1.0,
+                result={"status": "closed"},
+                error=None,
+                token_usage=_token_usage(input_tokens=1, output_tokens=1),
+            )
+
+        fake_service.invoke.side_effect = fake_invoke
+        orchestrator = AgentOrchestrator(mcp_tool_service=fake_service)
+
+        async def slow_single_mode(
+            *_: object,
+            **__: object,
+        ) -> AgentOrchestrationResponse:
+            await asyncio.sleep(0.05)
+            return AgentOrchestrationResponse(
+                session_id="sess_timeout",
+                request_id="req_timeout",
+                execution_mode=AgentExecutionMode.SINGLE,
+                response_text="late response",
+                grounded=False,
+                tool_call_count=0,
+                tool_calls=[],
+            )
+
+        with patch.object(AgentOrchestrator, "_respond_single_mode", side_effect=slow_single_mode):
+            response = await orchestrator.respond(
+                AgentOrchestrationRequest(
+                    tenant_id="tenant_a",
+                    prompt="timeout path",
+                    session_id="sess_timeout",
+                    timeout_ms=1,
+                )
+            )
+
+        assert response.grounded is False
+        assert response.tool_call_count == EXPECTED_TIMEOUT_TOOL_CALLS
+        assert len(response.tool_calls) == EXPECTED_TIMEOUT_TOOL_CALLS
+        invoke_request = fake_service.invoke.call_args.args[0]
+        assert invoke_request.tool_name == MCPToolName.MEMORY_END_SESSION
+        assert invoke_request.arguments["end_reason"] == "timeout"

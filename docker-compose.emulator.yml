@@ -1,0 +1,24 @@
+version: "3.9"
+
+services:
+  spanner-emulator:
+    image: gcr.io/cloud-spanner-emulator/emulator
+    container_name: agent-memory-graph-spanner-emulator
+    ports:
+      - "9010:9010"
+      - "9020:9020"
+
+  agent-memory-graph-api:
+    build:
+      context: .
+    container_name: agent-memory-graph-api
+    command: uv run uvicorn src.api.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "8000:8000"
+    environment:
+      SPANNER_EMULATOR_HOST: spanner-emulator:9010
+      GCP_PROJECT_ID: test-project
+      SPANNER_INSTANCE_ID: test-instance
+      SPANNER_DATABASE_ID: test-database
+    depends_on:
+      - spanner-emulator

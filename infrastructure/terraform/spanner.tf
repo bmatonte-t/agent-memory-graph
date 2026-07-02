@@ -7,8 +7,8 @@
 ###############################################################################
 
 locals {
-  spanner_instance_id  = lookup(var.spanner_instance_id, local.environment)
-  spanner_database_id  = "agent-memory-graph-${local.environment}"
+  spanner_instance_id     = lookup(var.spanner_instance_id, local.environment)
+  spanner_database_id     = "agent-memory-graph-${local.environment}"
   spanner_instance_config = "regional-${local.region}"
 }
 
@@ -78,7 +78,7 @@ resource "null_resource" "run_migrations" {
   }
 
   provisioner "local-exec" {
-    command = <<-SCRIPT
+    command     = <<-SCRIPT
       set -euo pipefail
       MIGRATIONS_DIR="${path.module}/../../migrations"
       for sql_file in $(ls "$MIGRATIONS_DIR"/*.sql | sort); do

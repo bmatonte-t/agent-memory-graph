@@ -1,8 +1,37 @@
 # MCP Tools
 
-Agent Memory Graph exposes four tools through the Model Context Protocol (MCP). All tools are reached via a single endpoint:
+Agent Memory Graph exposes six tools through the Model Context Protocol (MCP).
 
+## Discovery endpoint
+
+Clients can auto-configure against the versioned discovery manifest:
+
+```http
+GET /.well-known/mcp
 ```
+
+Optional query parameter:
+
+- `version`: contract version requested by the client. Current supported value: `1.0`.
+
+Example:
+
+```bash
+curl -s "https://<service-url>/.well-known/mcp?version=1.0"
+```
+
+The response includes:
+
+- `manifest_version` and `supported_versions`.
+- `invoke_endpoint` used for tool execution.
+- `tools` and `tool_catalog` with parameter metadata.
+- Stable error catalog and compatibility notes.
+
+## Invocation endpoint
+
+All tools are executed via the same endpoint:
+
+```http
 POST /api/v1/mcp/invoke
 ```
 

@@ -13,8 +13,10 @@
 #   GCP_PROJECT_ID_INTG     — GCP project ID for intg workspace
 #   GCP_PROJECT_ID_PROD     — GCP project ID for prod workspace
 #   GCP_REGION              — Default GCP region (e.g. us-east1)
-#   GOOGLE_CREDENTIALS      — Service account JSON key for CI runner
-#                             (or use Workload Identity Federation)
+#   WORKLOAD_IDENTITY_PROVIDER      — Full provider resource name for GitLab OIDC
+#                                     (e.g. projects/123/locations/global/workloadIdentityPools/gitlab-ci-pool/providers/gitlab-ci-provider)
+#   WORKLOAD_IDENTITY_SERVICE_ACCOUNT — Service account email to impersonate via WIF
+#   GOOGLE_CREDENTIALS              — Legacy fallback service account JSON key (deprecated)
 #
 # The terraform.tfvars is written from CI variables at plan/apply time;
 # it is NOT committed to the repository.
@@ -44,11 +46,50 @@ build-image:
   image: docker:24
   services:
     - docker:24-dind
+  id_tokens:
+    GITLAB_OIDC_TOKEN:
+      aud: https://sts.googleapis.com
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
   before_script:
-    - echo "$GOOGLE_CREDENTIALS" | docker login -u _json_key --password-stdin
-        "https://${GCP_REGION}-docker.pkg.dev"
+    - |
+      apk add --no-cache curl jq
+
+      if [ -n "${WORKLOAD_IDENTITY_PROVIDER:-}" ] && [ -n "${WORKLOAD_IDENTITY_SERVICE_ACCOUNT:-}" ]; then
+        echo "Authenticating with Workload Identity Federation"
+        STS_RESPONSE=$(curl -s -X POST "https://sts.googleapis.com/v1/token" \
+          -H "Content-Type: application/json" \
+          -d "{\"audience\":\"//iam.googleapis.com/${WORKLOAD_IDENTITY_PROVIDER}\",\"grantType\":\"urn:ietf:params:oauth:grant-type:token-exchange\",\"requestedTokenType\":\"urn:ietf:params:oauth:token-type:access_token\",\"scope\":\"https://www.googleapis.com/auth/cloud-platform\",\"subjectTokenType\":\"urn:ietf:params:oauth:token-type:jwt\",\"subjectToken\":\"${GITLAB_OIDC_TOKEN}\"}")
+        FEDERATED_ACCESS_TOKEN=$(echo "$STS_RESPONSE" | jq -r '.access_token')
+
+        if [ -z "$FEDERATED_ACCESS_TOKEN" ] || [ "$FEDERATED_ACCESS_TOKEN" = "null" ]; then
+          echo "Failed to exchange GitLab OIDC token for federated access token"
+          echo "$STS_RESPONSE"
+          exit 1
+        fi
+
+        IAM_RESPONSE=$(curl -s -X POST "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${WORKLOAD_IDENTITY_SERVICE_ACCOUNT}:generateAccessToken" \
+          -H "Authorization: Bearer ${FEDERATED_ACCESS_TOKEN}" \
+          -H "Content-Type: application/json" \
+          -d '{"scope":["https://www.googleapis.com/auth/cloud-platform"]}')
+        GCP_ACCESS_TOKEN=$(echo "$IAM_RESPONSE" | jq -r '.accessToken')
+
+        if [ -z "$GCP_ACCESS_TOKEN" ] || [ "$GCP_ACCESS_TOKEN" = "null" ]; then
+          echo "Failed to generate service account access token"
+          echo "$IAM_RESPONSE"
+          exit 1
+        fi
+
+        docker login -u oauth2accesstoken -p "$GCP_ACCESS_TOKEN" \
+          "https://${GCP_REGION}-docker.pkg.dev"
+      elif [ -n "${GOOGLE_CREDENTIALS:-}" ]; then
+        echo "Using legacy GOOGLE_CREDENTIALS fallback"
+        echo "$GOOGLE_CREDENTIALS" | docker login -u _json_key --password-stdin \
+          "https://${GCP_REGION}-docker.pkg.dev"
+      else
+        echo "No authentication method configured. Set WIF variables or GOOGLE_CREDENTIALS."
+        exit 1
+      fi
   script:
     - |
       # Determine project ID based on branch
@@ -147,3 +188,24 @@ write-tfvars:
     - if: '$CI_COMMIT_BRANCH'
   needs:
     - build-image
+
+# ---------------------------------------------------------------------------
+# Testing governance enforcement
+#
+# Blocks new unapproved integration over-mocking violations while allowing
+# explicitly approved legacy files during the migration window.
+# ---------------------------------------------------------------------------
+
+test-governance-enforce:
+  stage: .pre
+  image: python:3.14
+  script:
+    - python scripts/test_suite_governance.py --fail-on-new-violations
+  artifacts:
+    when: always
+    paths:
+      - reports/testing-governance-inventory.json
+      - reports/testing-governance-inventory.md
+    expire_in: 1 week
+  rules:
+    - if: '$CI_COMMIT_BRANCH'

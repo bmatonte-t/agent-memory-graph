@@ -6,8 +6,6 @@ and synthesis linkage for NeighborEnricher and EvidenceTracker.
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock
-
 import pytest
 
 from src.memory.retrieval import EvidenceTracker, NeighborEnricher
@@ -21,19 +19,23 @@ MAX_CHARS_SMALL = 100
 SOURCE_TYPE_VARIANT_COUNT = 4
 
 
+class _SpannerClientStub:
+    """Minimal client stub for retrieval and evidence tracking tests."""
+
+
 class TestNeighborEnricher:
     """Tests for NeighborEnricher GQL queries and filtering."""
 
     @pytest.fixture
-    def mock_spanner_client(self) -> MagicMock:
-        """Create a mock Spanner client."""
-        return MagicMock()
+    def spanner_client_stub(self) -> _SpannerClientStub:
+        """Create a deterministic Spanner client stub."""
+        return _SpannerClientStub()
 
     @pytest.fixture
-    def neighbor_enricher(self, mock_spanner_client: MagicMock) -> NeighborEnricher:
+    def neighbor_enricher(self, spanner_client_stub: _SpannerClientStub) -> NeighborEnricher:
         """Create a neighbor enricher with mock client."""
         return NeighborEnricher(
-            client=mock_spanner_client,
+            client=spanner_client_stub,
             max_direct_neighbors=MAX_DIRECT_NEIGHBORS,
             max_neighbors_per_entity=MAX_NEIGHBORS_PER_ENTITY,
             max_chars=MAX_CHARS_DEFAULT,
@@ -123,14 +125,14 @@ class TestEvidenceTracker:
     """Tests for EvidenceTracker evidence recording and linking."""
 
     @pytest.fixture
-    def mock_spanner_client(self) -> MagicMock:
-        """Create a mock Spanner client."""
-        return MagicMock()
+    def spanner_client_stub(self) -> _SpannerClientStub:
+        """Create a deterministic Spanner client stub."""
+        return _SpannerClientStub()
 
     @pytest.fixture
-    def evidence_tracker(self, mock_spanner_client: MagicMock) -> EvidenceTracker:
+    def evidence_tracker(self, spanner_client_stub: _SpannerClientStub) -> EvidenceTracker:
         """Create an evidence tracker with mock client."""
-        return EvidenceTracker(client=mock_spanner_client)
+        return EvidenceTracker(client=spanner_client_stub)
 
     @pytest.mark.asyncio
     async def test_record_evidence_retrieved_validates_tenant_id(
@@ -230,7 +232,7 @@ class TestNeighborEnrichmentEdgeCases:
     @pytest.fixture
     def neighbor_enricher(self) -> NeighborEnricher:
         """Create neighbor enricher with mock client."""
-        return NeighborEnricher(client=MagicMock())
+        return NeighborEnricher(client=_SpannerClientStub())
 
     @pytest.mark.asyncio
     async def test_neighbor_enrichment_empty_entity(
@@ -258,7 +260,7 @@ class TestNeighborEnrichmentEdgeCases:
     ) -> None:
         """Neighbor enrichment with large char budget."""
         # Create enricher with large budget
-        enricher = NeighborEnricher(client=MagicMock(), max_chars=MAX_CHARS_LARGE)
+        enricher = NeighborEnricher(client=_SpannerClientStub(), max_chars=MAX_CHARS_LARGE)
         assert enricher.max_chars == MAX_CHARS_LARGE
 
     @pytest.mark.asyncio
@@ -268,7 +270,7 @@ class TestNeighborEnrichmentEdgeCases:
     ) -> None:
         """Neighbor enrichment with constrained char budget."""
         # Create enricher with very small budget
-        enricher = NeighborEnricher(client=MagicMock(), max_chars=MAX_CHARS_SMALL)
+        enricher = NeighborEnricher(client=_SpannerClientStub(), max_chars=MAX_CHARS_SMALL)
         assert enricher.max_chars == MAX_CHARS_SMALL
 
     @pytest.mark.asyncio
@@ -296,7 +298,7 @@ class TestEvidenceTrackingEdgeCases:
     @pytest.fixture
     def evidence_tracker(self) -> EvidenceTracker:
         """Create evidence tracker with mock client."""
-        return EvidenceTracker(client=MagicMock())
+        return EvidenceTracker(client=_SpannerClientStub())
 
     @pytest.mark.asyncio
     async def test_evidence_tracking_zero_weight(

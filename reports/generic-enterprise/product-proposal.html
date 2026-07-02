@@ -79,18 +79,18 @@
 <div class="section">
   <h1 style="border-color: #ED1650;">A Monday Morning Without Memory</h1>
 
-  <p class="tagline">Meet Martín Díaz — and the problem AMG was built to solve.</p>
+  <p class="tagline">Meet a Data Engineer — and the problem AMG was built to solve.</p>
 
-  <p>It is 9:14 AM on a Monday. Martín Díaz, Data Engineer on the ADO squad, sits down to build a new agent. His goal is simple: an assistant that helps his team find the right dataset owner when something breaks in production. The data catalog has the answers — he just needs the agent to find them reliably.</p>
+  <p>It is 9:14 AM on a Monday. A data engineer sits down to build a new agent. His goal is simple: an assistant that helps his team find the right dataset owner when something breaks in production. The data catalog has the answers — he just needs the agent to find them reliably.</p>
 
-  <p>He wires the agent to the GenAI Gateway and runs his first query: <em>"Who owns the flight punctuality dataset and what's the refresh schedule?"</em> The agent replies with a name and a schedule. Sounds right. Martín uses it to route an incident ticket.</p>
+  <p>He wires the agent to the organization's AI gateway and runs his first query: <em>"Who owns the flight punctuality dataset and what's the refresh schedule?"</em> The agent replies with a name and a schedule. Sounds right. He uses it to route an incident ticket.</p>
 
   <p>Two hours later, the ticket bounces back. Wrong owner. The dataset was transferred to a different squad three months ago, but the agent had no way to know — it started with zero context, scraped the catalog on the fly, and returned a stale result. No memory, no continuity, no audit trail.</p>
 
   <div class="highlight" style="border-left-color: #ED1650; background: linear-gradient(120deg, rgba(237,22,80,.06), rgba(237,22,80,.03));">
     <strong>The cold start problem — measured:</strong>
     <ul style="margin: 0.75rem 0 0 0;">
-      <li><strong>45 minutes</strong> of Martín's time re-explaining context to the agent across three separate sessions that week</li>
+      <li><strong>45 minutes</strong> of the engineer's time re-explaining context to the agent across three separate sessions that week</li>
       <li><strong>4,200 tokens</strong> spent per session on re-loading background knowledge the agent already retrieved the day before</li>
       <li><strong>1 misrouted incident</strong> because the agent returned a stale fact with no confidence signal or timestamp</li>
       <li><strong>Zero audit trail</strong> — no way to know where the wrong answer came from or which call triggered it</li>
@@ -99,7 +99,7 @@
 
   <h2>The Same Monday, With AMG</h2>
 
-  <p>With Agent Memory Graph, Martín's agent starts differently. When it receives the ownership query, the MindMap pipeline fires: it mines the entity <em>"flight punctuality dataset"</em> from the prompt, traverses the Semantic graph, and retrieves 12 facts — including the current owner, the transfer event, the refresh schedule, and the last quality score — all with confidence weights and timestamps. The facts are serialized with unique IDs and injected into the synthesis prompt. The agent cites <code>fact-id: f_7a3c</code> as the source of the ownership answer.</p>
+  <p>With Agent Memory Graph, the agent starts differently. When it receives the ownership query, the MindMap pipeline fires: it mines the entity <em>"flight punctuality dataset"</em> from the prompt, traverses the Semantic graph, and retrieves 12 facts — including the current owner, the transfer event, the refresh schedule, and the last quality score — all with confidence weights and timestamps. The facts are serialized with unique IDs and injected into the synthesis prompt. The agent cites <code>fact-id: f_7a3c</code> as the source of the ownership answer.</p>
 
   <p>The answer is correct. The transfer is reflected. The incident is routed in 90 seconds. The audit log shows exactly which fact the agent relied on, when it was last validated, and what its confidence weight was at query time.</p>
 
@@ -108,12 +108,12 @@
     <ul style="margin: 0.75rem 0 0 0;">
       <li><strong>12 facts retrieved</strong> in under 5ms — pre-weighted, pre-validated, with provenance</li>
       <li><strong>1,200 tokens</strong> used at synthesis — only the high-confidence, relevant facts were included</li>
-      <li><strong>Correct owner returned</strong> — the transfer event had been ingested from DataHub and weighted appropriately</li>
+      <li><strong>Correct owner returned</strong> — the transfer event had been ingested from the data catalog and weighted appropriately</li>
       <li><strong>Full audit trail</strong> — every access, every fact cited, every authorization decision logged immutably</li>
     </ul>
   </div>
 
-  <p>Martín did not change how he wrote the agent. He did not add prompt engineering or manual context loading. AMG handled it at the infrastructure layer — transparently, deterministically, and with zero hallucination risk.</p>
+  <p>The engineer did not change how the agent was written. He did not add prompt engineering or manual context loading. AMG handled it at the infrastructure layer — transparently, deterministically, and with zero hallucination risk.</p>
 
   <p>That is what AMG gives your organization: a persistent, shared, auditable memory layer that transforms every AI agent from a stateless call into a context-aware, evidence-grounded workflow participant.</p>
 </div>
@@ -492,7 +492,7 @@
     </tr>
     <tr>
       <td><strong>Engineer time recaptured</strong></td>
-      <td>Elimination of context re-explanation overhead. Martín's example: 45 min/week × 50 engineers × $80/hr fully-loaded = $150k/yr in recaptured engineering time.</td>
+      <td>Elimination of context re-explanation overhead. Example: 45 min/week × 50 engineers × $80/hr fully-loaded = $150k/yr in recaptured engineering time.</td>
       <td>$100,000 – $180,000/yr</td>
     </tr>
     <tr>
@@ -565,7 +565,7 @@
     <tr>
       <td><strong>Internal Assistants</strong></td>
       <td>AI copilots for engineers and analysts that remember project context across weeks</td>
-      <td>Context + Semantic tier, MCP integration with Claude Code / Codeen</td>
+      <td>Context + Semantic tier, MCP integration with developer tools</td>
       <td>Faster onboarding, eliminated context re-explanation overhead</td>
     </tr>
     <tr>
@@ -616,7 +616,7 @@
       <td><strong>Data / AI Engineer</strong></td>
       <td>1 FTE</td>
       <td>5–12</td>
-      <td>Semantic graph entity schema design, data catalog connector configuration, MAPIS ingestion pipeline setup and quality validation</td>
+      <td>Semantic graph entity schema design, data catalog connector configuration, operational data ingestion pipeline setup and quality validation</td>
     </tr>
     <tr>
       <td><strong>Security / Governance</strong></td>
@@ -650,16 +650,16 @@
       <th>What For</th>
     </tr>
     <tr>
-      <td><strong>GenAI Gateway / Cosmos Platform</strong></td>
+      <td><strong>GenAI Gateway / GenAI Platform</strong></td>
       <td>~1 hour</td>
       <td>Week 1</td>
       <td>Issue API key for the AMG service account, confirm model access (Claude, GPT-5, Gemini), set initial monthly budget</td>
     </tr>
     <tr>
-      <td><strong>DataHub / ATLAS</strong></td>
+      <td><strong>Data Catalog Platform</strong></td>
       <td>~2 hours</td>
       <td>Week 5</td>
-      <td>Provide read token for DataHub MCP, confirm schema access for catalog connector, validate ingestion of dataset ownership and lineage facts</td>
+      <td>Provide read token for the data catalog MCP, confirm schema access for catalog connector, validate ingestion of dataset ownership and lineage facts</td>
     </tr>
     <tr>
       <td><strong>Network / Infrastructure</strong></td>
@@ -683,7 +683,7 @@
       <td><strong>Backstage / Developer Platform</strong></td>
       <td>~1 hour</td>
       <td>Week 2</td>
-      <td>Register <code>catalog-info.yaml</code> in the service catalog, confirm MCP tool visibility in GenAI Hub, validate discovery from Claude Code / Codeen</td>
+      <td>Register <code>catalog-info.yaml</code> in the service catalog, confirm MCP tool visibility in GenAI Hub, validate discovery from developer tools</td>
     </tr>
   </table>
 
@@ -725,8 +725,8 @@
       <td>AMG service account</td>
     </tr>
     <tr>
-      <td>BigQuery (MAPIS)</td>
-      <td><code>roles/bigquery.dataViewer</code> on <code>emx-data-prod-e6c5.raw_emx_mapis_rag.*</code></td>
+      <td>BigQuery (Operational Data)</td>
+      <td><code>roles/bigquery.dataViewer</code> on <code>your-project.your_dataset.*</code></td>
       <td>AMG ingest service account only</td>
     </tr>
   </table>
@@ -853,7 +853,7 @@
       <td>2</td>
       <td>Service catalog registration; MCP registration in your GenAI Hub</td>
       <td>Platform Engineer</td>
-      <td>AMG visible in Backstage + discoverable from Claude Code / Codeen</td>
+      <td>AMG visible in Backstage + discoverable from developer tools</td>
     </tr>
     <tr>
       <td>2–3</td>

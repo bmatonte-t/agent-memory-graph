@@ -18,6 +18,7 @@ EXPECTED_ENTITY_WEIGHT = 0.5
 EXPECTED_FIRST_TOKENS_USED = 100
 EXPECTED_SECOND_TOKENS_USED = 150
 EXPECTED_EXPORTED_TOKENS = 50
+EXPECTED_BATCH_ITEM_COUNT = 2
 
 
 @pytest.fixture
@@ -186,6 +187,51 @@ class TestMemoryAddFact:
         call_args = client.http_client.post.call_args
         request_body = call_args.kwargs["json"]
         assert "relationship" not in request_body["arguments"]
+
+    @pytest.mark.asyncio
+    async def test_add_facts_batch_success(self, client: AgentMemoryGraphClient) -> None:
+        """Batch fact ingestion should return aggregate summary payload."""
+        response_data = {
+            "tool_name": "memory_add_fact_batch",
+            "success": True,
+            "latency_ms": 41.0,
+            "result": {
+                "total_items": 2,
+                "succeeded": 2,
+                "failed": 0,
+                "partial_failure": False,
+            },
+        }
+        mock_response = AsyncMock(spec=httpx.Response)
+        mock_response.json.return_value = response_data
+        client.http_client.post = AsyncMock(return_value=mock_response)
+
+        result = await client.add_facts_batch(
+            [
+                {
+                    "entity_type": "PERSON",
+                    "entity_id": "person_1",
+                    "attributes": {"name": "Alice"},
+                },
+                {
+                    "entity_type": "ORGANIZATION",
+                    "entity_id": "org_1",
+                    "attributes": {"name": "LATAM"},
+                },
+            ]
+        )
+
+        assert result["total_items"] == EXPECTED_BATCH_ITEM_COUNT
+        assert result["succeeded"] == EXPECTED_BATCH_ITEM_COUNT
+
+    @pytest.mark.asyncio
+    async def test_add_facts_batch_rejects_empty_input(
+        self,
+        client: AgentMemoryGraphClient,
+    ) -> None:
+        """Batch fact ingestion should fail fast when input list is empty."""
+        with pytest.raises(ValueError, match="facts must be a non-empty list"):
+            await client.add_facts_batch([])
 
 
 class TestMemoryLogTrace:

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from src.memory import mindmap_pipeline
 from src.memory.mindmap_pipeline import (
     DeterministicAggregationAdapter,
     DeterministicMiningAdapter,
@@ -51,7 +52,7 @@ class TestMindMapIntegration:
     """End-to-end tests for the MindMap pipeline execution path."""
 
     @pytest.fixture(autouse=True)
-    def _stub_audit_trace(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def _stub_audit_trace(self) -> object:
         """Stub audit persistence to keep integration deterministic and local."""
 
         async def fake_record_audit_event(**_: object) -> AuditResponse:
@@ -62,10 +63,13 @@ class TestMindMapIntegration:
                 timestamp=datetime.now(UTC),
             )
 
-        monkeypatch.setattr(
-            "src.memory.mindmap_pipeline.MemoryAPI.record_audit_event",
-            fake_record_audit_event,
-        )
+        original_record_audit_event = mindmap_pipeline.MemoryAPI.record_audit_event
+        mindmap_pipeline.MemoryAPI.record_audit_event = fake_record_audit_event
+
+        try:
+            yield
+        finally:
+            mindmap_pipeline.MemoryAPI.record_audit_event = original_record_audit_event
 
     async def test_pipeline_end_to_end_returns_traceable_grounded_response(self) -> None:
         """Pipeline should return synthesis + trace linkage for a factual query."""

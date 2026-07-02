@@ -6,6 +6,7 @@ tenant ID injection, and cross-mode coexistence.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,7 +16,20 @@ from src.security.tenant_context import OrgTenantContext
 from src.security.validators import validate_tenant_id
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from src.project_base.settings.config import SingleCompanySettings
+
+
+@contextmanager
+def _temporary_single_company(settings: object, single_company: object) -> Iterator[None]:
+    """Temporarily override ``settings.single_company`` for test isolation."""
+    original_single_company = settings.single_company
+    settings.single_company = single_company
+    try:
+        yield
+    finally:
+        settings.single_company = original_single_company
 
 
 class TestOrgWideModeRequestInjection:
@@ -110,9 +124,7 @@ class TestOrgWideModeValidatorFlow:
 class TestSingleCompanySettingsValidation:
     """Tests for SingleCompanySettings validation."""
 
-    def test_settings_requires_company_id_when_enabled(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_settings_requires_company_id_when_enabled(self) -> None:
         """SingleCompanySettings should require non-empty company_id when enabled."""
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
 
@@ -123,9 +135,7 @@ class TestSingleCompanySettingsValidation:
                 company_id="",
             )
 
-    def test_settings_allows_blank_company_id_when_disabled(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_settings_allows_blank_company_id_when_disabled(self) -> None:
         """SingleCompanySettings should allow blank company_id when disabled."""
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
 
@@ -137,9 +147,7 @@ class TestSingleCompanySettingsValidation:
         assert settings.enabled is False
         assert settings.company_id == ""
 
-    def test_settings_requires_external_url_when_external_mode(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_settings_requires_external_url_when_external_mode(self) -> None:
         """SingleCompanySettings should require external_auth_url when auth_mode='external'."""
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
 
@@ -151,9 +159,7 @@ class TestSingleCompanySettingsValidation:
                 external_auth_url=None,
             )
 
-    def test_settings_allows_no_external_url_when_internal_mode(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_settings_allows_no_external_url_when_internal_mode(self) -> None:
         """SingleCompanySettings should allow missing external_auth_url in internal mode."""
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
 
@@ -271,9 +277,7 @@ class TestSpannerQueryContextWithOrgWideMode:
 class TestMultiTenantAndOrgWideCoexistence:
     """Tests for multi-tenant mode coexisting with org-wide logic."""
 
-    def test_multi_tenant_mode_requires_explicit_tenant_id(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_multi_tenant_mode_requires_explicit_tenant_id(self) -> None:
         """Multi-tenant mode should require explicit tenant_id."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
@@ -282,13 +286,14 @@ class TestMultiTenantAndOrgWideCoexistence:
             enabled=False,
             company_id="",
         )
-        monkeypatch.setattr(settings, "single_company", multi_tenant)
-
-        # Without tenant_id, should fail validation
-        with pytest.raises(ValueError, match="must be a non-empty string"):
+        with (
+            _temporary_single_company(settings, multi_tenant),
+            pytest.raises(ValueError, match="must be a non-empty string"),
+        ):
+            # Without tenant_id, should fail validation
             validate_tenant_id(None)
 
-    def test_multi_tenant_mode_accepts_any_tenant_id(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_multi_tenant_mode_accepts_any_tenant_id(self) -> None:
         """Multi-tenant mode should accept any provided tenant_id."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
@@ -297,13 +302,12 @@ class TestMultiTenantAndOrgWideCoexistence:
             enabled=False,
             company_id="",
         )
-        monkeypatch.setattr(settings, "single_company", multi_tenant)
+        with _temporary_single_company(settings, multi_tenant):
+            result = validate_tenant_id("any-tenant-id")
 
-        result = validate_tenant_id("any-tenant-id")
+            assert result == "any-tenant-id"
 
-        assert result == "any-tenant-id"
-
-    def test_handler_can_switch_between_modes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_handler_can_switch_between_modes(self) -> None:
         """Same handler should work in both multi-tenant and org-wide modes."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
@@ -313,23 +317,23 @@ class TestMultiTenantAndOrgWideCoexistence:
             enabled=False,
             company_id="",
         )
-        monkeypatch.setattr(settings, "single_company", multi_tenant)
-        result_mt = validate_tenant_id("explicit-tenant")
-        assert result_mt == "explicit-tenant"
+        with _temporary_single_company(settings, multi_tenant):
+            result_mt = validate_tenant_id("explicit-tenant")
+            assert result_mt == "explicit-tenant"
 
         # Switch to org-wide
         org_wide = SingleCompanySettings(
             enabled=True,
             company_id="org-wide-tenant",
         )
-        monkeypatch.setattr(settings, "single_company", org_wide)
-        result_ow = validate_tenant_id(None)
-        assert result_ow == "org-wide-tenant"
+        with _temporary_single_company(settings, org_wide):
+            result_ow = validate_tenant_id(None)
+            assert result_ow == "org-wide-tenant"
 
         # Multi-tenant should still work with explicit value
-        monkeypatch.setattr(settings, "single_company", multi_tenant)
-        result_mt2 = validate_tenant_id("another-tenant")
-        assert result_mt2 == "another-tenant"
+        with _temporary_single_company(settings, multi_tenant):
+            result_mt2 = validate_tenant_id("another-tenant")
+            assert result_mt2 == "another-tenant"
 
 
 class TestOrgWideModeModelValidatorOrder:

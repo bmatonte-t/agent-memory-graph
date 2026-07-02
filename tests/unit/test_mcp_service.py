@@ -10,9 +10,16 @@ import pytest
 from src.mcp.service import MCPToolService
 from src.models.mcp import MCPInvokeRequest, MCPToolName
 from src.models.mindmap import MindMapResponse, MindMapTrace, StageTiming, SynthesisResult
-from src.models.schemas import AuditResponse, ContextResponse, FactResponse
+from src.models.schemas import (
+    AuditResponse,
+    ContextResponse,
+    EndSessionResponse,
+    FactResponse,
+    SessionKnowledgeExtractionResponse,
+)
 
 EXPECTED_AUDIT_CALLS_WITH_AUTH = 2  # 1 for authorization granted + 1 for operation
+EXPECTED_BATCH_FACT_ITEMS = 2
 
 
 class TestMCPToolService:
@@ -144,6 +151,118 @@ class TestMCPToolService:
             source_query_id=None,
         )
 
+    async def test_memory_add_fact_batch_reports_partial_failures(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Batch fact ingestion should report per-item errors without aborting the full request."""
+        service = MCPToolService(mindmap_pipeline=AsyncMock())
+
+        async def fake_add_semantic_fact(**kwargs: object) -> FactResponse:
+            if kwargs["entity_id"] == "ent_2":
+                msg = "Invalid entity_type."
+                raise ValueError(msg)
+            return FactResponse(
+                tenant_id="tenant_a",
+                entity_id=str(kwargs["entity_id"]),
+                entity_type=str(kwargs["entity_type"]),
+                node_path=f"/{kwargs['entity_type']}/{kwargs['entity_id']}",
+                weight=0.5,
+                created_at=datetime.now(UTC),
+            )
+
+        monkeypatch.setattr("src.mcp.service.MemoryAPI.add_semantic_fact", fake_add_semantic_fact)
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count", lambda *_: 2
+        )
+
+        response = await service.invoke(
+            MCPInvokeRequest(
+                tenant_id="tenant_a",
+                tool_name=MCPToolName.MEMORY_ADD_FACT_BATCH,
+                session_id="sess_1",
+                arguments={
+                    "facts": [
+                        {
+                            "entity_type": "PERSON",
+                            "entity_id": "ent_1",
+                            "attributes": {"name": "Alice"},
+                        },
+                        {
+                            "entity_type": "INVALID",
+                            "entity_id": "ent_2",
+                            "attributes": {"name": "Invalid"},
+                        },
+                    ]
+                },
+            )
+        )
+
+        assert response.success is True
+        assert response.result is not None
+        assert response.result["total_items"] == EXPECTED_BATCH_FACT_ITEMS
+        assert response.result["succeeded"] == 1
+        assert response.result["failed"] == 1
+        assert response.result["partial_failure"] is True
+
+    async def test_memory_add_fact_batch_rejects_empty_facts_array(
+        self,
+    ) -> None:
+        """Batch fact ingestion should fail fast when payload does not provide facts."""
+        service = MCPToolService(mindmap_pipeline=AsyncMock())
+
+        response = await service.invoke(
+            MCPInvokeRequest(
+                tenant_id="tenant_a",
+                tool_name=MCPToolName.MEMORY_ADD_FACT_BATCH,
+                session_id="sess_1",
+                arguments={"facts": []},
+            )
+        )
+
+        assert response.success is False
+        assert response.error is not None
+        assert response.error.code == "validation_error"
+
+    async def test_memory_add_fact_batch_reports_permission_denied_item(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Batch fact ingestion should include per-item permission failures in failed_items."""
+        service = MCPToolService(mindmap_pipeline=AsyncMock())
+
+        async def fake_add_semantic_fact(**_: object) -> FactResponse:
+            msg = "authorization denied for add_semantic_fact"
+            raise PermissionError(msg)
+
+        monkeypatch.setattr("src.mcp.service.MemoryAPI.add_semantic_fact", fake_add_semantic_fact)
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count", lambda *_: 2
+        )
+
+        response = await service.invoke(
+            MCPInvokeRequest(
+                tenant_id="tenant_a",
+                tool_name=MCPToolName.MEMORY_ADD_FACT_BATCH,
+                session_id="sess_1",
+                arguments={
+                    "facts": [
+                        {
+                            "entity_type": "PERSON",
+                            "entity_id": "ent_1",
+                            "attributes": {"name": "Alice"},
+                        }
+                    ]
+                },
+            )
+        )
+
+        assert response.success is True
+        assert response.result is not None
+        assert response.result["failed"] == 1
+        failed_item = response.result["failed_items"][0]
+        assert failed_item["code"] == "permission_denied"
+
     async def test_memory_log_trace_passes_tenant_to_memory_api(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -218,6 +337,97 @@ class TestMCPToolService:
             tenant_id="tenant_a",
             session_id="sess_1",
             window_size=5,
+            authorization_scope=None,
+        )
+
+    async def test_memory_end_session_passes_tenant_to_memory_api(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Session end tool should forward closure parameters to MemoryAPI.end_session."""
+        service = MCPToolService(mindmap_pipeline=AsyncMock())
+        mock_end_session = AsyncMock(
+            return_value=EndSessionResponse(
+                tenant_id="tenant_a",
+                session_id="sess_1",
+                status="closed",
+                end_reason="completed",
+                ended_at=datetime.now(UTC),
+                extraction_status="completed",
+                extraction=SessionKnowledgeExtractionResponse(
+                    tenant_id="tenant_a",
+                    session_id="sess_1",
+                    domain="general",
+                    processed_turns=2,
+                    extracted_facts=1,
+                    skipped_facts=1,
+                    failed_facts=0,
+                    extracted_at=datetime.now(UTC),
+                ),
+            )
+        )
+        monkeypatch.setattr("src.mcp.service.MemoryAPI.end_session", mock_end_session)
+
+        response = await service.invoke(
+            MCPInvokeRequest(
+                tenant_id="tenant_a",
+                tool_name=MCPToolName.MEMORY_END_SESSION,
+                session_id="sess_1",
+                arguments={"end_reason": "completed", "window_size": 20},
+            )
+        )
+
+        assert response.success is True
+        mock_end_session.assert_awaited_once_with(
+            tenant_id="tenant_a",
+            session_id="sess_1",
+            end_reason="completed",
+            domain_hint=None,
+            window_size=20,
+            authorization_scope=None,
+        )
+
+    async def test_memory_recall_context_passes_cursor_to_memory_api(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Context recall should pass cursor when provided by the caller."""
+        service = MCPToolService(mindmap_pipeline=AsyncMock())
+
+        mock_recall = AsyncMock(
+            return_value=ContextResponse(
+                tenant_id="tenant_a",
+                session_id="sess_1",
+                turns=[],
+                has_more=False,
+                next_cursor=None,
+                total_weight_sum=0.0,
+                retrieved_at=datetime.now(UTC),
+            )
+        )
+        monkeypatch.setattr("src.mcp.service.MemoryAPI.retrieve_context_window", mock_recall)
+        monkeypatch.setattr(
+            "src.mcp.service.MemoryAPI._increment_session_action_count", lambda *_: 2
+        )
+
+        response = await service.invoke(
+            MCPInvokeRequest(
+                tenant_id="tenant_a",
+                tool_name=MCPToolName.MEMORY_RECALL_CONTEXT,
+                session_id="sess_1",
+                arguments={
+                    "window_size": 5,
+                    "cursor": "2026-07-01T00:00:00+00:00|turn_42",
+                },
+            )
+        )
+
+        assert response.success is True
+        mock_recall.assert_awaited_once_with(
+            tenant_id="tenant_a",
+            session_id="sess_1",
+            window_size=5,
+            cursor="2026-07-01T00:00:00+00:00|turn_42",
             authorization_scope=None,
         )
 

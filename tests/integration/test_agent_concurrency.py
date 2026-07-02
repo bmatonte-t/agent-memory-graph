@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import time
-from unittest.mock import AsyncMock
 
 import pytest
 
@@ -21,34 +20,34 @@ class TestAgentConcurrency:
     @pytest.mark.asyncio
     async def test_concurrent_agent_sessions_p95_latency(self) -> None:
         """Concurrent sessions should complete within an acceptable p95 latency."""
-        fake_service = AsyncMock()
 
-        async def fake_invoke(request: MCPInvokeRequest) -> MCPInvokeResponse:
-            await asyncio.sleep(0.002)
-            result = {}
-            if request.tool_name == MCPToolName.MEMORY_SEARCH:
-                result = {
-                    "synthesis": {
-                        "response_text": "Grounded answer",
-                        "grounded": True,
+        class _MCPServiceStub:
+            async def invoke(self, request: MCPInvokeRequest) -> MCPInvokeResponse:
+                await asyncio.sleep(0.002)
+                result = {}
+                if request.tool_name == MCPToolName.MEMORY_SEARCH:
+                    result = {
+                        "synthesis": {
+                            "response_text": "Grounded answer",
+                            "grounded": True,
+                        }
                     }
-                }
-            return MCPInvokeResponse(
-                tool_name=request.tool_name,
-                request_id=request.request_id,
-                success=True,
-                latency_ms=2.0,
-                result=result,
-                error=None,
-                token_usage={
-                    "input_tokens": 1,
-                    "output_tokens": 1,
-                    "total_tokens": 2,
-                    "estimated": True,
-                },
-            )
+                return MCPInvokeResponse(
+                    tool_name=request.tool_name,
+                    request_id=request.request_id,
+                    success=True,
+                    latency_ms=2.0,
+                    result=result,
+                    error=None,
+                    token_usage={
+                        "input_tokens": 1,
+                        "output_tokens": 1,
+                        "total_tokens": 2,
+                        "estimated": True,
+                    },
+                )
 
-        fake_service.invoke.side_effect = fake_invoke
+        fake_service = _MCPServiceStub()
         orchestrator = AgentOrchestrator(mcp_tool_service=fake_service)
 
         latencies_ms: list[float] = []
