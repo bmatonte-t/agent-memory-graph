@@ -9,6 +9,7 @@
 locals {
   spanner_instance_id  = lookup(var.spanner_instance_id, local.environment)
   spanner_database_id  = "agent-memory-graph-${local.environment}"
+  spanner_instance_config = "regional-${local.region}"
 }
 
 ###############################################################################
@@ -23,6 +24,7 @@ resource "google_spanner_instance" "main" {
   project          = local.spanner_project_id
   name             = local.spanner_instance_id
   display_name     = "Agent Memory Graph (${local.environment})"
+  config           = local.spanner_instance_config
   processing_units = local.environment == "prod" ? 200 : 100
 
   labels = local.common_labels
