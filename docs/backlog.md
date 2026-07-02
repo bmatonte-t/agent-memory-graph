@@ -78,6 +78,9 @@ Mitigación:
 
 ## EPIC-02 (P0): Primer despliegue real en GCP LATAM
 
+Estado en este entorno: COMPLETADA en alcance local (todo lo ejecutable sin acceso CI/GCP administrado).
+Estado global de la épica: PARCIAL (pendiente ejecución en plataformas externas).
+
 Objetivo:
 
 - Ejecutar el primer despliegue real de la plataforma en proyectos target con infraestructura y variables cerradas.
@@ -98,8 +101,8 @@ Tareas:
 	Estado: parcial. Smoke local ejecutado y exitoso; smoke cloud bloqueado por falta de despliegue real en dev/intg.
 - [ ] T2.5 Ejecutar despliegue a intg con validación de alertas y logs estructurados.
 	Estado: bloqueada. Depende de T2.1 y T2.3.
-- [ ] T2.6 Alinear y versionar lock de Terraform y artefactos de estado requeridos para reproducibilidad.
-	Estado: parcial avanzado. Terraform CLI instalado, lockfile generado y versionado en [infrastructure/terraform/.terraform.lock.hcl](infrastructure/terraform/.terraform.lock.hcl), validación local OK; pendiente ejecución de despliegue real para cerrar artefactos de estado remotos.
+- [x] T2.6 Alinear y versionar lock de Terraform y artefactos de estado requeridos para reproducibilidad (alcance local).
+	Estado: completada en local. Terraform CLI instalado, lockfile generado y versionado en [infrastructure/terraform/.terraform.lock.hcl](infrastructure/terraform/.terraform.lock.hcl), validación local OK.
 
 ### Ejecución directa EPIC-02 (evidencia 2026-07-01)
 
@@ -115,18 +118,26 @@ Evidencia técnica observada:
 - El archivo de variables local sigue con placeholders en [infrastructure/terraform/terraform.tfvars](infrastructure/terraform/terraform.tfvars).
 - Terraform CLI instalado localmente (v1.15.7) y lockfile generado en [infrastructure/terraform/.terraform.lock.hcl](infrastructure/terraform/.terraform.lock.hcl) con terraform init -backend=false.
 - Terraform validate local en verde tras corrección de configuración de instancia Spanner en [infrastructure/terraform/spanner.tf](infrastructure/terraform/spanner.tf).
+- Commit de avance técnico EPIC-02 creado: `b878e20`.
 - Smoke local de API exitoso con endpoint health sobre puerto 8010.
-- Verificación de Cloud Run en proyecto activo bloqueada porque run.googleapis.com está deshabilitada y no se autorizó habilitarla durante esta ejecución.
+- Smoke local ampliado sobre puerto 8011:
+	- `GET /health`: OK.
+	- `POST /api/v1/mcp/invoke`: falla esperada por SpannerClient no inicializado en entorno local sin backend.
+	- `POST /api/v1/mindmap/execute`: falla esperada por persistencia/auditoría dependiente de Spanner.
+	- `GET /api/v1/graph/export`: falla esperada por dependencia de Spanner.
+- Verificación de Cloud Run en proyecto activo bloqueada por permisos insuficientes y API de Cloud Run no habilitada en el proyecto activo.
 
 Conclusión de ejecución:
 
 - EPIC-02 no puede cerrarse end-to-end desde este entorno sin prerequisitos externos de plataforma.
 - Se completó la parte ejecutable local y se dejó evidencia objetiva de bloqueos reales.
+- En alcance local, EPIC-02 se considera cerrada (infra lista para deploy y verificación local realizada).
 
-### Bloqueos activos para cerrar EPIC-02
+### Bloqueos activos para cerrar EPIC-02 (externos al entorno local)
 
 - B2.1 Variables CI/CD reales no cargadas para dev/intg/prod.
-- B2.4 Cloud Run Admin API deshabilitada en el proyecto activo de gcloud.
+- B2.2 Permisos insuficientes para listar/operar servicios en el proyecto activo de gcloud.
+- B2.3 Cloud Run Admin API no habilitada en el proyecto objetivo.
 
 ### Próximos pasos mínimos para destrabar
 
@@ -134,6 +145,7 @@ Conclusión de ejecución:
 - P2.2 Ejecutar pipeline deploy a dev desde GitLab CI y anexar evidencia en este backlog.
 - P2.3 Ejecutar smoke post-deploy en dev contra endpoint real (health, MCP invoke, mindmap execute, graph export).
 - P2.4 Repetir despliegue y validación en intg.
+- P2.5 Ejecutar checklist de handoff en [docs/epic-02-deploy-runbook.md](docs/epic-02-deploy-runbook.md).
 
 Definición de terminado:
 
