@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from dataclasses import dataclass, field
 
 import pytest
 
+import src.memory.api as memory_api
 from src.db.idempotency import (
     IdempotencyContext,
     generate_idempotency_key,
@@ -23,8 +23,132 @@ UUID_LENGTH = 36
 CONCURRENT_TASKS = 3
 
 
+@dataclass(slots=True)
+class _BatchStub:
+    """Batch stub used to track idempotency key usage."""
+
+    captured_keys: list[str | None] = field(default_factory=list)
+
+    def execute_update(self, sql: str, params: dict[str, object]) -> int:
+        """Capture active idempotency key for each write operation.
+
+        Args:
+            sql: SQL statement.
+            params: Bound SQL parameters.
+
+        Returns:
+            int: Number of affected rows.
+        """
+        del sql, params
+        self.captured_keys.append(get_idempotency_key())
+        return 1
+
+
+class _BatchContext:
+    """Context manager wrapper around batch stub."""
+
+    def __init__(self, batch: _BatchStub) -> None:
+        """Store wrapped batch.
+
+        Args:
+            batch: Batch stub instance.
+        """
+        self._batch = batch
+
+    def __enter__(self) -> _BatchStub:
+        """Return wrapped batch.
+
+        Returns:
+            _BatchStub: Batch stub.
+        """
+        return self._batch
+
+    def __exit__(self, exc_type: object, exc_value: object, traceback: object) -> bool:
+        """Do not suppress exceptions.
+
+        Returns:
+            bool: Always False.
+        """
+        del exc_type, exc_value, traceback
+        return False
+
+
+@dataclass(slots=True)
+class _DatabaseStub:
+    """Database stub exposing batch writes used in the tested flow."""
+
+    batch_stub: _BatchStub = field(default_factory=_BatchStub)
+
+    def batch(self) -> _BatchContext:
+        """Return writable batch context.
+
+        Returns:
+            _BatchContext: Writable context over batch stub.
+        """
+        return _BatchContext(self.batch_stub)
+
+    def run_in_transaction(self, operation: object) -> object:
+        """Execute transaction callback against batch stub.
+
+        Args:
+            operation: Transaction callback.
+
+        Returns:
+            object: Callback result.
+        """
+        if not callable(operation):
+            msg = "operation must be callable"
+            raise TypeError(msg)
+        return operation(self.batch_stub)
+
+
+class _SpannerClientStub:
+    """Spanner client stub for idempotency integration tests."""
+
+    _database = _DatabaseStub()
+
+    @staticmethod
+    def get_database() -> _DatabaseStub:
+        """Return shared in-memory database.
+
+        Returns:
+            _DatabaseStub: Shared database stub.
+        """
+        return _SpannerClientStub._database
+
+    @staticmethod
+    def _validate_audit_mutation_forbidden(table_name: str, operation: str) -> None:
+        """Allow append-only audit inserts in integration tests.
+
+        Args:
+            table_name: Target table name.
+            operation: Requested mutation operation.
+        """
+        del table_name, operation
+
+
 class TestIdempotency:
     """Integration tests for idempotency context and deduplication."""
+
+    @pytest.fixture(autouse=True)
+    def _configure_stubs(self) -> object:
+        """Inject deterministic Spanner and weight-update stubs."""
+        _SpannerClientStub._database = _DatabaseStub()
+        original_spanner_client = memory_api.SpannerClient
+        original_weight_update = MemoryAPI._update_weight_on_successful_use
+
+        async def _noop_weight_update(*args: object, **kwargs: object) -> None:
+            """No-op weight update used by idempotency integration tests."""
+            del args, kwargs
+
+        memory_api.SpannerClient = _SpannerClientStub
+        MemoryAPI._update_weight_on_successful_use = _noop_weight_update
+
+        try:
+            yield
+        finally:
+            memory_api.SpannerClient = original_spanner_client
+            MemoryAPI._update_weight_on_successful_use = original_weight_update
 
     def test_generate_idempotency_key_creates_unique_keys(self) -> None:
         """Verify key generation creates unique UUID strings."""
@@ -69,73 +193,32 @@ class TestIdempotency:
         self,
     ) -> None:
         """Verify semantic fact creation happens within idempotency context."""
-        with patch("src.memory.api.SpannerClient") as mock_client:
-            mock_db = MagicMock()
-            mock_batch = MagicMock()
-            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
-            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
-            mock_client.get_database.return_value = mock_db
+        response = await MemoryAPI.add_semantic_fact(
+            tenant_id=TENANT_ID,
+            entity_type="PERSON",
+            entity_id="person_idempotency_test",
+        )
 
-            captured_keys: list[str | None] = []
+        assert isinstance(response, FactResponse)
+        assert response.tenant_id == TENANT_ID
 
-            # Capture idempotency key inside batch operation
-            def execute_update_with_capture(
-                *args: Any,
-                **kwargs: Any,
-            ) -> int:
-                """Capture the current idempotency key."""
-                current_key = get_idempotency_key()
-                if current_key is not None:
-                    captured_keys.append(current_key)
-                return 1
-
-            mock_batch.execute_update.side_effect = execute_update_with_capture
-
-            with patch.object(
-                MemoryAPI,
-                "_update_weight_on_successful_use",
-                new_callable=AsyncMock,
-            ):
-                response = await MemoryAPI.add_semantic_fact(
-                    tenant_id=TENANT_ID,
-                    entity_type="PERSON",
-                    entity_id="person_idempotency_test",
-                )
-
-                # Verify response is valid
-                assert isinstance(response, FactResponse)
-                assert response.tenant_id == TENANT_ID
-
-                # Verify idempotency key was captured during batch operation
-                assert len(captured_keys) > 0
-                assert captured_keys[0] is not None
-                assert len(captured_keys[0]) == UUID_LENGTH
+        captured_keys = _SpannerClientStub.get_database().batch_stub.captured_keys
+        non_empty_keys = [key for key in captured_keys if key is not None]
+        assert non_empty_keys
+        assert len(non_empty_keys[0]) == UUID_LENGTH
 
     @pytest.mark.asyncio
     async def test_idempotency_context_not_active_after_fact_creation(
         self,
     ) -> None:
         """Verify idempotency context is cleared after add_semantic_fact."""
-        with patch("src.memory.api.SpannerClient") as mock_client:
-            mock_db = MagicMock()
-            mock_batch = MagicMock()
-            mock_db.batch.return_value.__enter__ = MagicMock(return_value=mock_batch)
-            mock_db.batch.return_value.__exit__ = MagicMock(return_value=None)
-            mock_client.get_database.return_value = mock_db
+        await MemoryAPI.add_semantic_fact(
+            tenant_id=TENANT_ID,
+            entity_type="PERSON",
+            entity_id="person_after_context_test",
+        )
 
-            with patch.object(
-                MemoryAPI,
-                "_update_weight_on_successful_use",
-                new_callable=AsyncMock,
-            ):
-                await MemoryAPI.add_semantic_fact(
-                    tenant_id=TENANT_ID,
-                    entity_type="PERSON",
-                    entity_id="person_after_context_test",
-                )
-
-                # After fact creation, context should be cleared
-                assert get_idempotency_key() is None
+        assert get_idempotency_key() is None
 
     @pytest.mark.asyncio
     async def test_concurrent_operations_have_independent_idempotency_keys(

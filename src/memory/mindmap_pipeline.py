@@ -127,6 +127,7 @@ class MindMapConfig(BaseModel):
     max_hops: int = Field(default=3, ge=1, le=6)
     max_paths: int = Field(default=20, ge=1)
     max_evidence_nodes: int = Field(default=200, ge=1)
+    # Model selection is deployment-controlled (ADR-0002), not caller-controlled.
     extraction_model_name: str = Field(default="gemini-2.5-flash")
     synthesis_model_name: str = Field(default="gemini-2.5-pro")
     use_vertex_mining: bool = Field(default=False)
@@ -172,12 +173,11 @@ class MindMapConfig(BaseModel):
     )
 
     @model_validator(mode="after")
-    def aggregation_flags_mutually_exclusive(self) -> "MindMapConfig":
-        """Enforce that use_spanner_aggregation and use_deterministic_aggregation cannot both be True."""
+    def aggregation_flags_mutually_exclusive(self) -> MindMapConfig:
+        """Enforce aggregation flags are mutually exclusive."""
         if self.use_spanner_aggregation and self.use_deterministic_aggregation:
-            raise ValueError(
-                "use_spanner_aggregation and use_deterministic_aggregation are mutually exclusive"
-            )
+            msg = "use_spanner_aggregation and use_deterministic_aggregation are mutually exclusive"
+            raise ValueError(msg)
         return self
 
 
@@ -750,20 +750,46 @@ class MindMapPipeline:
             trace_id = f"trace_{uuid.uuid4()}"
             stage_timings: list[StageTiming] = []
 
-            mining_result = await self.mining_adapter.mine(query)
+            with trace_span(
+                "mindmap.stage.mine",
+                attributes={
+                    "tenant.id": tenant_id or "",
+                    "session.id": session_id or "",
+                    "mindmap.stage": "mine",
+                },
+            ):
+                mining_result = await self.mining_adapter.mine(query)
             stage_timings.append(
                 StageTiming(stage=PipelineStage.MINE, latency_ms=mining_result.latency_ms)
             )
 
-            aggregation_result = await self.aggregation_adapter.aggregate(
-                mining_result=mining_result,
-                config=self.config,
-            )
+            with trace_span(
+                "mindmap.stage.aggregate",
+                attributes={
+                    "tenant.id": tenant_id or "",
+                    "session.id": session_id or "",
+                    "mindmap.stage": "aggregate",
+                    "mindmap.mined_entity_count": len(mining_result.entities),
+                },
+            ):
+                aggregation_result = await self.aggregation_adapter.aggregate(
+                    mining_result=mining_result,
+                    config=self.config,
+                )
             stage_timings.append(
                 StageTiming(stage=PipelineStage.AGGREGATE, latency_ms=aggregation_result.latency_ms)
             )
 
-            serialization_result = self._serialize(aggregation_result=aggregation_result)
+            with trace_span(
+                "mindmap.stage.serialize",
+                attributes={
+                    "tenant.id": tenant_id or "",
+                    "session.id": session_id or "",
+                    "mindmap.stage": "serialize",
+                    "mindmap.path_count": len(aggregation_result.paths),
+                },
+            ):
+                serialization_result = self._serialize(aggregation_result=aggregation_result)
             stage_timings.append(
                 StageTiming(
                     stage=PipelineStage.SERIALIZE, latency_ms=serialization_result.latency_ms
@@ -791,20 +817,29 @@ class MindMapPipeline:
                         extra={"tenant_id": tenant_id, "error": str(error)},
                     )
 
-            if self.config.use_vertex_synthesis:
-                synthesis_result = self._synthesize_with_vertex(
-                    serialization_result=serialization_result,
-                    mining_result=mining_result,
-                    tenant_id=tenant_id,
-                    evidence_context=evidence_context,
-                )
-            else:
-                synthesis_result = self._synthesize(
-                    serialization_result=serialization_result,
-                    mining_result=mining_result,
-                    tenant_id=tenant_id,
-                    evidence_context=evidence_context,
-                )
+            with trace_span(
+                "mindmap.stage.synthesize",
+                attributes={
+                    "tenant.id": tenant_id or "",
+                    "session.id": session_id or "",
+                    "mindmap.stage": "synthesize",
+                    "mindmap.fact_count": len(serialization_result.facts),
+                },
+            ):
+                if self.config.use_vertex_synthesis:
+                    synthesis_result = self._synthesize_with_vertex(
+                        serialization_result=serialization_result,
+                        mining_result=mining_result,
+                        tenant_id=tenant_id,
+                        evidence_context=evidence_context,
+                    )
+                else:
+                    synthesis_result = self._synthesize(
+                        serialization_result=serialization_result,
+                        mining_result=mining_result,
+                        tenant_id=tenant_id,
+                        evidence_context=evidence_context,
+                    )
             self._validate_grounding(
                 synthesis_result=synthesis_result,
                 serialization_result=serialization_result,

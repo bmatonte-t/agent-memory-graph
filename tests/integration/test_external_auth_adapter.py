@@ -6,13 +6,14 @@ including error handling, timeouts, and policy response validation.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, patch
 
-from src.models.mcp import MCPInvokeRequest
+import httpx
 
 if TYPE_CHECKING:
-    import pytest
+    from collections.abc import Callable, Iterator
+
 from src.security.governance_adapter import (
     AuthorizationDecision,
     ExternalPassthroughAdapter,
@@ -23,22 +24,85 @@ from src.security.governance_adapter import (
 EXTERNAL_AUTH_TIMEOUT_SECONDS = 5.0
 
 
+@contextmanager
+def _override_httpx_post(post_impl: Callable[..., object]) -> Iterator[None]:
+    """Temporarily override ``httpx.post`` for deterministic adapter tests."""
+    original_post = httpx.post
+    httpx.post = post_impl
+    try:
+        yield
+    finally:
+        httpx.post = original_post
+
+
+class _RequestStub:
+    """MCP request stub with deterministic JSON serialization behavior."""
+
+    def __init__(self, payload_json: str = "{}") -> None:
+        """Initialize request payload.
+
+        Args:
+            payload_json: JSON payload returned by model_dump_json.
+        """
+        self.payload_json = payload_json
+        self.model_dump_json_calls = 0
+
+    def model_dump_json(self) -> str:
+        """Return serialized request payload.
+
+        Returns:
+            str: Request payload JSON.
+        """
+        self.model_dump_json_calls += 1
+        return self.payload_json
+
+
+class _ResponseStub:
+    """HTTP response stub for external authorization adapter tests."""
+
+    def __init__(self, payload: dict[str, object], *, json_error: Exception | None = None) -> None:
+        """Initialize response payload and optional JSON parsing error.
+
+        Args:
+            payload: Payload returned by json().
+            json_error: Optional exception raised by json().
+        """
+        self._payload = payload
+        self._json_error = json_error
+
+    def raise_for_status(self) -> None:
+        """No-op status validation for successful stubs."""
+
+    def json(self) -> dict[str, object]:
+        """Return payload or raise configured parsing error.
+
+        Returns:
+            dict[str, object]: Parsed payload.
+        """
+        if self._json_error is not None:
+            raise self._json_error
+        return self._payload
+
+
 class TestExternalAuthAdapterIntegration:
     """Tests for ExternalPassthroughAdapter in realistic scenarios."""
 
     def test_adapter_handles_policy_service_approval(self) -> None:
         """External adapter should authorize based on policy service response."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "allowed": True,
-            "reason_code": "POLICY_APPROVED",
-            "details": "User has required scope",
-        }
+        response = _ResponseStub(
+            {
+                "allowed": True,
+                "reason_code": "POLICY_APPROVED",
+                "details": "User has required scope",
+            }
+        )
 
-        with patch("httpx.post", return_value=mock_response):
+        def _post_stub(*_: object, **__: object) -> _ResponseStub:
+            return response
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(
                 external_auth_url="http://policy-service:8080/authorize"
             )
@@ -49,17 +113,20 @@ class TestExternalAuthAdapterIntegration:
 
     def test_adapter_handles_policy_service_denial(self) -> None:
         """External adapter should deny based on policy service response."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "allowed": False,
-            "reason_code": "INSUFFICIENT_SCOPE",
-            "details": "User scope does not include memory_search",
-        }
+        response = _ResponseStub(
+            {
+                "allowed": False,
+                "reason_code": "INSUFFICIENT_SCOPE",
+                "details": "User scope does not include memory_search",
+            }
+        )
 
-        with patch("httpx.post", return_value=mock_response):
+        def _post_stub(*_: object, **__: object) -> _ResponseStub:
+            return response
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(
                 external_auth_url="http://policy-service:8080/authorize"
             )
@@ -71,33 +138,41 @@ class TestExternalAuthAdapterIntegration:
 
     def test_adapter_sends_request_to_correct_endpoint(self) -> None:
         """External adapter should POST to the configured service URL."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = '{"tool": "memory_search"}'
+        request = _RequestStub(payload_json='{"tool": "memory_search"}')
 
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"allowed": True}
+        response = _ResponseStub({"allowed": True})
 
-        with patch("httpx.post", return_value=mock_response) as mock_post:
+        called_urls: list[str] = []
+
+        def _post_stub(url: str, **_: object) -> _ResponseStub:
+            called_urls.append(url)
+            return response
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(
                 external_auth_url="http://localhost:8001/authorize"
             )
             adapter.authorize(request)
 
             # Verify post was called with correct URL and timeout
-            mock_post.assert_called_once()
-            call_args = mock_post.call_args
-            assert call_args is not None
-            assert call_args[0][0] == "http://localhost:8001/authorize"
+            assert called_urls == ["http://localhost:8001/authorize"]
 
     def test_adapter_includes_timeout_in_request(self) -> None:
         """External adapter should respect timeout configuration."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"allowed": True}
+        response = _ResponseStub({"allowed": True})
 
-        with patch("httpx.post", return_value=mock_response) as mock_post:
+        observed_timeout: list[float] = []
+
+        def _post_stub(url: str, **kwargs: object) -> _ResponseStub:
+            del url
+            timeout_value = kwargs.get("timeout")
+            if isinstance(timeout_value, int | float):
+                observed_timeout.append(float(timeout_value))
+            return response
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(
                 external_auth_url="http://localhost:8001/authorize",
                 _request_timeout_seconds=5.0,
@@ -105,17 +180,17 @@ class TestExternalAuthAdapterIntegration:
             adapter.authorize(request)
 
             # Verify timeout was passed
-            call_args = mock_post.call_args
-            assert call_args is not None
-            assert "timeout" in call_args[1]
-            assert call_args[1]["timeout"] == EXTERNAL_AUTH_TIMEOUT_SECONDS
+            assert observed_timeout == [EXTERNAL_AUTH_TIMEOUT_SECONDS]
 
     def test_adapter_recovers_from_network_error(self) -> None:
         """External adapter should deny on network errors."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
-        with patch("httpx.post", side_effect=ConnectionError("Network unreachable")):
+        def _post_stub(*_: object, **__: object) -> _ResponseStub:
+            msg = "Network unreachable"
+            raise ConnectionError(msg)
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(
                 external_auth_url="http://unreachable-service:8080/authorize"
             )
@@ -126,10 +201,13 @@ class TestExternalAuthAdapterIntegration:
 
     def test_adapter_recovers_from_service_timeout(self) -> None:
         """External adapter should deny on timeout."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
-        with patch("httpx.post", side_effect=TimeoutError("Request timeout")):
+        def _post_stub(*_: object, **__: object) -> _ResponseStub:
+            msg = "Request timeout"
+            raise TimeoutError(msg)
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(
                 external_auth_url="http://slow-service:8080/authorize",
                 _request_timeout_seconds=1.0,
@@ -141,13 +219,14 @@ class TestExternalAuthAdapterIntegration:
 
     def test_adapter_handles_json_parse_error(self) -> None:
         """External adapter should deny on malformed JSON response."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
-        mock_response = MagicMock()
-        mock_response.json.side_effect = ValueError("Invalid JSON")
+        response = _ResponseStub({}, json_error=ValueError("Invalid JSON"))
 
-        with patch("httpx.post", return_value=mock_response):
+        def _post_stub(*_: object, **__: object) -> _ResponseStub:
+            return response
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(
                 external_auth_url="http://buggy-service:8080/authorize"
             )
@@ -160,49 +239,57 @@ class TestExternalAuthAdapterIntegration:
 class TestExternalAuthFactoryIntegration:
     """Tests for governance adapter factory with external auth."""
 
-    def test_factory_creates_external_adapter_in_external_mode(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_factory_creates_external_adapter_in_external_mode(self) -> None:
         """Factory should create ExternalPassthroughAdapter when configured."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
         from src.security import governance_adapter  # noqa: PLC0415
 
+        original_single_company = settings.single_company
         org_settings = SingleCompanySettings(
             enabled=True,
             company_id="org-1",
             auth_mode="external",
             external_auth_url="http://policy-service:8080/authorize",
         )
-        monkeypatch.setattr(settings, "single_company", org_settings)
+        settings.single_company = org_settings
         governance_adapter._ADAPTER_CACHE.clear()
 
-        adapter = build_governance_adapter()
+        try:
+            adapter = build_governance_adapter()
 
-        assert isinstance(adapter, ExternalPassthroughAdapter)
-        assert adapter.external_auth_url == "http://policy-service:8080/authorize"
+            assert isinstance(adapter, ExternalPassthroughAdapter)
+            assert adapter.external_auth_url == "http://policy-service:8080/authorize"
+        finally:
+            settings.single_company = original_single_company
+            governance_adapter._ADAPTER_CACHE.clear()
 
-    def test_factory_caches_external_adapter(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_factory_caches_external_adapter(self) -> None:
         """Factory should cache the external adapter instance."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import SingleCompanySettings  # noqa: PLC0415
         from src.security import governance_adapter  # noqa: PLC0415
 
+        original_single_company = settings.single_company
         org_settings = SingleCompanySettings(
             enabled=True,
             company_id="org-1",
             auth_mode="external",
             external_auth_url="http://policy-service:8080/authorize",
         )
-        monkeypatch.setattr(settings, "single_company", org_settings)
+        settings.single_company = org_settings
         governance_adapter._ADAPTER_CACHE.clear()
 
-        adapter_1 = build_governance_adapter()
-        adapter_2 = build_governance_adapter()
+        try:
+            adapter_1 = build_governance_adapter()
+            adapter_2 = build_governance_adapter()
 
-        assert adapter_1 is adapter_2
+            assert adapter_1 is adapter_2
+        finally:
+            settings.single_company = original_single_company
+            governance_adapter._ADAPTER_CACHE.clear()
 
-    def test_factory_invalidates_cache_on_url_change(self, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_factory_invalidates_cache_on_url_change(self) -> None:
         """Factory should create new adapter when URL changes."""
         from src.project_base.settings import settings  # noqa: PLC0415
         from src.project_base.settings.config import (  # noqa: PLC0415
@@ -210,31 +297,36 @@ class TestExternalAuthFactoryIntegration:
         )
         from src.security import governance_adapter  # noqa: PLC0415
 
+        original_single_company = settings.single_company
         org_settings_1 = SingleCompanySettings(
             enabled=True,
             company_id="org-1",
             auth_mode="external",
             external_auth_url="http://service-1:8080/authorize",
         )
-        monkeypatch.setattr(settings, "single_company", org_settings_1)
+        settings.single_company = org_settings_1
         governance_adapter._ADAPTER_CACHE.clear()
 
-        adapter_1 = build_governance_adapter()
+        try:
+            adapter_1 = build_governance_adapter()
 
-        org_settings_2 = SingleCompanySettings(
-            enabled=True,
-            company_id="org-1",
-            auth_mode="external",
-            external_auth_url="http://service-2:8080/authorize",
-        )
-        monkeypatch.setattr(settings, "single_company", org_settings_2)
-        governance_adapter._ADAPTER_CACHE.clear()
+            org_settings_2 = SingleCompanySettings(
+                enabled=True,
+                company_id="org-1",
+                auth_mode="external",
+                external_auth_url="http://service-2:8080/authorize",
+            )
+            settings.single_company = org_settings_2
+            governance_adapter._ADAPTER_CACHE.clear()
 
-        adapter_2 = build_governance_adapter()
+            adapter_2 = build_governance_adapter()
 
-        assert adapter_1 is not adapter_2
-        assert adapter_1.external_auth_url == "http://service-1:8080/authorize"
-        assert adapter_2.external_auth_url == "http://service-2:8080/authorize"
+            assert adapter_1 is not adapter_2
+            assert adapter_1.external_auth_url == "http://service-1:8080/authorize"
+            assert adapter_2.external_auth_url == "http://service-2:8080/authorize"
+        finally:
+            settings.single_company = original_single_company
+            governance_adapter._ADAPTER_CACHE.clear()
 
 
 class TestExternalAuthPolicyResponseValidation:
@@ -242,17 +334,20 @@ class TestExternalAuthPolicyResponseValidation:
 
     def test_adapter_accepts_response_with_all_fields(self) -> None:
         """Adapter should accept complete policy response."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "allowed": True,
-            "reason_code": "COMPLETE_RESPONSE",
-            "details": "All fields present",
-        }
+        response = _ResponseStub(
+            {
+                "allowed": True,
+                "reason_code": "COMPLETE_RESPONSE",
+                "details": "All fields present",
+            }
+        )
 
-        with patch("httpx.post", return_value=mock_response):
+        def _post_stub(*_: object, **__: object) -> _ResponseStub:
+            return response
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(external_auth_url="http://service:8080/authorize")
             decision = adapter.authorize(request)
 
@@ -262,16 +357,14 @@ class TestExternalAuthPolicyResponseValidation:
 
     def test_adapter_defaults_allowed_to_false(self) -> None:
         """Adapter should default allowed to False if missing from response."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
-        mock_response = MagicMock()
-        # Response missing 'allowed' field
-        mock_response.json.return_value = {
-            "reason_code": "PARTIAL_RESPONSE",
-        }
+        response = _ResponseStub({"reason_code": "PARTIAL_RESPONSE"})
 
-        with patch("httpx.post", return_value=mock_response):
+        def _post_stub(*_: object, **__: object) -> _ResponseStub:
+            return response
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(external_auth_url="http://service:8080/authorize")
             decision = adapter.authorize(request)
 
@@ -279,18 +372,21 @@ class TestExternalAuthPolicyResponseValidation:
 
     def test_adapter_accepts_reason_code_from_policy_service(self) -> None:
         """Adapter should preserve reason_code from policy service."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
         custom_reason = "CUSTOM_POLICY_REASON"
-        mock_response = MagicMock()
-        mock_response.json.return_value = {
-            "allowed": False,
-            "reason_code": custom_reason,
-            "details": "Custom policy applied",
-        }
+        response = _ResponseStub(
+            {
+                "allowed": False,
+                "reason_code": custom_reason,
+                "details": "Custom policy applied",
+            }
+        )
 
-        with patch("httpx.post", return_value=mock_response):
+        def _post_stub(*_: object, **__: object) -> _ResponseStub:
+            return response
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(external_auth_url="http://service:8080/authorize")
             decision = adapter.authorize(request)
 
@@ -302,37 +398,41 @@ class TestExternalAuthRequestPayload:
 
     def test_adapter_sends_mcp_request_as_json(self) -> None:
         """External adapter should serialize MCP request to JSON."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = (
-            '{"tenant_id": "org-1", "tool_name": "memory_search"}'
+        request = _RequestStub(
+            payload_json=('{"tenant_id": "org-1", "tool_name": "memory_search"}')
         )
 
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"allowed": True}
+        response = _ResponseStub({"allowed": True})
 
-        with patch("httpx.post", return_value=mock_response):
+        def _post_stub(*_: object, **__: object) -> _ResponseStub:
+            return response
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(external_auth_url="http://service:8080/authorize")
             adapter.authorize(request)
 
             # Verify request was serialized
-            request.model_dump_json.assert_called()
+            assert request.model_dump_json_calls == 1
 
     def test_adapter_sends_request_with_content_type_json(self) -> None:
         """External adapter should set Content-Type to application/json."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
-        mock_response = MagicMock()
-        mock_response.json.return_value = {"allowed": True}
+        response = _ResponseStub({"allowed": True})
 
-        with patch("httpx.post", return_value=mock_response) as mock_post:
+        observed_headers: list[object] = []
+
+        def _post_stub(url: str, **kwargs: object) -> _ResponseStub:
+            del url
+            observed_headers.append(kwargs.get("headers"))
+            return response
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(external_auth_url="http://service:8080/authorize")
             adapter.authorize(request)
 
-            call_args = mock_post.call_args
-            assert call_args is not None
-            if "headers" in call_args[1]:
-                assert "application/json" in str(call_args[1]["headers"])
+            assert observed_headers
+            assert "application/json" in str(observed_headers[0])
 
 
 class TestExternalAuthErrorRecovery:
@@ -340,10 +440,13 @@ class TestExternalAuthErrorRecovery:
 
     def test_adapter_logs_failed_authorization_attempt(self) -> None:
         """External adapter should log failed authorization."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
-        with patch("httpx.post", side_effect=Exception("Service error")):
+        def _post_stub(*_: object, **__: object) -> _ResponseStub:
+            msg = "Service error"
+            raise RuntimeError(msg)
+
+        with _override_httpx_post(_post_stub):
             adapter = ExternalPassthroughAdapter(external_auth_url="http://service:8080/authorize")
             # Should not raise, but deny
             decision = adapter.authorize(request)
@@ -352,8 +455,7 @@ class TestExternalAuthErrorRecovery:
 
     def test_adapter_denies_on_any_exception(self) -> None:
         """External adapter should deny on any exception."""
-        request = MagicMock(spec=MCPInvokeRequest)
-        request.model_dump_json.return_value = "{}"
+        request = _RequestStub()
 
         exceptions_to_test = [
             ConnectionError("Network error"),
@@ -363,7 +465,15 @@ class TestExternalAuthErrorRecovery:
         ]
 
         for exc in exceptions_to_test:
-            with patch("httpx.post", side_effect=exc):
+
+            def _post_stub(
+                *_: object,
+                __error: Exception = exc,
+                **__: object,
+            ) -> _ResponseStub:
+                raise __error
+
+            with _override_httpx_post(_post_stub):
                 adapter = ExternalPassthroughAdapter(
                     external_auth_url="http://service:8080/authorize"
                 )

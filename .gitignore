@@ -139,3 +139,7 @@ worktrees/
 
 # Terraform — adopter-specific config (stored in CI variables)
 infrastructure/terraform/terraform.tfvars
+
+# Generated testing governance artifacts
+reports/testing-governance-inventory.json
+reports/testing-governance-inventory.md

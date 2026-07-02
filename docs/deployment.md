@@ -24,6 +24,22 @@ LATAM Organization
 
 Each team's deployment is fully independent: no shared Spanner instances, no shared IAM, no cross-project data access. Teams can adopt AMG at their own pace.
 
+## Architecture decision freeze (EPIC-05)
+
+The following decisions are accepted and govern deployments:
+
+- Spanner tenancy: dedicated instance/database per team and environment.
+- Synthesis model policy: deployment-fixed model selection (no caller override).
+- AUDIT_EVENTS export: log-centric export path for compliance and analytics.
+- Pruning threshold scope: global deployment-level threshold (default `0.30`).
+
+See ADRs:
+
+- [ADR-0001](architecture/adr/ADR-0001-spanner-tenancy-model.md)
+- [ADR-0002](architecture/adr/ADR-0002-synthesis-model-policy.md)
+- [ADR-0003](architecture/adr/ADR-0003-audit-events-export-strategy.md)
+- [ADR-0004](architecture/adr/ADR-0004-pruning-threshold-scope.md)
+
 ### What gets deployed per project
 
 Terraform provisions the following in each GCP project:

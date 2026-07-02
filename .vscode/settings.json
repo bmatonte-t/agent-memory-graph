@@ -77,6 +77,7 @@
   ],
   "chat.tools.terminal.autoApprove": {
     "just": true,
-    "tee": true
+    "tee": true,
+    "uv": true
   }
 }

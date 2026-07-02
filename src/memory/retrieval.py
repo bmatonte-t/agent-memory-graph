@@ -266,7 +266,7 @@ class EvidentPathFinder:
                     total_chars,
                 )
 
-                return PathRetrievalResult(paths=results, total_chars=total_chars)  # noqa: TRY300
+                return PathRetrievalResult(paths=results, total_chars=total_chars)
 
             except Exception as e:
                 msg = f"path_retrieval_failed: {e}"

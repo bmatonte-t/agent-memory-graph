@@ -258,8 +258,8 @@ class TestCloudSchedulerJob:
 
     def test_pruning_schedule_cron_format(self) -> None:
         """Test pruning job CRON schedule format."""
-        # Should be daily at 3 AM UTC: "0 3 * * *"
-        assert CloudSchedulerJob.PRUNING_SCHEDULE_CRON == "0 3 * * *"
+        # Should be weekly (Sunday) at 3 AM UTC: "0 3 * * 0"
+        assert CloudSchedulerJob.PRUNING_SCHEDULE_CRON == "0 3 * * 0"
 
     @pytest.mark.asyncio
     async def test_create_decay_job_not_installed(self) -> None:

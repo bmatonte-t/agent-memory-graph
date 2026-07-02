@@ -17,7 +17,7 @@ Test Coverage:
 from __future__ import annotations
 
 import logging
-from unittest.mock import AsyncMock, MagicMock, patch
+from dataclasses import dataclass
 
 import pytest
 from fastapi.testclient import TestClient
@@ -34,6 +34,32 @@ from src.pipelines.api.extraction_api import app
 from src.pipelines.services.extraction_orchestrator import (
     ExtractionOrchestrator,
 )
+
+
+@dataclass(slots=True)
+class _ExtractedDocumentStub:
+    """Deterministic extracted-document shape for integration tests."""
+
+    document_id: str
+    text: str
+
+
+@dataclass(slots=True)
+class _DeduplicationResultsStub:
+    """Deterministic deduplication summary used by pipeline tests."""
+
+    candidates_found: int
+    matches_identified: int
+    duplicate_candidates: list[dict[str, object]]
+
+
+@dataclass(slots=True)
+class _BatchResultStub:
+    """Deterministic process_batch return payload used in integration tests."""
+
+    extracted_documents: list[_ExtractedDocumentStub]
+    errors: list[dict[str, str]]
+    deduplication_results: _DeduplicationResultsStub | None = None
 
 
 class TestExtractionPipelineEndToEnd:
@@ -150,30 +176,52 @@ class TestExtractionPipelineEndToEnd:
         assert "gcloud run services update-traffic" in rollback_command
         assert "extraction-api-dev" in rollback_command
 
-    @pytest.mark.asyncio
     async def test_async_batch_processing(self) -> None:
         """Test async execution of extraction pipeline."""
-        with patch.object(
-            ExtractionOrchestrator, "process_batch", new_callable=AsyncMock
-        ) as mock_async:
-            mock_async.return_value = MagicMock(
-                extracted_documents=[MagicMock(document_id="doc_1", text="Content")],
+        original_process_batch = ExtractionOrchestrator.process_batch
+
+        async def _process_batch_stub(
+            self: ExtractionOrchestrator,
+            file_paths: list[str],
+            *,
+            detect_entities: bool,
+        ) -> _BatchResultStub:
+            del self
+            assert file_paths == ["doc_1.pdf"]
+            assert detect_entities is True
+            return _BatchResultStub(
+                extracted_documents=[_ExtractedDocumentStub(document_id="doc_1", text="Content")],
                 errors=[],
             )
 
-            result = await mock_async(["doc_1.pdf"], detect_entities=True)
+        ExtractionOrchestrator.process_batch = _process_batch_stub
+
+        try:
+            orchestrator = ExtractionOrchestrator()
+            result = await orchestrator.process_batch(["doc_1.pdf"], detect_entities=True)
 
             assert len(result.extracted_documents) == 1
-            mock_async.assert_called_once()
+            assert result.extracted_documents[0].document_id == "doc_1"
+        finally:
+            ExtractionOrchestrator.process_batch = original_process_batch
 
     def test_error_recovery_on_partial_failure(self) -> None:
         """Test pipeline resilience when some documents fail."""
-        with patch.object(ExtractionOrchestrator, "process_batch") as mock_batch:
-            # Simulate 2 successes, 1 failure
-            mock_batch.return_value = MagicMock(
+        original_process_batch = ExtractionOrchestrator.process_batch
+
+        def _process_batch_stub(
+            self: ExtractionOrchestrator,
+            file_paths: list[str],
+            *,
+            detect_entities: bool,
+        ) -> _BatchResultStub:
+            del self
+            assert file_paths == ["doc_1.pdf", "doc_2.pdf", "doc_3.pdf"]
+            assert detect_entities is True
+            return _BatchResultStub(
                 extracted_documents=[
-                    MagicMock(document_id="doc_1", text="Content 1"),
-                    MagicMock(document_id="doc_3", text="Content 3"),
+                    _ExtractedDocumentStub(document_id="doc_1", text="Content 1"),
+                    _ExtractedDocumentStub(document_id="doc_3", text="Content 3"),
                 ],
                 errors=[
                     {
@@ -184,6 +232,9 @@ class TestExtractionPipelineEndToEnd:
                 ],
             )
 
+        ExtractionOrchestrator.process_batch = _process_batch_stub
+
+        try:
             orchestrator = ExtractionOrchestrator()
             result = orchestrator.process_batch(
                 ["doc_1.pdf", "doc_2.pdf", "doc_3.pdf"],
@@ -194,16 +245,28 @@ class TestExtractionPipelineEndToEnd:
             assert len(result.extracted_documents) == 2
             assert len(result.errors) == 1
             assert result.errors[0]["file_path"] == "doc_2.pdf"
+        finally:
+            ExtractionOrchestrator.process_batch = original_process_batch
 
     def test_entity_deduplication_in_pipeline(self) -> None:
         """Test entity deduplication integrated in extraction pipeline."""
-        with patch.object(ExtractionOrchestrator, "process_batch") as mock_batch:
-            mock_batch.return_value = MagicMock(
+        original_process_batch = ExtractionOrchestrator.process_batch
+
+        def _process_batch_stub(
+            self: ExtractionOrchestrator,
+            file_paths: list[str],
+            *,
+            detect_entities: bool,
+        ) -> _BatchResultStub:
+            del self
+            assert file_paths == ["doc_1.pdf", "doc_2.pdf"]
+            assert detect_entities is True
+            return _BatchResultStub(
                 extracted_documents=[
-                    MagicMock(document_id="doc_1", text="John Smith"),
-                    MagicMock(document_id="doc_2", text="Jon Smith"),
+                    _ExtractedDocumentStub(document_id="doc_1", text="John Smith"),
+                    _ExtractedDocumentStub(document_id="doc_2", text="Jon Smith"),
                 ],
-                deduplication_results=MagicMock(
+                deduplication_results=_DeduplicationResultsStub(
                     candidates_found=2,
                     matches_identified=1,
                     duplicate_candidates=[
@@ -217,6 +280,9 @@ class TestExtractionPipelineEndToEnd:
                 errors=[],
             )
 
+        ExtractionOrchestrator.process_batch = _process_batch_stub
+
+        try:
             orchestrator = ExtractionOrchestrator()
             result = orchestrator.process_batch(
                 ["doc_1.pdf", "doc_2.pdf"],
@@ -224,8 +290,11 @@ class TestExtractionPipelineEndToEnd:
             )
 
             # Verify deduplication results
+            assert result.deduplication_results is not None
             assert result.deduplication_results.candidates_found == 2
             assert result.deduplication_results.matches_identified == 1
+        finally:
+            ExtractionOrchestrator.process_batch = original_process_batch
 
     def test_api_response_formatting_compliance(self, client: TestClient) -> None:
         """Validate API response format adheres to specification."""
@@ -350,22 +419,36 @@ class TestExtractionPipelineEndToEnd:
 
     def test_batch_extraction_with_mocked_orchestrator(self) -> None:
         """Test batch extraction via orchestrator mock."""
-        with patch.object(ExtractionOrchestrator, "process_batch") as mock_batch:
-            mock_batch.return_value = MagicMock(
+        original_process_batch = ExtractionOrchestrator.process_batch
+
+        def _process_batch_stub(
+            self: ExtractionOrchestrator,
+            file_paths: list[str],
+            *,
+            detect_entities: bool,
+        ) -> _BatchResultStub:
+            del self
+            assert file_paths == ["doc_1.pdf", "doc_2.pdf", "doc_3.pdf"]
+            assert detect_entities is True
+            return _BatchResultStub(
                 extracted_documents=[
-                    MagicMock(
-                        document_id=f"doc_{i}",
-                        text=f"Content {i}",
+                    _ExtractedDocumentStub(
+                        document_id=f"doc_{idx}",
+                        text=f"Content {idx}",
                     )
-                    for i in range(3)
+                    for idx in range(3)
                 ],
                 errors=[],
-                deduplication_results=MagicMock(
+                deduplication_results=_DeduplicationResultsStub(
                     candidates_found=0,
                     matches_identified=0,
+                    duplicate_candidates=[],
                 ),
             )
 
+        ExtractionOrchestrator.process_batch = _process_batch_stub
+
+        try:
             orchestrator = ExtractionOrchestrator()
             result = orchestrator.process_batch(
                 ["doc_1.pdf", "doc_2.pdf", "doc_3.pdf"],
@@ -375,3 +458,5 @@ class TestExtractionPipelineEndToEnd:
             # Verify results
             assert len(result.extracted_documents) == 3
             assert len(result.errors) == 0
+        finally:
+            ExtractionOrchestrator.process_batch = original_process_batch

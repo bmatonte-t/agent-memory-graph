@@ -1,0 +1,22 @@
+logging:
+  log_level: DEBUG
+  third_party_log_level: INFO
+
+cloud_trace:
+  enabled: false
+
+cloud_logging:
+  enabled: false
+
+governance:
+  weighting:
+    enabled: true
+    action_count_threshold: 3
+  authorization:
+    enabled: false
+
+single_company:
+  enabled: false
+  company_id: ""
+  auth_mode: internal
+  external_auth_url: null

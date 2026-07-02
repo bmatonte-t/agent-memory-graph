@@ -52,7 +52,7 @@ The prune job (`POST /internal/prune-weights`) removes nodes whose `LogOddsWeigh
 Pruning is conservative by default:
 - Only SEMANTIC nodes are pruned (CONTEXT and AUDIT are never pruned programmatically)
 - SEMANTIC nodes that still have active edges are retained even if their weight is low
-- The pruning threshold is configurable
+- The pruning threshold is global per deployment (not per tenant) in the current phase
 
 ## Effect on MindMap Queries
 
@@ -74,7 +74,8 @@ governance:
     action_count_threshold: 3   # sessions below this get scaled weights
 ```
 
-The pruning threshold and decay lambda are configurable at the application level. Contact the AMG team for tuning guidance on your graph's knowledge distribution.
+The pruning threshold and decay lambda are configurable at the deployment level.
+Per-tenant thresholding is intentionally deferred by architecture decision (see ADR-0004).
 
 ## Operational Endpoints
 

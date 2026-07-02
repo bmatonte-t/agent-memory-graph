@@ -6,6 +6,17 @@
 
 <!-- Explain how this change has been tested and how the reviewer may replicate those tests. -->
 
+## Testing Governance (Required For Test Changes)
+
+<!-- Required when adding/removing/updating tests. Reference docs/testing-governance.md and docs/testing-capability-matrix.md. -->
+
+- Capability row:
+- Layer and marker:
+- Unique behavior statement:
+- Gate impact (`test-gate-pr-functional` / `test-gate-full-functional` / `test-gate-non-functional`):
+- Duplicate impact assessment:
+- Replacement and retirement completed in same PR? (yes/no + rationale)
+
 ## Notes
 
 <!-- Any relevant notes -->

@@ -27,6 +27,11 @@ class AgentOrchestrationRequest(BaseModel):
     session_id: str = Field(..., min_length=1)
     request_id: str | None = Field(default=None)
     mode: AgentExecutionMode = Field(default=AgentExecutionMode.SINGLE)
+    timeout_ms: int | None = Field(
+        default=None,
+        ge=1,
+        description="Optional orchestration timeout in milliseconds.",
+    )
     authorization_scope: AuthorizationScope | None = Field(default=None)
 
 

@@ -188,7 +188,7 @@ class CloudSchedulerJob:
     """Manages Cloud Scheduler integration for periodic decay."""
 
     DECAY_SCHEDULE_CRON = "0 2 * * *"  # Run daily at 2 AM UTC
-    PRUNING_SCHEDULE_CRON = "0 3 * * *"  # Run daily at 3 AM UTC
+    PRUNING_SCHEDULE_CRON = "0 3 * * 0"  # Run weekly on Sunday at 3 AM UTC
 
     @staticmethod
     def _build_target_uri(cloud_run_url: str, path: str) -> str:
@@ -285,8 +285,8 @@ class CloudSchedulerJob:
             response = create_cloud_scheduler_http_job(
                 project_id=project_id,
                 location=location,
-                job_name="amg-prune-weights-daily",
-                description="Daily cognitive weight pruning for agent memory graph",
+                job_name="amg-prune-weights-weekly",
+                description="Weekly cognitive weight pruning for agent memory graph",
                 schedule=CloudSchedulerJob.PRUNING_SCHEDULE_CRON,
                 target_uri=pruning_uri,
                 body_json=b'{"threshold": 0.30}',
@@ -339,7 +339,7 @@ class CloudSchedulerJob:
                 },
             },
             "pruning_job": {
-                "name": "amg-prune-weights-daily",
+                "name": "amg-prune-weights-weekly",
                 "schedule": CloudSchedulerJob.PRUNING_SCHEDULE_CRON,
                 "timezone": "UTC",
                 "http_target": {

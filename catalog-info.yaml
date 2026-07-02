@@ -6,6 +6,12 @@ metadata:
     GCP-native shared memory platform for AI agents. Provides tripartite memory
     (Context, Semantic, Audit), a grounding-first MindMap reasoning pipeline,
     and typed MCP tools for stable multi-agent orchestration.
+  tags:
+    - gcp
+    - cloud-run
+    - spanner
+    - mcp
+    - ai-agents
   labels:
     product: agent-memory-graph
     team: data-ai
@@ -17,6 +23,20 @@ metadata:
     runbook-url: https://latamairlines.atlassian.net/wiki/spaces/DATA/agent-memory-graph-runbook
     # Deployment environment (updated by CI on each deploy)
     deployment/environment: "prod"
+    backstage.io/techdocs-ref: dir:.
+  links:
+    - url: https://gitlab.com/latamairlines/data/data-ai-ops/agent-memory-graph/-/blob/develop/docs/backlog.md
+      title: Backlog
+      icon: docs
+    - url: https://gitlab.com/latamairlines/data/data-ai-ops/agent-memory-graph/-/blob/develop/docs/testing-health-dashboard.md
+      title: Testing and SLO Dashboard Guide
+      icon: dashboard
+    - url: https://gitlab.com/latamairlines/data/data-ai-ops/agent-memory-graph/-/blob/develop/docs/epic-06-slo-incident-protocol.md
+      title: SLO Incident Protocol
+      icon: alert
+    - url: https://gitlab.com/latamairlines/data/data-ai-ops/agent-memory-graph/-/blob/develop/docs/epic-07-adoption-playbook.md
+      title: LATAM Adoption Playbook
+      icon: docs
 spec:
   type: service
   lifecycle: production
