@@ -5,7 +5,7 @@ description = "Cognitive Agent Memory Graph - Tripartite memory model with Spann
 requires-python = ">=3.14"
 dependencies = [
     "asgi-correlation-id",
-    "fastapi>=0.104.0",
+    "fastapi>=0.139.0",
     "google-cloud-logging>=3.10",
     "google-cloud-scheduler>=2.20.0",
     "google-cloud-spanner>=3.25.0",
