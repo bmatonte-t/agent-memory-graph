@@ -1,0 +1,299 @@
+# Rerun Eligibility Rules — Machine-Readable Configuration
+# Used by E7-exec-T7 to determine whether a failed run can be retried
+# Companion to failure_taxonomy.md
+
+rules:
+
+  AF-001:
+    description: Retrieval timeout
+    rerun_eligible: true
+    max_reruns: 2
+    delay_ms: 10000
+    condition:
+      outcome: timeout
+      retrieval_latency_ms_gt: 5000
+      nodes_traversed_eq: 0
+    escalation_threshold:
+      count: 5
+      window_minutes: 60
+      contact: infrastructure_lead
+
+  AF-002:
+    description: Inference error (Gemini)
+    rerun_eligible: true
+    rerun_condition:
+      error_message_contains:
+        - "429"
+        - "quota"
+        - "rate"
+    max_reruns: 1
+    delay_ms: 30000
+    condition:
+      outcome: error
+      error_type_in:
+        - VertexAIError
+        - APIError
+      tokens_total_eq: 0
+    escalation_threshold:
+      count: 3
+      window_minutes: 30
+      contact: infrastructure_lead
+
+  AF-003:
+    description: Task failure — grounding below threshold
+    rerun_eligible: false
+    max_reruns: 0
+    delay_ms: null
+    condition:
+      task_success: false
+      groundedness_score_lt: 0.50
+      outcome: task_failure
+    escalation_threshold:
+      pct_of_scenario_runs: 0.30
+      contact: data_lead
+
+  AF-004:
+    description: Task failure — precision/recall miss
+    rerun_eligible: false
+    max_reruns: 0
+    delay_ms: null
+    condition:
+      task_success: false
+      outcome: task_failure
+      scenario_id_in:
+        - EMC-003
+        - EMC-007
+    escalation: data_lead
+
+  AF-005:
+    description: Data isolation violation
+    rerun_eligible: false
+    max_reruns: 0
+    delay_ms: null
+    halt_scenario: true
+    condition:
+      task_success: false
+      outcome: task_failure
+      scenario_id: EMC-004
+    escalation: security_lead
+    escalation_priority: IMMEDIATE
+
+  AF-006:
+    description: Synthesis failure — empty or truncated response
+    rerun_eligible: true
+    max_reruns: 1
+    delay_ms: 2000
+    condition:
+      response_text_length_lt: 20
+      tokens_output_lt: 20
+      task_success: false
+    escalation_threshold:
+      count: 3
+      window_per_scenario: true
+      contact: backend_engineer
+
+  AF-007:
+    description: No-evidence safe abstention (expected behavior)
+    rerun_eligible: false
+    max_reruns: 0
+    delay_ms: null
+    is_expected_outcome: true
+    note: >
+      Count as task_success=true per E4-T2 §3.4. Do not mark as failure.
+      groundedness_score should be 1.0 (abstention is perfectly grounded).
+
+  IF-001:
+    description: Slack integration timeout
+    rerun_eligible: true
+    max_reruns: 2
+    delay_ms: 15000
+    condition:
+      action: api_call_slack
+      outcome_in:
+        - timeout
+        - error
+      http_status_code_in:
+        - null
+        - 503
+        - 504
+    escalation_threshold:
+      count: 5
+      window_minutes: 60
+      contact: program_manager
+
+  IF-002:
+    description: Jira API error
+    rerun_eligible: true
+    rerun_condition:
+      http_status_code_in: [500, 502, 503, 504]
+    max_reruns: 1
+    delay_ms: 5000
+    condition:
+      action: api_call_jira
+      outcome: error
+    escalation:
+      http_status_code_in: [401, 403]
+      contact: infrastructure_lead
+
+  IF-003:
+    description: GitHub API rate limit
+    rerun_eligible: true
+    max_reruns: 1
+    delay_ms: 60000
+    condition:
+      action: api_call_github
+      http_status_code: 429
+    escalation_threshold:
+      count: 3
+      window_minutes: 60
+      contact: infrastructure_lead
+
+  IF-004:
+    description: Google Calendar API error
+    rerun_eligible: true
+    rerun_condition:
+      http_status_code_in: [500, 502, 503, 504]
+    max_reruns: 1
+    delay_ms: 5000
+    condition:
+      action: api_call_calendar
+      outcome_in:
+        - error
+        - timeout
+    escalation:
+      http_status_code: 403
+      contact: infrastructure_lead
+
+  INF-001:
+    description: Spanner connection timeout
+    rerun_eligible: true
+    max_reruns: 2
+    delay_ms: 15000
+    condition:
+      resource_type: graph_node
+      outcome: timeout
+      nodes_traversed_eq: 0
+    escalation_threshold:
+      count: 5
+      window_minutes: 60
+      contact: infrastructure_lead
+
+  INF-002:
+    description: BigQuery query timeout
+    rerun_eligible: false
+    max_reruns: 0
+    delay_ms: null
+    condition:
+      resource_type: bq_table
+      outcome: timeout
+      rows_scanned_eq: 0
+    escalation: data_lead
+
+  INF-003:
+    description: Cloud Run OOM
+    rerun_eligible: false
+    max_reruns: 0
+    delay_ms: null
+    halt_scenario: true
+    condition:
+      error_type_in:
+        - MemoryError
+        - OOMKilled
+      http_status_code: 500
+    escalation: backend_engineer
+    escalation_priority: IMMEDIATE
+
+  INF-004:
+    description: Cloud Run cold start timeout
+    rerun_eligible: true
+    max_reruns: 1
+    delay_ms: 0
+    condition:
+      latency_ms_gt: 20000
+      error_type: DeadlineExceeded
+      warmup_flag: false
+    note: >
+      Warmup runs should prevent this for measured runs.
+      If occurs on measured run, single retry is sufficient (container now warm).
+
+  SYS-001:
+    description: Cost hard-stop triggered
+    rerun_eligible: false
+    max_reruns: 0
+    delay_ms: null
+    halt_all_execution: true
+    condition:
+      event_type: cost_hard_stop_triggered
+    escalation: finance_lead
+    escalation_priority: IMMEDIATE
+    action: >
+      1. Set stop_event in BenchmarkOrchestrator.
+      2. Allow in-progress runs to complete (do not cancel).
+      3. Log all pending (not-yet-started) runs as cancelled.
+      4. Generate cost report from CostLedger.summary().
+      5. Notify Finance Lead and Program Manager.
+      6. Proceed directly to E7-exec-T9 gate (skip remaining scenarios).
+
+  SYS-002:
+    description: Campaign TTL approaching (< 2 hours)
+    rerun_eligible: false
+    max_reruns: 0
+    delay_ms: null
+    action: >
+      Stop starting new scenarios.
+      Allow in-progress runs to complete.
+      Begin E7-exec-T9 gate preparation.
+    condition:
+      minutes_until_ttl_lt: 120
+
+  SYS-003:
+    description: Config hash mismatch
+    rerun_eligible: false
+    max_reruns: 0
+    delay_ms: null
+    halt_all_execution: true
+    condition:
+      config_hash_neq: frozen_config_hash_e6t7
+    escalation: program_manager
+    escalation_priority: IMMEDIATE
+    action: >
+      1. Halt all benchmark execution immediately.
+      2. Log config_hash from run that triggered the mismatch.
+      3. Notify Program Manager and Security Lead.
+      4. Do not resume until config hash discrepancy is explained and documented.
+
+---
+
+# Classification Engine Logic (Python pseudocode)
+
+# def classify_failure(run_result: RunResult) -> str:
+#     """Return the taxonomy code for a failed run.
+#
+#     Returns:
+#         str: Taxonomy code (e.g., 'AF-001') or 'AF-007' for expected abstention.
+#     """
+#     if run_result.outcome == RunOutcome.TIMEOUT and run_result.retrieval_latency_ms > 5000:
+#         return 'AF-001'
+#     if run_result.outcome == RunOutcome.TIMEOUT:
+#         return 'INF-001'
+#     if run_result.error_type in ('MemoryError', 'OOMKilled'):
+#         return 'INF-003'
+#     if run_result.error_type == 'DeadlineExceeded' and run_result.latency_ms > 20000:
+#         return 'INF-004'
+#     if run_result.outcome == RunOutcome.COST_HARD_STOP:
+#         return 'SYS-001'
+#     if run_result.config_hash != 'frozen_config_hash_e6t7':
+#         return 'SYS-003'
+#     if run_result.task_success is False:
+#         if run_result.scenario_id == 'EMC-004':
+#             return 'AF-005'
+#         if run_result.scenario_id in ('EMC-003', 'EMC-007'):
+#             return 'AF-004'
+#         if run_result.groundedness_score < 0.50:
+#             return 'AF-003'
+#         if len(run_result.response_text) < 20:
+#             return 'AF-006'
+#         return 'AF-003'
+#     # Check integration errors
+#     # ...
+#     return 'AF-003'  # default task failure

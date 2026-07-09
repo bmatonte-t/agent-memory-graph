@@ -1,0 +1,465 @@
+# E7-prep-T3: Observability Infrastructure Templates
+# Grounded in E4-T4 (observability event schema) and E5-T6 (Cloud Logging/Trace/Monitoring setup)
+# Deploy with: scripts/deploy_observability.sh
+
+metadata:
+  artifact: E7-prep-T3
+  campaign_id: amg-campaign-2026-06-29
+  gcp_project: amg-validation-2026-07-q3
+  cloud_run_service: amg-campaign-agents
+  region: us-central1
+  trace_sampling_rate: 1.0  # 100% sampling during E7-exec
+  status: FROZEN
+
+---
+
+# ─── CLOUD LOGGING QUERIES ─────────────────────────────────────────────────────
+# Pre-built log queries for E7-exec monitoring. Run these in Cloud Logging during execution.
+
+logging_queries:
+
+  - name: all_agent_runs
+    description: All agent execution runs (INFO and above) from the benchmark service
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      severity>=INFO
+      jsonPayload.campaign_id="amg-campaign-2026-06-29"
+    order_by: timestamp DESC
+    time_window: last_24h
+
+  - name: agent_runs_by_scenario
+    description: Agent runs filtered by scenario_id — parameterize SCENARIO_ID
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      severity>=INFO
+      jsonPayload.scenario_id=~"EMC-0(0[1-9]|1[0-2])"
+      jsonPayload.campaign_id="amg-campaign-2026-06-29"
+    order_by: timestamp DESC
+    params:
+      - name: SCENARIO_ID
+        description: e.g. EMC-001
+        filter_key: jsonPayload.scenario_id
+
+  - name: run_completions_with_cost
+    description: All run_complete events with token counts and cost estimates
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      jsonPayload.event_type="run_complete"
+      jsonPayload.tokens_total>0
+    order_by: timestamp DESC
+    time_window: last_24h
+
+  - name: task_failures
+    description: Runs where task_success=false — used for failure taxonomy
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      severity>=WARN
+      jsonPayload.task_success=false
+      jsonPayload.campaign_id="amg-campaign-2026-06-29"
+    order_by: timestamp DESC
+
+  - name: system_errors
+    description: Error and critical severity logs — infrastructure failures
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      severity>=ERROR
+    order_by: timestamp DESC
+    alert_on: true
+    alert_threshold_count: 5
+    alert_window_minutes: 10
+
+  - name: integration_failures
+    description: Integration-layer failures (Slack, Jira, GitHub, Calendar)
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      severity>=WARN
+      (
+        jsonPayload.action=~"api_call_slack" OR
+        jsonPayload.action=~"api_call_jira" OR
+        jsonPayload.action=~"api_call_github" OR
+        jsonPayload.action=~"api_call_calendar"
+      )
+      jsonPayload.outcome=~"timeout|error|permission_denied"
+    order_by: timestamp DESC
+
+  - name: cost_hard_stop_events
+    description: Any log entry indicating cost hard-stop was triggered
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      severity>=CRITICAL
+      jsonPayload.event_type="cost_hard_stop_triggered"
+    order_by: timestamp DESC
+    alert_on: true
+    alert_threshold_count: 1
+    alert_window_minutes: 1
+
+  - name: spanner_graph_queries
+    description: All Spanner graph traversal events with node/edge counts
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      jsonPayload.resource_type="graph_node"
+      jsonPayload.evidence_metrics.nodes_traversed>0
+    order_by: timestamp DESC
+
+  - name: latency_outliers
+    description: Runs with latency exceeding 8000ms — potential SLA violations
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      jsonPayload.latency_ms>8000
+      jsonPayload.event_type="run_complete"
+    order_by: jsonPayload.latency_ms DESC
+
+  - name: groundedness_low
+    description: Runs with groundedness_score below 0.60 — grounding risk signals
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      jsonPayload.groundedness_score<0.60
+      jsonPayload.warmup_flag=false
+    order_by: jsonPayload.groundedness_score ASC
+
+  - name: t3_audit_events
+    description: Immutable T3 audit events for compliance verification
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      jsonPayload.resource_type="memory_t3"
+      jsonPayload.campaign_id="amg-campaign-2026-06-29"
+    order_by: timestamp DESC
+
+---
+
+# ─── CLOUD TRACE SPAN HIERARCHIES ──────────────────────────────────────────────
+# Span structure for agent execution tracing. Maps to src/observability/tracing.py.
+
+trace_spans:
+
+  root_span:
+    name: agent_execution_root
+    display_name: "AMG Agent Execution"
+    attributes:
+      - tenant.id
+      - session.id
+      - request.id
+      - campaign.id
+      - scenario.id
+      - agent.id
+      - warmup.flag
+    child_spans:
+
+      - name: orchestrator_respond
+        display_name: "Orchestrator: respond()"
+        source_file: src/agent/orchestrator.py
+        source_method: AgentOrchestrator.respond
+        attributes:
+          - agent.mode
+          - request.id
+        child_spans:
+
+          - name: mindmap_pipeline
+            display_name: "MindMap Pipeline"
+            source_file: src/memory/mindmap_pipeline.py
+            attributes:
+              - pipeline.stage
+            child_spans:
+
+              - name: mine_stage
+                display_name: "Stage 1: Mine"
+                attributes:
+                  - entities.extracted_count
+                  - entities.types
+
+              - name: aggregate_stage
+                display_name: "Stage 2: Aggregate"
+                attributes:
+                  - paths.retrieved_count
+                  - nodes.traversed
+                  - evidence.weight
+
+              - name: serialize_stage
+                display_name: "Stage 3: Serialize"
+                attributes:
+                  - facts.serialized_count
+                  - tokens.serialized_chars
+
+              - name: synthesize_stage
+                display_name: "Stage 4: Synthesize"
+                attributes:
+                  - tokens.input
+                  - tokens.output
+                  - latency.inference_ms
+                  - groundedness.score
+
+          - name: retrieval_path_finder
+            display_name: "Retrieval: EvidentPathFinder"
+            source_file: src/memory/retrieval.py
+            source_method: EvidentPathFinder.find_paths
+            attributes:
+              - paths.max_length
+              - paths.max_count
+              - spanner.rows_scanned
+
+          - name: t3_audit_write
+            display_name: "Audit: T3 Write"
+            source_file: src/memory/api.py
+            attributes:
+              - event.type
+              - event.id
+              - resource.type
+              - outcome
+
+  integration_call_span:
+    name: external_integration_call
+    display_name: "External Integration Call"
+    attributes:
+      - integration.type
+      - http.method
+      - http.url
+      - http.status_code
+      - latency.ms
+      - outcome
+
+---
+
+# ─── CLOUD MONITORING DASHBOARDS ───────────────────────────────────────────────
+# Dashboard configurations for E7-exec real-time monitoring.
+# Deployed via: gcloud monitoring dashboards create
+
+dashboards:
+
+  - name: amg-campaign-benchmark-overview
+    display_name: "AMG Campaign — Benchmark Overview"
+    description: "Real-time KPI monitoring during E7-exec benchmark runs"
+    widgets:
+
+      - title: "Success Rate (Rolling 1h)"
+        type: line_chart
+        metric: custom.googleapis.com/amg/success_rate
+        aggregation: mean
+        window: 3600s
+        threshold:
+          value: 0.75
+          label: "Acceptable (75%)"
+          color: yellow
+        threshold2:
+          value: 0.85
+          label: "Goal (85%)"
+          color: green
+
+      - title: "Avg Groundedness Score (Rolling 1h)"
+        type: line_chart
+        metric: custom.googleapis.com/amg/groundedness_score
+        aggregation: mean
+        window: 3600s
+        threshold:
+          value: 0.75
+          label: "Acceptable (75%)"
+          color: yellow
+
+      - title: "Latency p95 by Scenario (ms)"
+        type: bar_chart
+        metric: custom.googleapis.com/amg/latency_ms
+        aggregation: p95
+        group_by: scenario_id
+        threshold:
+          value: 10000
+          label: "Max SLA (10s)"
+          color: red
+
+      - title: "Cumulative Cost vs Budget"
+        type: line_chart
+        metric: custom.googleapis.com/amg/cumulative_cost_usd
+        aggregation: sum
+        threshold:
+          value: 200
+          label: "Warn 1 ($200)"
+          color: yellow
+        threshold2:
+          value: 240
+          label: "Warn 2 ($240)"
+          color: orange
+        threshold3:
+          value: 260
+          label: "Hard Stop ($260)"
+          color: red
+
+      - title: "Runs Completed by Scenario"
+        type: stacked_bar
+        metric: custom.googleapis.com/amg/run_count
+        group_by: scenario_id
+        color_by: warmup_flag
+        target_line:
+          value: 30
+          label: "Min runs (30)"
+
+      - title: "Error Rate by Failure Type"
+        type: stacked_bar
+        metric: custom.googleapis.com/amg/error_count
+        group_by: error_type
+        window: last_24h
+
+      - title: "Token Usage by Model"
+        type: pie_chart
+        metric: custom.googleapis.com/amg/tokens_total
+        group_by: model_name
+
+      - title: "Integration Health Status"
+        type: status_grid
+        integrations:
+          - name: Slack
+            metric: custom.googleapis.com/amg/integration_health
+            labels: {integration: "slack"}
+          - name: Google Calendar
+            metric: custom.googleapis.com/amg/integration_health
+            labels: {integration: "calendar"}
+          - name: Jira
+            metric: custom.googleapis.com/amg/integration_health
+            labels: {integration: "jira"}
+          - name: GitHub
+            metric: custom.googleapis.com/amg/integration_health
+            labels: {integration: "github"}
+
+  - name: amg-campaign-cost-control
+    display_name: "AMG Campaign — Cost Control Ledger"
+    description: "Hard-stop enforcement and cost attribution dashboard"
+    widgets:
+
+      - title: "Total Spend vs Hard-Stop ($260)"
+        type: gauge
+        metric: custom.googleapis.com/amg/cumulative_cost_usd
+        max_value: 300
+        thresholds: [200, 240, 260]
+        threshold_colors: [green, yellow, orange, red]
+
+      - title: "Cost per Run (Hourly Average)"
+        type: line_chart
+        metric: custom.googleapis.com/amg/cost_per_run_usd
+        aggregation: mean
+        window: 3600s
+
+      - title: "Cost Forecast vs Budget"
+        type: table
+        columns:
+          - Spent to Date
+          - Forecasted Total
+          - Remaining Budget
+          - Hard-Stop Remaining
+          - Forecast Status
+
+      - title: "Cost Breakdown by Scenario"
+        type: bar_chart
+        metric: custom.googleapis.com/amg/cost_usd
+        group_by: scenario_id
+
+      - title: "Cost Breakdown by Agent"
+        type: bar_chart
+        metric: custom.googleapis.com/amg/cost_usd
+        group_by: agent_id
+
+---
+
+# ─── ALERTING POLICIES ─────────────────────────────────────────────────────────
+
+alerting_policies:
+
+  - name: amg-cost-hard-stop
+    display_name: "AMG: Cost Hard-Stop Triggered"
+    condition:
+      type: log_match
+      filter: 'jsonPayload.event_type="cost_hard_stop_triggered"'
+      threshold: 1
+      window: 60s
+    notification_channels:
+      - type: email
+        address: pvl@campaign.internal
+      - type: slack
+        channel: "#amg-campaign-alerts"
+    severity: CRITICAL
+    auto_close: false
+
+  - name: amg-cost-warn-2
+    display_name: "AMG: Cost Warning 2 ($240 threshold)"
+    condition:
+      type: metric_threshold
+      metric: custom.googleapis.com/amg/cumulative_cost_usd
+      threshold_value: 240.0
+      comparison: COMPARISON_GT
+      duration: 60s
+    notification_channels:
+      - type: slack
+        channel: "#amg-campaign-alerts"
+    severity: WARNING
+
+  - name: amg-error-rate-spike
+    display_name: "AMG: System Error Rate > 5%"
+    condition:
+      type: metric_threshold
+      metric: custom.googleapis.com/amg/error_rate
+      threshold_value: 0.05
+      comparison: COMPARISON_GT
+      duration: 300s
+    notification_channels:
+      - type: slack
+        channel: "#amg-campaign-alerts"
+    severity: WARNING
+
+  - name: amg-latency-breach
+    display_name: "AMG: p95 Latency > 10s (SLA breach)"
+    condition:
+      type: metric_threshold
+      metric: custom.googleapis.com/amg/latency_ms_p95
+      threshold_value: 10000
+      comparison: COMPARISON_GT
+      duration: 300s
+    notification_channels:
+      - type: slack
+        channel: "#amg-campaign-alerts"
+    severity: WARNING
+
+  - name: amg-integration-down
+    display_name: "AMG: Integration Health Check Failure"
+    condition:
+      type: log_match
+      filter: |
+        jsonPayload.outcome=~"timeout|error|permission_denied"
+        jsonPayload.action=~"api_call_(slack|jira|github|calendar)"
+        severity>=ERROR
+      threshold: 3
+      window: 300s
+    notification_channels:
+      - type: slack
+        channel: "#amg-campaign-alerts"
+    severity: WARNING
+
+---
+
+# ─── LOG SINK CONFIGURATION ────────────────────────────────────────────────────
+
+log_sinks:
+
+  - name: amg-benchmark-runs-sink
+    description: "Sink all run_complete events to BigQuery benchmark_metrics table"
+    destination: bigquery.googleapis.com/projects/amg-validation-2026-07-q3/datasets/benchmark_metrics
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      jsonPayload.event_type="run_complete"
+    include_children: false
+
+  - name: amg-audit-events-sink
+    description: "Sink T3 audit events to BigQuery for compliance"
+    destination: bigquery.googleapis.com/projects/amg-validation-2026-07-q3/datasets/benchmark_metrics
+    filter: |
+      resource.type="cloud_run_revision"
+      resource.labels.service_name="amg-campaign-agents"
+      jsonPayload.resource_type="memory_t3"
+    include_children: false
