@@ -9,8 +9,8 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import NamedTuple
+from enum import StrEnum
+from typing import ClassVar, NamedTuple
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ GEMINI_PRO_INPUT_PER_M = 1.50
 GEMINI_PRO_OUTPUT_PER_M = 6.00
 
 
-class HardStopDecision(str, Enum):
+class HardStopDecision(StrEnum):
     """Decision returned by HardStopPolicy.evaluate().
 
     Attributes:
@@ -157,7 +157,7 @@ class CostLedger:
             )
         return result
 
-    def run_count(self, include_warmup: bool = True) -> int:  # noqa: ARG002
+    def run_count(self, *, include_warmup: bool = True) -> int:  # noqa: ARG002
         """Return total number of recorded runs.
 
         Args:
@@ -275,7 +275,7 @@ class CostAttributionEngine:
     """
 
     # Agent → model assignment from E2-T2
-    _AGENT_MODEL_MAP: dict[str, str] = {
+    _AGENT_MODEL_MAP: ClassVar[dict[str, str]] = {
         "AGENT-EC": "gemini-1.5-flash",
         "AGENT-CC": "gemini-1.5-flash",
         "AGENT-SI": "gemini-1.5-flash",
@@ -352,7 +352,14 @@ class CostAttributionEngine:
 
         Returns:
             dict[str, float]: Breakdown of estimated costs by model and total.
+
+        Raises:
+            ValueError: If model-specific scenario counts do not match the total.
         """
+        if n_scenarios != flash_scenarios + pro_scenarios:
+            msg = "Model-specific scenario counts must sum to n_scenarios."
+            raise ValueError(msg)
+
         flash_cost_per_run = self.estimate_cost(
             avg_tokens_flash_input, avg_tokens_flash_output, "gemini-1.5-flash"
         )

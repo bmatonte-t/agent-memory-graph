@@ -58,7 +58,7 @@
   "notebook.formatOnSave.enabled": true,
   "python.testing.pytestArgs": [
     "tests",
-    "--cov=project_base" // Ensure VS Code test coverage only considers our package and not the .venv or notebooks.
+    "--cov=src" // Measure coverage for the complete application package.
   ],
   "python.testing.unittestEnabled": false,
   "python.testing.pytestEnabled": true,

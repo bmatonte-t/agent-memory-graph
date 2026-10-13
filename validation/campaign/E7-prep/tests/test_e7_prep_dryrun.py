@@ -8,7 +8,10 @@ Run with: python -m pytest E7-prep/tests/ -v
 from __future__ import annotations
 
 import asyncio
+import json
 import math
+import random
+import re
 import sys
 from pathlib import Path
 
@@ -22,8 +25,6 @@ from benchmark_runners import (
     BatchResult,
     BenchmarkOrchestrator,
     MeasurementProtocol,
-    RunOutcome,
-    ScenarioDefinition,
     ScenarioRunner,
 )
 from cost_controller import (
@@ -36,12 +37,14 @@ from cost_controller import (
     HardStopPolicy,
 )
 from statistics_engine import (
-    GROUNDEDNESS_THRESHOLD_ACCEPTABLE,
     SUCCESS_RATE_THRESHOLD_ACCEPTABLE,
     ConfidenceIntervalComputer,
     EffectSizeAnalyzer,
     KPIScoringEngine,
 )
+
+EXPECTED_SUCCESS_RATE_LOWER_BOUND = 0.80
+EXPECTED_SUCCESS_RATE_UPPER_BOUND = 0.94
 
 # ─── ScenarioRunner ──────────────────────────────────────────────────────────
 
@@ -60,8 +63,6 @@ class TestScenarioRunner:
 
     def test_all_scenario_ids_format(self) -> None:
         """All scenario IDs must follow EMC-NNN format."""
-        import re
-
         pattern = re.compile(r"^EMC-\d{3}$")
         for sid in SCENARIO_CATALOG:
             assert pattern.match(sid), f"Invalid scenario ID: {sid}"
@@ -90,8 +91,6 @@ class TestScenarioRunner:
         assert log_file.exists()
         lines = log_file.read_text().strip().splitlines()
         assert len(lines) == 1
-
-        import json
 
         record = json.loads(lines[0])
         assert record["scenario_id"] == "EMC-002"
@@ -214,8 +213,6 @@ class TestKPIScoringEngine:
         cost_usd: float = 0.001,
     ) -> list[dict]:
         """Generate synthetic run result dicts for testing."""
-        import random
-
         rng = random.Random(42)
         runs = []
         for i in range(n):
@@ -238,7 +235,8 @@ class TestKPIScoringEngine:
         runs = self._mock_runs(n=100, success_rate=0.87)
         engine = KPIScoringEngine()
         score = engine.score(runs)
-        assert 0.80 <= score.success_rate <= 0.94
+        assert score.success_rate >= EXPECTED_SUCCESS_RATE_LOWER_BOUND
+        assert score.success_rate <= EXPECTED_SUCCESS_RATE_UPPER_BOUND
 
     def test_passes_success_rate_threshold(self) -> None:
         """Success rate above 0.85 (plan §13 threshold) must pass."""
@@ -307,8 +305,6 @@ class TestConfidenceIntervalComputer:
 
     def test_ci_contains_true_mean(self) -> None:
         """95% CI must contain the true mean for normally distributed data."""
-        import random
-
         rng = random.Random(99)
         true_mean = 3500.0
         values = [true_mean + rng.gauss(0, 200) for _ in range(30)]
@@ -317,8 +313,6 @@ class TestConfidenceIntervalComputer:
 
     def test_larger_sample_narrower_ci(self) -> None:
         """Larger sample should produce narrower confidence interval."""
-        import random
-
         rng = random.Random(77)
         values_small = [rng.gauss(100, 20) for _ in range(10)]
         values_large = [rng.gauss(100, 20) for _ in range(100)]
@@ -363,7 +357,7 @@ class TestEffectSizeAnalyzer:
         assert abs(d) < 0.01  # noqa: PLR2004
 
     def test_cohens_d_direction(self) -> None:
-        """d must be positive when group A > group B."""
+        """D must be positive when group A > group B."""
         a = [0.90] * 30
         b = [0.70] * 30
         d = EffectSizeAnalyzer().cohens_d(a, b)
@@ -371,8 +365,6 @@ class TestEffectSizeAnalyzer:
 
     def test_cohens_d_magnitude_medium(self) -> None:
         """A well-separated pair must produce medium effect size."""
-        import random
-
         rng = random.Random(55)
         a = [rng.gauss(0.85, 0.05) for _ in range(30)]
         b = [rng.gauss(0.70, 0.05) for _ in range(30)]
@@ -381,8 +373,6 @@ class TestEffectSizeAnalyzer:
 
     def test_significant_difference_detected(self) -> None:
         """Clearly separated groups must yield p < 0.05."""
-        import random
-
         rng = random.Random(33)
         a = [rng.gauss(0.90, 0.03) for _ in range(30)]
         b = [rng.gauss(0.70, 0.03) for _ in range(30)]
@@ -392,8 +382,6 @@ class TestEffectSizeAnalyzer:
 
     def test_no_significance_for_identical_groups(self) -> None:
         """Identical groups must not yield statistical significance."""
-        import random
-
         rng = random.Random(22)
         group = [rng.gauss(0.80, 0.05) for _ in range(30)]
         result = EffectSizeAnalyzer().compare(group, group)
@@ -524,3 +512,12 @@ class TestCostAttributionEngine:
         estimate = engine.estimate_campaign_cost()
         assert estimate["llm_inference_total_usd"] < 10.0  # noqa: PLR2004  LLM only is ~$0.36
         assert estimate["grand_total_estimate_usd"] < 260.0  # noqa: PLR2004
+
+    def test_campaign_cost_rejects_inconsistent_scenario_counts(self) -> None:
+        """Scenario totals must match the sum of model-specific counts."""
+        with pytest.raises(ValueError, match="scenario counts must sum"):
+            CostAttributionEngine().estimate_campaign_cost(
+                n_scenarios=2,
+                flash_scenarios=1,
+                pro_scenarios=0,
+            )

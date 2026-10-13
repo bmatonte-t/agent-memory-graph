@@ -38,7 +38,7 @@ test:
 
 # Run tests with coverage report
 test-coverage:
-  uv run pytest --cov={{SRC}} --cov-fail-under=0
+  uv run pytest --cov={{SRC}} --cov-fail-under=85
 
 # Run linter to check for issues
 lint:
@@ -62,7 +62,7 @@ format:
 
 # Check docstring coverage
 docstring-coverage:
-  uv run docstr-coverage --fail-under 20 --verbose=2 --skip-file-doc --skip-init {{SRC_DIR}}
+  uv run docstr-coverage --fail-under 90 --verbose=2 --skip-file-doc --skip-init {{SRC_DIR}}
 
 # Clean build artifacts and cache files
 clean:
@@ -143,7 +143,7 @@ docs-build-and-publish-site: build-docs docs-publish-site
 
 # Run the main application
 run:
-  uv run python {{SRC_DIR}}/src.py
+  uv run uvicorn src.api.main:app --reload
 
 # Render Cloud Run manifest for Phase 3 deployment
 phase3-render-cloudrun project_id image_tag='latest' region='us-central1' artifact_repo='agent-memory-graph' image_name='phase3' service_name='agent-memory-graph-phase3' output='infrastructure/phase3/cloudrun-service.rendered.yaml':

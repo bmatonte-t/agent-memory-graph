@@ -218,6 +218,15 @@ Observability hardening additions:
 
 ## Testing and Quality
 
+The repository adopts the Tryolabs `long-term` quality policy: at least 85% test coverage
+across `src` and 90% docstring coverage. `just check-all` enforces the policy alongside
+linting, formatting, strict type checking, and testing governance. Template initialization
+scripts and samples have been retired; the existing `src.*` package layout is retained.
+
+Secret scanning uses `.secrets.baseline`. Its single reviewed false positive is a Terraform
+`secret_type` metadata label in the campaign runbook, not a credential. Review new findings
+before updating the baseline. Documentation publishing destinations remain unchanged.
+
 | Metric | Status |
 | --- | --- |
 | Tests | 889 collected (886 passing, 3 skipped) in latest local full gate |
