@@ -10,6 +10,7 @@ import pytest
 
 from src.db.schema import SchemaConfig
 from src.memory.api import MemoryAPI
+from src.memory.exceptions import MemoryOperationError, WeightUpdateFailedError
 from src.models.schemas import FactResponse, SessionKnowledgeExtractionResponse
 from src.security.governance import GovernanceSettings, WeightingTriggerPolicy
 
@@ -19,10 +20,32 @@ if TYPE_CHECKING:
 EXPECTED_PROCESSED_TURNS = 2
 EXPECTED_AUDIT_EVENTS_FOR_EXTRACTION = 2
 EXPECTED_EXTRACTED_FACTS = 2
+EXPECTED_WEIGHT_UPDATE_ATTEMPTS = 3
 
 
 class TestMemoryApiWeightingAndSessionClosure:
     """Behavioral tests for weighting updates and session finalization."""
+
+    def test_weight_update_failure_preserves_diagnostic_context(self) -> None:
+        """Retry exhaustion exposes the original error and affected tenant and nodes."""
+        node_ids = ["node_1", "node_2"]
+        last_error = RuntimeError("storage unavailable")
+        error = WeightUpdateFailedError(
+            tenant_id="tenant_a",
+            node_ids=node_ids,
+            attempts=EXPECTED_WEIGHT_UPDATE_ATTEMPTS,
+            last_error=last_error,
+        )
+
+        assert isinstance(error, MemoryOperationError)
+        assert error.tenant_id == "tenant_a"
+        assert error.node_ids == node_ids
+        assert error.attempts == EXPECTED_WEIGHT_UPDATE_ATTEMPTS
+        assert error.last_error is last_error
+        assert str(error) == (
+            "Weight update failed after 3 attempts "
+            "for tenant_id=tenant_a nodes=2: storage unavailable"
+        )
 
     async def test_update_weight_uses_tenant_filter(self) -> None:
         """Weight updates should include the tenant filter in DML parameters."""

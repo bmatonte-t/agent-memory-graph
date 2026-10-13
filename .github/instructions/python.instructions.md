@@ -6,7 +6,7 @@ applyTo: "**/*.py"
 
 ## Coding guidelines
 
-- Always write code for **Python <PYTHON_VERSION>**.
+- Always write code for **Python 3.14**.
 - Write clear and concise comments for complex logic. Do not explain what the code does but, rather, why it's done or why you chose one approach over the other when it's not obvious.
 - Prefer functional programming approaches where they make sense.
 - Prefer `pathlib` over `os.path` for path manipulations.

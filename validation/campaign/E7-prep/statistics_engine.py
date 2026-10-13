@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import statistics
 from dataclasses import dataclass
-from typing import NamedTuple
+from typing import ClassVar, NamedTuple
 
 # Per-scenario diagnostic thresholds from E4-T5 (used for run-level monitoring)
 SUCCESS_RATE_THRESHOLD_DIAGNOSTIC = 0.75
@@ -312,7 +312,7 @@ class ConfidenceIntervalComputer:
     """
 
     # t* critical values for 95% CI (two-tailed), indexed by degrees of freedom
-    _T_CRITICAL = {
+    _T_CRITICAL: ClassVar[dict[int, float]] = {
         1: 12.706,
         2: 4.303,
         3: 3.182,
@@ -523,7 +523,7 @@ class EffectSizeAnalyzer:
             ComparisonResult: Complete comparison statistics.
         """
         d = self.cohens_d(group_a, group_b)
-        t_stat, p_val = (
+        _t_stat, p_val = (
             self.welchs_t_test(group_a, group_b)
             if (
                 len(group_a) >= 2 and len(group_b) >= 2  # noqa: PLR2004
@@ -553,7 +553,7 @@ class EffectSizeAnalyzer:
         """Compute minimum sample size for given effect size, alpha, and power.
 
         Approximation formula (Cohen, 1988) for two-sample t-test.
-        For our campaign minimum (d=0.5, α=0.05, β=0.80) → n ≈ 64 per group.
+        For our campaign minimum (d=0.5, alpha=0.05, β=0.80) → n ≈ 64 per group.
         We use 30/scenario which is sufficient for d ≥ 0.7 (medium-large).
 
         Args:

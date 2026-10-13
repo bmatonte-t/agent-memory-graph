@@ -136,9 +136,13 @@ cython_debug/
 *.local*
 # Git worktrees
 worktrees/
+.worktree/
 
 # Terraform — adopter-specific config (stored in CI variables)
 infrastructure/terraform/terraform.tfvars
+**/.terraform/
+*.tfstate
+*.tfstate.*
 
 # Generated testing governance artifacts
 reports/testing-governance-inventory.json

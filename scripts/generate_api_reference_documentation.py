@@ -7,10 +7,7 @@ from mkdocs_gen_files.nav import Nav
 
 
 def find_package(root: Path) -> Path:
-    """Find the package directory under `src/`.
-
-    The project follows the src layout, so the package is the single directory inside `src/` that
-    has an `__init__.py`.
+    """Find the application's `src` package.
 
     Args:
         root: The root directory to search in.
@@ -22,10 +19,8 @@ def find_package(root: Path) -> Path:
         Path: The path to the package directory.
     """
     src_directory = root / "src"
-    if src_directory.is_dir():
-        for item in src_directory.iterdir():
-            if item.is_dir() and (item / "__init__.py").is_file():
-                return item
+    if src_directory.is_dir() and (src_directory / "__init__.py").is_file():
+        return src_directory
 
     message = f"No package directory found in {src_directory}."
     raise ValueError(message)
@@ -40,13 +35,9 @@ def main() -> None:
     api_reference_documentation_directory = Path("api_reference")
 
     package_directory = find_package(root)
-    src_directory = package_directory.parent
 
     for path in sorted(package_directory.rglob("*.py")):
-        # Module / doc paths are computed relative to `src/` so that the dotted
-        # module path matches the actual import path (e.g. `project_base.foo`
-        # rather than `src.project_base.foo`).
-        path_relative = path.relative_to(src_directory)
+        path_relative = path.relative_to(root)
         path_repo_relative = path.relative_to(root)
         # parts: similar to splitting the path on / but doesn't depend on OS.
         path_parts_no_extension = path_relative.with_suffix("").parts

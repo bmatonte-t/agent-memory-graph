@@ -10,13 +10,18 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
-from typing import Any
+from tempfile import mkdtemp
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.agent.orchestrator import AgentOrchestrator
 
 logger = logging.getLogger(__name__)
 
@@ -27,9 +32,10 @@ MAX_LATENCY_SECONDS = 15.0
 DEFAULT_WORKER_COUNT = 4
 DEFAULT_RUN_COUNT = 30
 WARMUP_RUNS = 5
+SIMULATED_SUCCESS_RATE = 0.87
 
 
-class RunOutcome(str, Enum):
+class RunOutcome(StrEnum):
     """Outcome of a single benchmark run."""
 
     SUCCESS = "success"
@@ -314,6 +320,7 @@ class ScenarioRunner:
         self,
         scenario: ScenarioDefinition,
         measurement: MeasurementProtocol | None = None,
+        *,
         dry_run: bool = False,
         run_log_dir: Path | None = None,
     ) -> None:
@@ -323,17 +330,18 @@ class ScenarioRunner:
             scenario: Frozen scenario definition from SCENARIO_CATALOG.
             measurement: Protocol for cost/token estimation. Defaults to MeasurementProtocol().
             dry_run: If True, simulate execution without GCP access.
-            run_log_dir: Directory to write JSONL run logs. Defaults to /tmp.
+            run_log_dir: Directory to write JSONL run logs. Defaults to a private temp directory.
         """
         self.scenario = scenario
         self.measurement = measurement or MeasurementProtocol()
         self.dry_run = dry_run
-        self.run_log_dir = run_log_dir or Path("/tmp/amg_benchmark_runs")
+        self.run_log_dir = run_log_dir or Path(mkdtemp(prefix="amg_benchmark_runs_"))
         self.run_log_dir.mkdir(parents=True, exist_ok=True)
 
     async def run_once(
         self,
         seed_run_index: int,
+        *,
         warmup: bool = False,
         execution_week: int = 3,
     ) -> RunResult:
@@ -375,6 +383,7 @@ class ScenarioRunner:
 
     def _simulate_run(
         self,
+        *,
         run_id: str,
         timestamp: str,
         seed_run_index: int,
@@ -398,8 +407,6 @@ class ScenarioRunner:
         Returns:
             RunResult: Simulated run with realistic metrics.
         """
-        import random
-
         rng = random.Random(hash(run_id))  # deterministic per run_id
 
         retrieval_ms = rng.randint(80, 500)
@@ -412,7 +419,7 @@ class ScenarioRunner:
         cost = self.measurement.estimate_cost(tokens_input, tokens_output, model_name)
 
         # Simulate ~87% success rate; no-evidence runs always succeed
-        task_success = rng.random() < 0.87
+        task_success = rng.random() < SIMULATED_SUCCESS_RATE
         groundedness = (
             round(rng.uniform(0.72, 0.98), 3) if task_success else round(rng.uniform(0.0, 0.45), 3)
         )
@@ -450,6 +457,7 @@ class ScenarioRunner:
 
     async def _live_run(
         self,
+        *,
         run_id: str,
         timestamp: str,
         seed_run_index: int,
@@ -474,7 +482,6 @@ class ScenarioRunner:
             RunResult: Populated from actual agent response.
         """
         # Import deferred to avoid loading GCP clients in dry-run mode
-        from src.agent.orchestrator import AgentOrchestrator  # noqa: PLC0415
         from src.models.agent import AgentExecutionMode, AgentOrchestrationRequest  # noqa: PLC0415
 
         orchestrator = _build_live_orchestrator()
@@ -722,6 +729,7 @@ class BenchmarkOrchestrator:
         run_count: int = DEFAULT_RUN_COUNT,
         warmup_count: int = WARMUP_RUNS,
         worker_count: int = DEFAULT_WORKER_COUNT,
+        *,
         dry_run: bool = False,
         run_log_dir: Path | None = None,
         stop_event: asyncio.Event | None = None,
@@ -742,7 +750,7 @@ class BenchmarkOrchestrator:
         self.warmup_count = warmup_count
         self.worker_count = worker_count
         self.dry_run = dry_run
-        self.run_log_dir = run_log_dir or Path("/tmp/amg_benchmark_runs")
+        self.run_log_dir = run_log_dir or Path(mkdtemp(prefix="amg_benchmark_runs_"))
         self.stop_event = stop_event or asyncio.Event()
         self._measurement = MeasurementProtocol()
 
@@ -821,7 +829,7 @@ class BenchmarkOrchestrator:
         return BatchResult.from_results(scenario.scenario_id, all_results)
 
 
-def _build_live_orchestrator() -> Any:
+def _build_live_orchestrator() -> AgentOrchestrator:
     """Construct a live AgentOrchestrator for E7-exec.
 
     Deferred import ensures GCP clients are not loaded during dry-run mode.

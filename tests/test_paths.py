@@ -80,8 +80,8 @@ def test_all_paths_are_absolute() -> None:
 def test_relative_imports_work() -> None:
     """Test that the paths can be used for relative imports within the package."""
     # Test that we can construct paths relative to PACKAGE
-    src_file = PACKAGE / "src.py"
-    assert src_file.exists()
+    constants_file = PACKAGE / "constants.py"
+    assert constants_file.exists()
 
     paths_file = PACKAGE / "paths.py"
     assert paths_file.exists()

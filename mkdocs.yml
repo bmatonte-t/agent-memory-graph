@@ -1,7 +1,7 @@
 # ==> PROJECT INFORMATION
-site_name: Repo Template
+site_name: Agent Memory Graph
 site_author: Tryolabs
-site_description: A repository template for easily setting up a well behaved development environment for a smooth collaboration experience. Start coding, not configuring.
+site_description: Grounded, auditable shared memory for enterprise AI agents.
 site_url: https://documentation.tryolabs.com/repo-template
 repo_url: https://github.com/tryolabs/repo-template
 repo_name: tryolabs/repo-template
@@ -9,8 +9,6 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
-  logo: assets/logo.svg
-  favicon: assets/logo.svg
   features:
     - navigation.instant
     - navigation.tracking # Keeps the navigation section open for the current page
@@ -56,7 +54,7 @@ plugins:
       default_handler: python
       handlers:
         python:
-          paths: [src]
+          paths: ["."]
           options:
             docstring_style: google
             show_source: true
@@ -97,79 +95,40 @@ markdown_extensions:
       generic: true
 
 extra_javascript:
-  - assets/javascripts/mathjax.js
   - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
 
-extra_css:
-  - assets/stylesheets/extra.css
-
 nav:
-  # This defines the top-level tabs and pages.
-  - Home:
-      - Overview: index.md
-      - Getting Started:
-          - Using the Template: getting_started/using_the_template.md
-          - Configure your Repository: getting_started/configure_your_repository.md
-          - Initialization Modes: getting_started/initialization_modes.md
-          - For Existing Projects: getting_started/existing_projects.md
-  - Included Batteries:
-      - Project Structure: batteries/project_structure.md
-      - Configuration: batteries/configuration.md
-      - Development Environment: batteries/dev_environment.md
-      - Task Runner: batteries/task_runner.md
-      - Coding Agents: batteries/coding_agents.md
-      - Code Quality & Safety: batteries/code_quality.md
-      - Git Hooks: batteries/git_hooks.md
-      - Documentation: batteries/documentation.md
-      - Notebooks: batteries/notebooks.md
-      - Testing: batteries/testing.md
-      - Automation & Maintenance: batteries/automation.md
-      - Profiling Tools: batteries/profiling.md
-      - Scripts: batteries/scripts.md
-      - Logging: batteries/logging.md
-  - Development Workflow:
-      - Branch Management: workflow/branch_management.md
-      - Commit Conventions: workflow/commit_conventions.md
-      - Pull Request Process: workflow/pr_process.md
-      - Testing Health Dashboard: testing-health-dashboard.md
-  - Tutorials:
-      - Overview: tutorials/overview.md
-      - Documentation:
-          - Basics: tutorials/documentation/basics.md
-          - Deployments:
-              - Introduction: tutorials/documentation/deployments/introduction.md
-              - Standard Deploy: tutorials/documentation/deployments/standard_deploy.md
-      - Typing: tutorials/typing.md
-      - Docstrings: tutorials/docstrings.md
-      - Logging Internals: tutorials/logging_internals.md
-      - git:
-          - Multiple Configurations: tutorials/git/multiple_configurations.md
-      - Google Cloud WIF Setup: tutorials/gcp_wif_setup.md
-  # The `api_reference/` directory doesn't exist in your source code; it's generated at build time.
-  # This entry is necessary to create the top-level "API Reference" tab. The `literate-nav` plugin
-  # then handles the sub-navigation within that section based on the generated
-  # `api_reference/SUMMARY.md` file.
-  - API Reference: api_reference/
-  - Template Development:
-      - Contributing: development/CONTRIBUTING.md
-      - Configuration Internals: development/configuration.md
-      - Scripts: development/scripts.md
-      - Initialization Modes: development/initialization_modes.md
-      - Testing Changes: development/testing_changes.md
-      - Phase 4 Local User Testing: development/phase4-local-user-testing.md
-      - Documentation: development/documentation.md
-      - Release Strategy: development/release_strategy.md
+  - Home: index.md
+  - Concepts:
+    - Tripartite Memory: concepts/tripartite-memory.md
+    - MindMap Pipeline: concepts/mindmap-pipeline.md
+    - Cognitive Weighting: concepts/cognitive-weighting.md
+  - Architecture:
+    - Overview: architecture.md
+    - Decisions: architecture/adr/README.md
+    - Spanner Tenancy: architecture/adr/ADR-0001-spanner-tenancy-model.md
+    - Synthesis Model Policy: architecture/adr/ADR-0002-synthesis-model-policy.md
+    - Audit Export: architecture/adr/ADR-0003-audit-events-export-strategy.md
+    - Pruning Scope: architecture/adr/ADR-0004-pruning-threshold-scope.md
+  - User Guide:
+    - MCP Tools: user-guide/mcp-tools.md
+    - REST API: user-guide/api-reference.md
+    - Extraction Pipeline: user-guide/extraction-pipeline.md
   - Operations:
-      - Ops Runbook: operations/ops-runbook.md
-      - Admin Guide: operations/admin-guide.md
-      - Disaster Recovery: operations/disaster-recovery.md
-      - Support Playbook: operations/support-playbook.md
-  - Marketplace:
-      - Overview: marketplace/index.md
-      - Security Architecture: marketplace/security-architecture.md
-      - Quickstart: marketplace/quickstart.md
-      - Deployment Guide: marketplace/deployment-guide.md
-      - Pricing and Editions: marketplace/pricing-and-editions.md
-  - Help:
-      - Troubleshooting: help/troubleshooting.md
-      - FAQ: help/faq.md
+    - Deployment: deployment.md
+    - Infrastructure: infrastructure.md
+    - Deploy Runbook: epic-02-deploy-runbook.md
+    - Scheduler Runbook: epic-03-scheduler-runbook.md
+    - Incident Protocol: epic-06-slo-incident-protocol.md
+  - Adoption:
+    - Playbook: epic-07-adoption-playbook.md
+    - Checklist: epic-07-onboarding-checklist.md
+    - Support Model: epic-07-support-model.md
+    - Pilot Report: epic-07-pilot-onboarding-report.md
+  - Development:
+    - Testing Governance: testing-governance.md
+    - Testing Capabilities: testing-capability-matrix.md
+    - Testing Health: testing-health-dashboard.md
+    - Backlog: backlog.md
+    - LATAM Backlog: backlog-latam.md
+  - API Reference: api_reference/

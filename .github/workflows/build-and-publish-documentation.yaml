@@ -27,10 +27,10 @@ jobs:
             echo "📄 Running in repo-template. Building documentation."
           elif [[ -f pyproject.toml ]] && grep -Fq '[tool.repo-template]' pyproject.toml; then
             echo "should_deploy=true" >> "$GITHUB_OUTPUT"
-            echo "✅ Project initialized as `tool.repo-template` marker is present in `pyproject.toml`. Building documentation."
+            echo "✅ Project template policy is configured. Building documentation."
           else
             echo "should_deploy=false" >> "$GITHUB_OUTPUT"
-            echo "⚠️ Project has not been initialized yet (init.sh has not been run). Skipping documentation build and publish."
+            echo "⚠️ Project template policy is missing. Skipping documentation build and publish."
           fi
 
       - name: Authenticate to GCP using Workload Identity Federation

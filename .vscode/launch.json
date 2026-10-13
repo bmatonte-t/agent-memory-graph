@@ -20,25 +20,12 @@
             "request": "launch",
             "module": "uvicorn", // You could use gunicorn or your own .py file.
             "args": [
-                "project_base.apis.service.app:app",
+                "src.api.main:app",
                 "--host",
                 "0.0.0.0",
                 "--port",
                 "8001",
                 "--reload"
-            ],
-            "justMyCode": true
-        },
-        {
-            "name": "CLI",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${workspaceFolder}/.venv/bin/cli-name",
-            "args": [
-                "subcommand",
-                "argument",
-                "--option",
-                "value",
             ],
             "justMyCode": true
         },
